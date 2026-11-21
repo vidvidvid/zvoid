@@ -294,8 +294,8 @@ function gymFrame() {
   const cv = $('#gym-canvas');
   if (cv && NEB.ok) {                                    // GPU nebula
     if (Gym.cur && NEB.shot && NEB.shot.rec) nebFrame(Gym.cur, t, null);          // a time-lapse frame, off-screen
-    const busyGpu = Gym.cur && Gym.cur.training && Gym.cur.training.state === 'running';   // while it trains the trainer needs the GPU: draw the live view smaller and at half the frame rate, steadily, instead of fighting for it
-    NEB.qMax = busyGpu ? .55 : 1; if (busyGpu && NEB.q > .55) NEB.q = .55; Gym.fno = (Gym.fno || 0) + 1;
+    const busyGpu = Gym.cur && Gym.cur.training && Gym.cur.training.state === 'running';   // while it trains the trainer needs the GPU: draw the live view at half the frame rate, steadily, instead of fighting for it
+    NEB.qMax = 1; NEB.half = !!busyGpu; Gym.fno = (Gym.fno || 0) + 1;                       // resolution is never capped: only the frame rate is halved while the trainer needs the GPU
     if (Gym.cur && !(busyGpu && Gym.fno % 2)) nebFrame(Gym.cur, t, Gym.mouse, true);
   } else if (cv) {                                       // fallback: the older 2D renderer
     const d = devicePixelRatio || 1, w = cv.clientWidth, hh = cv.clientHeight;

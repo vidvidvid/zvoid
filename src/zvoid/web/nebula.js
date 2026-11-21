@@ -608,7 +608,7 @@ function nebFrame(c, t, mouse, onScreen) {
   const GL = NEB.gl, gl = NEB.shim, cv = NEB.canvas, U = NEB.U, d = dna(c), fx = fxOf(c.slug), n = d.n, sd = d.seed * 100;
   // resolution: as sharp as this machine can hold at full frame rate
   if (NEB.last && !SHOT) {
-    const fdt = Math.min(.1, t - NEB.last); NEB.acc += fdt; NEB.fast = (NEB.fast || 0) + fdt; NEB.fastN = (NEB.fastN || 0) + 1;
+    const fdt = Math.min(.1, t - NEB.last) * (NEB.half ? .5 : 1);   // at half frame rate, a frame that takes two display frames is on time, not late NEB.acc += fdt; NEB.fast = (NEB.fast || 0) + fdt; NEB.fastN = (NEB.fastN || 0) + 1;
     if (fdt < .012) NEB.short = (NEB.short || 0) + 1;                          // many short frames means a fast display, where real headroom is visible
     const drop = ms => { NEB.cap = NEB.q; NEB.capT = t; NEB.q = Math.max(.35, NEB.q * Math.max(.6, Math.min(.9, Math.sqrt(16.7 / ms)))); NEB.acc = 0; NEB.frames = 0; NEB.fast = 0; NEB.fastN = 0; };
     if (NEB.fastN >= 8) { const ms = NEB.fast / NEB.fastN * 1000; NEB.fast = 0; NEB.fastN = 0; if (ms > 20 && NEB.frames >= 0) drop(ms); }   // falling behind (a touch, a wave): give up resolution at once
