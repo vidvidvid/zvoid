@@ -18,94 +18,138 @@ function dna(c) {
 const hueOf = bright => 285 - clamp(bright, 0, 1) * 230;            // dark & bassy = violet, bright = acid yellow-green
 
 /* ---------- the entity ----------
-   Sound with a semi-physical form. A 3D body of light, drawn with additive blending:
-   - strings: one per track, vibrating as standing waves, forking at the tips once trained
-   - knots: nested torus-knot membranes instead of shells (more of them as it trains)
-   - cymatic dust: particles that settle on the nodal lines of a standing wave over a sphere
-   - band ribbons: bass, mids and treble as open, precessing orbits (they follow the real spectrum while audio plays)
-   - glyphs: one mark of its own script per ten epochs, drifting on a spiral
-   It has a little behaviour of its own: it wanders, breathes unevenly, gets curious about the pointer,
-   flinches when startled or poked, and individual strings twitch. Live audio drives all of it. */
-const fxOf = slug => Gym.fx[slug] || (Gym.fx[slug] = { births: {}, waves: [], names: null, epochs: null });
+   A void creature made of sound. It has no body and no centre: it is a flow.
+   - voids: several dark lobes that wander, merge and part. Light bends around them; they are punched out of the image.
+   - currents: every track is a family of strands streaming through the field the voids create (colour = brightness,
+     weight = bass). Untrained, the field is turbulent smoke; as it learns, the strands settle into folded orbits.
+   - dust: a thousand specks carried by the same flow, so the whole thing never holds still or repeats.
+   - glyphs: one mark of its own script per ten epochs, drifting near the voids.
+   Live audio stirs the field. It wanders, breathes unevenly, drifts toward the pointer when curious, and answers touch
+   differently depending on what you touch: a strand, a void, the flow, or empty space. It answers in its own voice. */
+const fxOf = slug => Gym.fx[slug] || (Gym.fx[slug] = { births: {}, waves: [], names: null, epochs: null, pluck: {}, temps: [], pings: [] });
 const easeOut = x => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
 const _nh = i => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return (x - Math.floor(x)) * 2 - 1; };
 const noise = x => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return _nh(i) * (1 - u) + _nh(i + 1) * u; };   // smooth, -1..1
-const KNOTS = [[2, 3], [3, 5], [3, 4], [5, 7], [4, 7], [5, 8]];
 
-function stringDirs(c, seed) {
-  const F = c.food || [], n = F.length, L = c.limbs && c.limbs.length > 1 ? c.limbs : null, out = new Array(n), lenK = new Array(n).fill(1);
-  const fib = (i, m, s0) => { const yy = 1 - 2 * (i + .5) / m, rr = Math.sqrt(1 - yy * yy), ph = i * 2.39996 + s0; return [Math.cos(ph) * rr, yy, Math.sin(ph) * rr]; };
-  if (!L) { for (let i = 0; i < n; i++) out[i] = fib(i, n, seed * 6.28); return { out, lenK }; }
-  L.forEach((limb, li) => {
-    const ax = fib(li, L.length, seed * 6.28); let u = [ax[2], 0, -ax[0]], ul = Math.hypot(u[0], u[2]); if (ul < 1e-3) { u = [1, 0, 0]; ul = 1; } u = u.map(x => x / ul);
-    const v = [ax[1] * u[2] - ax[2] * u[1], ax[2] * u[0] - ax[0] * u[2], ax[0] * u[1] - ax[1] * u[0]];
-    const mem = []; F.forEach((f, i) => { if ((f.limb || 0) === limb.id) mem.push(i); }); mem.sort((a, b) => (F[a].core || 0) - (F[b].core || 0));
-    const m = mem.length, cap = clamp(Math.sqrt(m / n) * 1.5, .2, 1.25);
-    mem.forEach((i, j) => { const ct = 1 - (j + .5) / m * (1 - Math.cos(cap)), st = Math.sqrt(1 - ct * ct), az = j * 2.39996, ca = Math.cos(az) * st, sa = Math.sin(az) * st;
-      out[i] = [ax[0] * ct + u[0] * ca + v[0] * sa, ax[1] * ct + u[1] * ca + v[1] * sa, ax[2] * ct + u[2] * ca + v[2] * sa]; lenK[i] = 1.22 - .5 * j / m; });   // the most typical track is the spine of its limb
-  });
-  for (let i = 0; i < n; i++) if (!out[i]) out[i] = [0, 1, 0];
-  return { out, lenK };
+function layout(fx, c, d) {                       // which void each track streams around, and where its strands start
+  const limbs = (c.limbs || []).length, key = d.n + '|' + limbs + '|' + (c.limbs || []).map(l => l.count).join(',');
+  if (fx.lkey === key) return; fx.lkey = key;
+  const k = d.n ? Math.max(2, limbs) + (d.n > 12 ? 1 : 0) : 1;
+  fx.base = [...Array(k)].map((_, j) => { const yy = k > 1 ? 1 - 2 * (j + .5) / k : 0, rr = Math.sqrt(1 - yy * yy), ph = j * 2.39996 + d.seed * 6.28; return [Math.cos(ph) * rr, yy * .7, Math.sin(ph) * rr]; });
+  fx.pole = d.F.map((f, i) => limbs > 1 ? (f.limb || 0) % k : i % k);
+  fx.per = d.n ? clamp(Math.round(90 / d.n), 1, 8) : 0;       // few tracks still make a full form: each spawns several strands
+  fx.seedv = d.F.map(f => [...Array(8)].map((_, m) => { const yy = hash(f.name + 'a' + m) * 2 - 1, rr = Math.sqrt(1 - yy * yy), ph = hash(f.name + 'b' + m) * 6.283; return [Math.cos(ph) * rr, yy, Math.sin(ph) * rr, .35 + hash(f.name + 'c' + m) * 1.1]; }));
 }
 
-/* its inner life: none of this is on a fixed loop */
-function live(fx, d, t, mouse, cx0, cy0, S, au) {
-  const sd = d.seed * 100, L = fx.life || (fx.life = { t, yaw: d.seed * 6, startle: 0, mx: null, my: null, beat: 0, bassAvg: 0, phase: 0, look: [0, 0] });
-  const dt = clamp(t - L.t, 0, .1); L.t = t;
-  L.curious = mouse ? clamp(.45 + noise(t * .05 + sd) * .9, 0, 1) : 0;                       // sometimes it cares about you, sometimes not
-  if (mouse) {
-    if (L.mx != null && Math.hypot(mouse.x - L.mx, mouse.y - L.my) / Math.max(dt, .016) > 1700 && Math.hypot(mouse.x - cx0, mouse.y - cy0) < S * .25) L.startle = Math.max(L.startle, .8);
-    L.mx = mouse.x; L.my = mouse.y;
-  } else L.mx = null;
-  if (Gym.poke) { Gym.poke = false; L.startle = 1; fx.waves.push({ t0: t, hue: 190 + noise(t) * 80, soft: true }); }
-  L.startle *= Math.exp(-dt * 1.5);
+function live(fx, d, t, mouse, cx0, cy0, S, au) { // its inner life: none of this is on a fixed loop
+  const sd = d.seed * 100, L = fx.life || (fx.life = { t, yaw: d.seed * 6, startle: 0, sx: cx0, sy: cy0, beat: -9, bassAvg: 0, phase: 0 });
+  const dt = clamp(t - L.t, 0, .1); L.t = t; L.dt = dt;
+  if (mouse) { L.sx += (mouse.x - L.sx) * Math.min(1, dt * 2.2); L.sy += (mouse.y - L.sy) * Math.min(1, dt * 2.2); }   // it follows a calm, delayed idea of where you are
+  L.curious = mouse ? clamp(.4 + noise(t * .05 + sd) * .9, 0, 1) : 0;
+  L.startle *= Math.exp(-dt * 1.4);
   const drive = au ? au.level : 0;
-  L.yaw += ((.1 + noise(t * .06 + sd + 5) * .5 + (d.training ? .55 : 0)) * (1 + L.startle * 5) + drive * 1.1 * (noise(t * .02 + sd) > -.2 ? 1 : -1)) * dt;
-  L.pitch = .4 + noise(t * .045 + sd + 9) * .6; L.roll = noise(t * .035 + sd + 13) * .55;
-  L.phase += dt * (1.1 + noise(t * .09 + sd + 2) * .75 + (d.training ? 1 : 0));
-  L.breath = clamp((.5 + .5 * Math.sin(L.phase)) * (1 + Math.max(0, noise(t * .03 + sd + 30) - .55) * 2.6), 0, 2);   // with the odd deep sigh
-  const lean = L.curious * (1 - L.startle * 3);
-  L.dx = S * .05 * noise(t * .04 + sd + 3) + (mouse ? (mouse.x - cx0) * .08 * lean : 0);
-  L.dy = S * .035 * noise(t * .05 + sd + 7) + (mouse ? (mouse.y - cy0) * .08 * lean : 0);
-  const tx = mouse ? clamp((mouse.x - cx0) / S, -1, 1) * L.curious : noise(t * .07 + sd + 40) * .5, ty = mouse ? clamp((mouse.y - cy0) / S, -1, 1) * L.curious : noise(t * .06 + sd + 50) * .5;
-  L.look[0] += (tx - L.look[0]) * Math.min(1, dt * 3); L.look[1] += (ty - L.look[1]) * Math.min(1, dt * 3);
-  if (au) { L.bassAvg = L.bassAvg * .93 + au.bass * .07; if (au.bass > L.bassAvg * 1.3 + .07 && t - L.beat > .2) { L.beat = t; fx.waves.push({ t0: t, hue: 300 - au.high * 200, soft: true }); } }
+  L.yaw += ((.07 + noise(t * .06 + sd + 5) * .32 + (d.training ? .3 : 0)) * (1 + L.startle * 3) + drive * .6 * (noise(t * .02 + sd) > -.2 ? 1 : -1)) * dt;
+  L.pitch = .35 + noise(t * .045 + sd + 9) * .65; L.roll = noise(t * .035 + sd + 13) * .7;
+  L.phase += dt * (1.0 + noise(t * .09 + sd + 2) * .75 + (d.training ? .8 : 0));
+  L.breath = clamp((.5 + .5 * Math.sin(L.phase)) * (1 + Math.max(0, noise(t * .03 + sd + 30) - .55) * 2.6), 0, 2);
+  L.dx = S * .045 * noise(t * .04 + sd + 3); L.dy = S * .035 * noise(t * .05 + sd + 7);
+  if (au) { L.bassAvg = L.bassAvg * .93 + au.bass * .07; if (au.bass > L.bassAvg * 1.3 + .07 && t - L.beat > .2) { L.beat = t; fx.waves.push({ t0: t, pole: Math.floor(Math.abs(noise(t * 3)) * 9), soft: true }); } }
   return L;
 }
 
 function drawCreature(g, W, H, c, t, mouse, mini) {
-  const d = dna(c), fx = fxOf(c.slug), S = Math.min(W, H), cx0 = W / 2, cy0 = H / 2 * (mini ? 1 : .94), sd = d.seed * 100;
-  g.clearRect(0, 0, W, H);
-  const au = mini ? null : audioLevels(), lv = au ? au.level : 0;                       // live sound, if anything is playing
-  const L = mini ? { yaw: t * .2 + d.seed * 6, pitch: .45, roll: 0, breath: .5 + .5 * Math.sin(t * 1.2), dx: 0, dy: 0, startle: 0, curious: 0, look: [0, 0], beat: -9 } : live(fx, d, t, mouse, cx0, cy0, S, au);
+  const d = dna(c), fx = fxOf(c.slug), S = Math.min(W, H), cx0 = W / 2, cy0 = H / 2 * (mini ? 1 : .94), sd = d.seed * 100, n = d.n;
+  g.clearRect(0, 0, W, H); layout(fx, c, d);
+  const au = mini ? null : audioLevels(), lv = au ? au.level : 0;
+  const L = mini ? { yaw: t * .15 + d.seed * 6, pitch: .45, roll: 0, breath: .5 + .5 * Math.sin(t * 1.2), dx: 0, dy: 0, startle: 0, curious: 0, beat: -9, dt: .016, sx: cx0, sy: cy0 } : live(fx, d, t, mouse, cx0, cy0, S, au);
   const cx = cx0 + L.dx, cy = cy0 + L.dy, kick = Math.exp(-(t - L.beat) * 7);
-  const hue = (hueOf(d.bright) + (au ? (au.high - au.bass) * 50 : 0) + noise(t * .02 + sd) * 16 + 360) % 360, hue2 = (hue + 50 + d.seed * 140) % 360;
-  const R = S * (d.n ? .08 + .03 * clamp(d.minutes / 30, 0, 1) + .045 * d.growth : .05) * (mini ? 1.7 : 1)
-    * (1 + (.03 + d.dyn * .05) * (L.breath - .5) * 2) * (1 - .22 * L.startle) * (1 + (au ? au.bass * .3 : 0));
+  const hue = (hueOf(d.bright) + (au ? (au.high - au.bass) * 50 : 0) + noise(t * .02 + sd) * 18 + 360) % 360, hue2 = (hue + 50 + d.seed * 140) % 360;
+  const R = S * (n ? .1 + .025 * clamp(d.minutes / 30, 0, 1) + .035 * d.growth : .07) * (mini ? 1.35 : 1) * (1 + (.03 + d.dyn * .05) * (L.breath - .5) * 2);
   const cyw = Math.cos(L.yaw), syw = Math.sin(L.yaw), cp = Math.cos(L.pitch), sp = Math.sin(L.pitch), cr = Math.cos(L.roll), sr = Math.sin(L.roll), F = S * 1.7;
   const proj = (x, y, z) => { const x1 = x * cyw + z * syw, z1 = -x * syw + z * cyw, y1 = y * cp - z1 * sp, z2 = y * sp + z1 * cp, k = F / (F - z2); return [cx + (x1 * cr - y1 * sr) * k, cy + (x1 * sr + y1 * cr) * k, z2, k]; };
+  const unproj = (px, py, z2) => { const k = F / (F - z2), xr = (px - cx) / k, yr = (py - cy) / k, x1 = xr * cr + yr * sr, y1 = -xr * sr + yr * cr, z1 = -y1 * sp + z2 * cp; return [x1 * cyw - z1 * syw, y1 * cp + z2 * sp, x1 * syw + z1 * cyw]; };
+
+  // the voids: where they are right now
+  const spread = R * (1.05 + .4 * d.growth) * (n > 80 ? 1.2 : 1), K = fx.base.length;
+  const poles = fx.base.map((b, j) => {
+    const w = 1 + .4 * noise(t * .05 + j * 7 + sd), ax = [noise(t * .04 + j * 3 + sd), .5 + noise(t * .05 + j * 5 + 9 + sd), noise(t * .045 + j * 8 + 17 + sd)], al = Math.hypot(ax[0], ax[1], ax[2]) || 1;
+    return { c: [b[0] * spread * w + noise(t * .06 + j * 13 + sd) * R * .6, b[1] * spread * w + noise(t * .055 + j * 17 + sd) * R * .6, b[2] * spread * w + noise(t * .05 + j * 19 + sd) * R * .6],
+      ax: [ax[0] / al, ax[1] / al, ax[2] / al], s: (j % 2 ? -1 : 1) * (.8 + .5 * noise(t * .07 + j * 2 + sd)), sig: R * (.95 + .3 * noise(t * .06 + j * 11 + sd)) * (1 + (au ? au.bass * .45 : 0) + kick * .12) * (1 - .3 * L.startle) };
+  });
+  if (!mini && mouse && L.curious > .05 && K) {       // the nearest void leans toward the (smoothed) pointer when it's curious
+    let best = 0, bd = 1e9; poles.forEach((P, j) => { const p = proj(P.c[0], P.c[1], P.c[2]), dd = Math.hypot(p[0] - L.sx, p[1] - L.sy); P.z2 = p[2]; if (dd < bd) { bd = dd; best = j; } });
+    const tg = unproj(L.sx, L.sy, poles[best].z2), k = .3 * L.curious; for (let a = 0; a < 3; a++) poles[best].c[a] += (tg[a] - poles[best].c[a]) * k;
+  }
+  fx.temps = fx.temps.filter(v => t - v.t0 < 5);
+  const temps = mini ? [] : fx.temps.map(v => ({ c: v.c, ax: v.ax, s: v.s * Math.exp(-(t - v.t0) * .7) * 2.2, sig: R * .8 }));
+  const all = poles.concat(temps), turb = (.22 + (1 - d.learned) * (d.epochs ? .7 : 1) + lv * 1.3 + L.startle * 1.2 + (d.digesting ? .5 : 0)) * (n ? 1 : .6), kf = 1 / (R * .95), bound = spread + R * 1.7;
+  let vx = 0, vy = 0, vz = 0;
+  const V = (x, y, z) => {                             // the flow: swirl around every void, pulled onto its shell, stirred by turbulence
+    vx = turb * Math.sin(y * kf + t * .31 + z * kf * .7); vy = turb * Math.sin(z * kf + t * .27 + x * kf * .6); vz = turb * Math.sin(x * kf + t * .23 + y * kf * .8);
+    for (let j = 0; j < all.length; j++) { const P = all[j], dx = x - P.c[0], dy = y - P.c[1], dz = z - P.c[2], d2 = dx * dx + dy * dy + dz * dz, dl = Math.sqrt(d2) + 1e-3, s2 = P.sig * P.sig, f = P.s * Math.exp(-d2 / (6 * s2)) * 2 / dl, pump = (P.sig * 1.3 - dl) / P.sig * .16 * Math.exp(-d2 / (12 * s2)) / dl, pol = (1 - d2 / (1.6 * s2)) * Math.exp(-d2 / (4 * s2)) * .85 * (P.s > 0 ? 1 : -1);
+      vx += (P.ax[1] * dz - P.ax[2] * dy) * f + dx * pump + P.ax[0] * pol; vy += (P.ax[2] * dx - P.ax[0] * dz) * f + dy * pump + P.ax[1] * pol; vz += (P.ax[0] * dy - P.ax[1] * dx) * f + dz * pump + P.ax[2] * pol; }
+    const rl = Math.hypot(x, y, z); if (rl > bound) { const q = Math.min(6, (rl - bound) / R * 3.2) / rl; vx -= x * q; vy -= y * q; vz -= z * q; }
+  };
+  fx.waves = fx.waves.filter(w => t - w.t0 < 2.4); const waves = mini ? [] : fx.waves.filter(w => t >= w.t0).slice(-4).map(w => ({ o: w.o || poles[w.pole % K].c, r: (t - w.t0) * R * 4.5, a: (1 - (t - w.t0) / 2.4) * R * (w.soft ? .22 : .5) }));
   g.save(); g.globalCompositeOperation = 'lighter'; g.lineCap = 'round'; g.lineJoin = 'round';
-  const n = d.n, wide = n > 80 ? 1.5 : 1;
 
-  // aura
-  const aur = g.createRadialGradient(cx, cy, 0, cx, cy, R * (n ? 5 : 3));
-  aur.addColorStop(0, `hsla(${hue},95%,55%,${(.1 + L.breath * .05 + lv * .25 + kick * .15) * (d.training ? 1.6 : 1)})`); aur.addColorStop(.4, `hsla(${hue2},95%,45%,.035)`); aur.addColorStop(1, 'hsla(0,0%,0%,0)');
-  g.fillStyle = aur; g.fillRect(0, 0, W, H);
+  // faint nebula around each void
+  if (!mini) poles.forEach((P, j) => { const p = proj(P.c[0], P.c[1], P.c[2]), rr = P.sig * 3.2 * p[3], gr = g.createRadialGradient(p[0], p[1], 0, p[0], p[1], rr);
+    gr.addColorStop(0, `hsla(${(hue + j * 40) % 360},95%,55%,${(.07 + L.breath * .03 + lv * .18 + kick * .1) * (d.training ? 1.5 : 1)})`); gr.addColorStop(1, 'hsla(0,0%,0%,0)'); g.fillStyle = gr; g.fillRect(p[0] - rr, p[1] - rr, rr * 2, rr * 2); });
 
-  // motes: drift around it, stream inward while training, scatter with sound
-  if (!mini) for (let i = 0; i < 70; i++) {
-    const a = i * 2.39996 + t * (.05 + (i % 7) * .01) + noise(t * .1 + i) * .6, life = d.training ? ((t * (.16 + (i % 5) * .03) + i * .137) % 1) : .5 + .5 * noise(t * .15 + i * 3),
-      rr = R * (d.training ? 6.5 - life * 5.6 : 3 + life * 3.5 + lv * 2), yy = Math.sin(i * 12.9898) * R * 2.2 * (d.training ? 1 - life * .8 : 1), p = proj(Math.cos(a) * rr, yy, Math.sin(a) * rr);
-    g.fillStyle = `hsla(${(hue2 + i * 11) % 360},95%,75%,${(d.training ? life : .25 + .2 * life) * clamp(.6 + p[2] / (R * 6), .15, 1)})`;
-    g.beginPath(); g.arc(p[0], p[1], (d.training ? .6 + life * 1.6 : .8) * p[3], 0, 7); g.fill();
+  // dust: carried by the flow
+  if (!mini) {
+    const N = n ? 2400 : 700; if (!fx.dust || fx.dust.length !== N * 4) fx.dust = new Float32Array(N * 4);
+    const D = fx.dust, sp = R * 1.25 * (d.training ? 1.6 : 1) * (1 + lv * 2), dA = .5 + d.growth * .4 + lv * .6;
+    for (let i = 0; i < N; i++) {
+      const o = i * 4; D[o + 3] -= L.dt * (.16 + (i % 7) * .03);
+      if (D[o + 3] <= 0) { const P = poles[i % K], yy = Math.random() * 2 - 1, rr = Math.sqrt(1 - yy * yy), ph = Math.random() * 6.283, r0 = P.sig * (.3 + Math.random() * (d.training ? 3.6 : 2.1)); D[o] = P.c[0] + Math.cos(ph) * rr * r0; D[o + 1] = P.c[1] + yy * r0; D[o + 2] = P.c[2] + Math.sin(ph) * rr * r0; D[o + 3] = 1; }
+      V(D[o], D[o + 1], D[o + 2]); D[o] += vx * sp * L.dt; D[o + 1] += vy * sp * L.dt; D[o + 2] += vz * sp * L.dt;
+      const p = proj(D[o], D[o + 1], D[o + 2]), al = Math.sin(D[o + 3] * Math.PI) * clamp(.55 + p[2] / (bound * 2), .1, 1) * dA, s = (1.5 + (i % 5) * .35) * p[3];
+      g.fillStyle = `hsla(${(hue2 + (i % 9) * 9 + Math.hypot(vx, vy, vz) * 30) % 360},100%,76%,${clamp(al, 0, 1)})`; g.fillRect(p[0] - s / 2, p[1] - s / 2, s, s);
+    }
   }
 
-  // glyphs: its own script, one mark per ten epochs, on a slow spiral
+  // currents: every track streams through the field
+  const per = mini ? Math.min(fx.per, 2) : fx.per, total = n * per, stride = Math.max(1, Math.ceil(total / 640)), steps0 = mini ? 14 : total > 400 ? 26 : total > 160 ? 38 : 54, h = R * .1 * (total > 400 ? 1.35 : 1);
+  const hits = mini ? null : (fx.hits = []);
+  for (let i = 0, q = 0; i < n; i++) {
+    const f = d.F[i], born = fx.births[f.name], grow = born == null ? 1 : easeOut((t - born) / 2.2); if (grow <= 0) { q += per; continue; }
+    const P = poles[fx.pole[i] % K], th = hueOf(f.bright ?? .3), thick = .5 + (f.low ?? .3) * 1.3, playing = Gym.playing === f.name;
+    const pl = fx.pluck[i], pk = pl ? pl.a * Math.exp(-(t - pl.t0) * 1.5) * (t >= pl.t0 ? 1 : 0) : 0; if (pl && t - pl.t0 > 4) delete fx.pluck[i];
+    const twitch = Math.max(0, noise(t * .4 + i * 7.3) - .5) * 2.4, hm = 2 + Math.round(clamp((f.bpm ?? 100) / 50, 1, 5));
+    for (let m = 0; m < per; m++, q++) {
+      if (q % stride) continue;
+      const sv = fx.seedv[i][m], r0 = P.sig * sv[3] * (1 + .25 * noise(t * .07 + i * 3.1 + m));
+      let x = P.c[0] + (sv[0] + noise(t * .05 + i + m * 9) * .5) * r0, y = P.c[1] + (sv[1] + noise(t * .045 + i * 2 + m * 5) * .5) * r0, z = P.c[2] + (sv[2] + noise(t * .04 + i * 3 + m * 7) * .5) * r0;
+      const Ks = Math.max(3, Math.round(steps0 * clamp(.55 + Math.sqrt((f.secs || 30) / 200), .6, 1.3) * (.6 + .4 * d.growth + (playing ? .2 : 0)) * grow)), ph = t * (2 + (f.bpm ?? 100) / 40) * (.6 + .4 * noise(t * .1 + i)) + i;
+      let first = null, last = null, mid = null, front = .5;
+      g.beginPath();
+      for (let k = 0; k <= Ks; k++) {
+        const u = k / Ks, wob = (pk * Math.sin(u * Math.PI * hm) * Math.sin(ph * 3) * R * .55 + twitch * Math.sin(u * 9 - ph) * R * .08 * u + (au ? au.wave[(k * 9 + i * 13) % 512] * lv * R * .5 : 0) + (playing ? Math.sin(u * 14 - ph * 2) * R * .08 : 0));
+        let px = x + P.ax[0] * wob, py = y + P.ax[1] * wob, pz = z + P.ax[2] * wob;
+        for (let wI = 0; wI < waves.length; wI++) { const w = waves[wI], ex = px - w.o[0], ey = py - w.o[1], ez = pz - w.o[2], el = Math.hypot(ex, ey, ez) + 1e-3, g2 = Math.exp(-Math.pow((el - w.r) / (R * .7), 2)) * w.a / el; px += ex * g2; py += ey * g2; pz += ez * g2; }
+        const p = proj(px, py, pz); k ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]);
+        if (!k) first = p; if (k === Ks >> 1) mid = p; if (k === Ks) { last = p; front = clamp(.55 + p[2] / (bound * 1.6), .12, 1); }
+        V(x, y, z); const ml = Math.hypot(vx, vy, vz) + 1e-6; x += vx / ml * h; y += vy / ml * h; z += vz / ml * h;
+      }
+      const alpha = front * (.4 + d.growth * .45 + lv * .4 + twitch * .12 + pk * .8) * (born != null && grow < 1 ? 1.5 : 1) * (playing ? 2 : 1) * (per > 3 ? .8 : 1), lw = (m ? .7 : 1.15) * thick * (mini ? .6 : 1) * (last ? last[3] : 1) * (1 + pk);
+      if (!m && !mini && total <= 260) { g.strokeStyle = `hsla(${th},96%,60%,${clamp(alpha * .15, 0, 1)})`; g.lineWidth = lw * 5; g.stroke(); }
+      g.strokeStyle = playing || pk > .15 ? `hsla(${th},70%,${80 + pk * 12}%,${clamp(alpha, 0, 1)})` : `hsla(${(th + m * 9 + 360) % 360},96%,${60 + (m % 3) * 6}%,${clamp(alpha, 0, 1)})`; g.lineWidth = lw; g.stroke();
+      if (last && !mini) {
+        g.fillStyle = `hsla(${th + 35},100%,84%,${clamp(front * (.35 + d.growth * .5) + twitch * .3 + pk, 0, 1)})`; g.beginPath(); g.arc(last[0], last[1], (.8 + thick * .7 + twitch + pk * 2 + (grow < 1 ? 3 * (1 - grow) : 0)) * last[3], 0, 7); g.fill();
+        if (hits) { hits.push(i, first[0], first[1], i, mid[0], mid[1], i, last[0], last[1]); }
+      }
+    }
+  }
+
+  // glyphs: its script, near the voids
   if (!mini && (d.epochs || d.training)) {
     const count = Math.min(72, Math.ceil(d.epochs / 10) + (d.training ? 1 : 0));
     for (let j = 0; j < count; j++) {
-      const a = j * .47 + t * .028 + noise(t * .05 + j) * .08, rad = R * (3.0 + j * .04) * wide, p = proj(Math.cos(a) * rad, Math.sin(j * 1.3 + t * .2) * R * .25, Math.sin(a) * rad);
-      const sz = (5 + (j % 3)) * p[3], fresh = d.training && j === count - 1, al = clamp(.5 + p[2] / (rad * 2), .07, .9) * (fresh ? .4 + .6 * Math.abs(noise(t * 9)) : .75);
+      const P = poles[j % K], a = j * 1.7 + t * .04 + noise(t * .05 + j) * .5, rad = P.sig * (1.9 + (j % 5) * .28 + noise(t * .03 + j * 3) * .3), b1 = [P.ax[1], -P.ax[0], 0], bl = Math.hypot(b1[0], b1[1]) || 1;
+      const ux = b1[0] / bl, uy = b1[1] / bl, wx = P.ax[1] * 0 - P.ax[2] * uy, wy = P.ax[2] * ux - P.ax[0] * 0, wz = P.ax[0] * uy - P.ax[1] * ux, ca = Math.cos(a) * rad, sa = Math.sin(a) * rad;
+      const p = proj(P.c[0] + ux * ca + wx * sa, P.c[1] + uy * ca + wy * sa, P.c[2] + wz * sa), sz = (4.5 + (j % 3)) * p[3], fresh = d.training && j === count - 1, al = clamp(.5 + p[2] / (bound * 1.6), .07, .9) * (fresh ? .4 + .6 * Math.abs(noise(t * 9)) : .7);
       g.strokeStyle = `hsla(${(hue2 + j * 7) % 360},90%,${fresh ? 90 : 72}%,${al})`; g.lineWidth = .9; g.beginPath();
       for (let k = 0; k < 4; k++) { const r1 = Math.abs(_nh(j * 13 + k * 7 + sd)), r2 = Math.abs(_nh(j * 17 + k * 11 + sd + 5)), pt = v => [p[0] + ((Math.floor(v * 9) % 3) - 1) * sz, p[1] + (Math.floor(v * 9 / 3) - 1) * sz];
         const A = pt(r1), B = pt(r2); if (k % 2 && r1 > .5) { g.moveTo(A[0] + sz * .5, A[1]); g.arc(A[0], A[1], sz * .5, 0, Math.PI * (1 + r2)); } else { g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); } }
@@ -113,125 +157,79 @@ function drawCreature(g, W, H, c, t, mouse, mini) {
     }
   }
 
-  // strings: one per track, standing waves, with a will of their own
-  const stride = Math.max(1, Math.ceil(n / 480)), strands = mini ? 1 : n > 140 ? 1 : n > 45 ? 2 : 3, segs = mini ? 9 : n > 220 ? 11 : n > 70 ? 15 : 22;
-  const lenBase = R * (1.1 + (.45 + d.growth * 1.9)) * (n > 80 ? 1.25 : 1), reach = Math.min(1, (S * (mini ? .46 : .43) - R) / (lenBase * 1.75)) * (1 - .3 * L.startle);
-  const dkey = n + '|' + (c.limbs || []).map(l => l.count).join(',');
-  if (fx.dkey !== dkey) { fx.dkey = dkey; fx.dirs = stringDirs(c, d.seed); }
-  const pull = mouse && !mini ? L.curious * .2 - L.startle * .45 : 0, forks = !mini && n <= 120 && d.growth > .2;
-  for (let i = 0; i < n; i += stride) {
-    const f = d.F[i], born = fx.births[f.name], grow = born == null ? 1 : easeOut((t - born) / 1.8); if (grow <= 0) continue;
-    const [dx, dy, dz] = fx.dirs.out[i];
-    let ux = dz, uy = 0, uz = -dx; const ul = Math.hypot(ux, uz) || 1; ux /= ul; uz /= ul; if (ul < 1e-3) { ux = 1; uz = 0; }
-    const vx = dy * uz - dz * uy, vy = dz * ux - dx * uz, vz = dx * uy - dy * ux;
-    const playing = Gym.playing === f.name, twitch = Math.max(0, noise(t * .55 + i * 7.3) - .45) * 3.2;       // now and then one string flares on its own
-    const len = lenBase * clamp(.5 + Math.sqrt((f.secs || 30) / 150), .6, 1.5) * fx.dirs.lenK[i] * grow * reach * (1 + noise(t * .12 + i * 2.1) * .08 + (playing ? .15 : 0));
-    const amp = R * (.05 + (f.dyn ?? .3) * .2) * (d.training ? 1.5 : 1) * (1 + twitch + lv * 2.6 + L.startle * 2 + (playing ? 1.2 : 0)), spd = (f.bpm ?? 100) / 60 * (d.training ? 2.8 : 1.1);
-    const h1 = 1 + Math.round(clamp((f.bpm ?? 100) / 60, 1, 3)), vib = (f.bpm ?? 100) / 60 * (d.training ? 9 : 5) * (1 + lv * 1.5);
-    const th = hueOf(f.bright ?? .3), thick = (.55 + (f.low ?? .3) * 1.3) * (playing ? 2 : 1);
-    const tip0 = proj(dx * (R + len), dy * (R + len), dz * (R + len)), pk = pull ? pull * Math.exp(-Math.pow(Math.hypot(mouse.x - tip0[0], mouse.y - tip0[1]) / (S * .3), 2)) : 0;
-    const at = (u, s, fk) => { const ph = s * 2.094 + i, e1 = Math.sin(u * Math.PI * (h1 + .5)) * amp * Math.sin(t * vib + ph), e2 = Math.sin(u * Math.PI * (h1 * 2 + 1.5)) * amp * .45 * Math.cos(t * vib * 1.31 + ph * 1.7),
-      sway = (Math.sin(t * .35 + i * 1.3) + noise(t * .2 + i * 5) * 1.4) * R * .2 * u * u, a1 = e1 + sway + (fk ? fk * Math.max(0, u - .66) * len * .5 : 0), a2 = e2 + (fk ? Math.max(0, u - .66) * len * .22 * Math.sin(i + fk) : 0), r0 = R * .92 + len * u;
-      const p = proj(dx * r0 + ux * a1 + vx * a2, dy * r0 + uy * a1 + vy * a2, dz * r0 + uz * a1 + vz * a2);
-      if (pk) { p[0] += (mouse.x - p[0]) * pk * u * u; p[1] += (mouse.y - p[1]) * pk * u * u; } return p; };
-    let tip, front = .5;
-    for (let s = 0; s < strands; s++) {
-      g.beginPath();
-      for (let k = 0; k <= segs; k++) { const p = at(k / segs, s); k ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); if (k === segs) { if (!s) tip = p; front = clamp(.55 + p[2] / (2.2 * (R + len)), .12, 1); } }
-      const alpha = front * (.3 + d.growth * .5 + lv * .4 + twitch * .15) * (born != null && grow < 1 ? 1.6 : 1) * (s ? .7 : 1) * (playing ? 2 : 1), lw = (s ? .7 : 1.25) * thick * (mini ? .6 : 1) * (tip ? tip[3] : 1);
-      if (!s && !mini && n <= 90) { g.strokeStyle = `hsla(${th},96%,60%,${clamp(alpha * .16, 0, 1)})`; g.lineWidth = lw * 5; g.stroke(); }
-      g.strokeStyle = playing ? `hsla(${th},60%,92%,${clamp(alpha, 0, 1)})` : `hsla(${th + s * 22},96%,${60 + s * 7}%,${clamp(alpha, 0, 1)})`; g.lineWidth = lw; g.stroke();
-    }
-    if (forks) for (const fk of [-1, 1]) {                           // forked tips, like something that grew
-      g.beginPath(); for (let k = 0; k <= 7; k++) { const p = at(.66 + .34 * k / 7 * (.55 + d.growth * .45), 0, fk); k ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); }
-      g.strokeStyle = `hsla(${th + 30},96%,72%,${front * (.2 + d.growth * .35)})`; g.lineWidth = .7; g.stroke();
-    }
-    if (tip) {
-      g.fillStyle = `hsla(${th + 35},100%,82%,${clamp(front * (.5 + d.growth * .5) + (grow < 1 ? .5 : 0) + twitch * .3, 0, 1)})`; g.beginPath(); g.arc(tip[0], tip[1], (mini ? .8 : 1 + thick * 1.1 + (grow < 1 ? 3 * (1 - grow) : 0) + twitch) * tip[3], 0, 7); g.fill();
-      if (!mini && (n <= 160 || i % 3 === 0)) {                    // a bead of light on the string: runs inward while training
-        const u = d.training || playing ? 1 - ((t * spd * .22 + i * .37) % 1) : ((t * .1 + i * .61 + noise(t * .1 + i) * .2 + 1) % 1), p = at(u, 0);
-        g.fillStyle = `hsla(${th + 20},100%,90%,${front * (d.training || playing ? .95 : .45)})`; g.beginPath(); g.arc(p[0], p[1], (d.training || playing ? 2 : 1.2) * p[3], 0, 7); g.fill();
-      }
-    }
-  }
-
-  // band ribbons: bass, mids, treble as open, precessing orbits. They trace the real spectrum while audio plays.
-  if (n && !mini) [[d.low, 4, .5, 305, 1.6, 2, 2, 14], [d.mid, 13, 1.4, 182, 2.0, 3, 14, 110], [d.high, 41, 3.2, 72, 2.35, 5, 110, 380]].forEach(([e, k, spd, bh, rad, lobes, b0, b1], bi) => {
-    const liveE = au ? [au.bass, au.mid, au.high][bi] : 0, A = clamp(.025 + Math.sqrt(e) * .16, .025, .2) * (d.training ? 1.6 : 1) + liveE * .3 / (1 + bi * 1.5);
-    const tilt = bi * 1.05 + d.seed * 3 + noise(t * .04 + bi * 9 + sd) * .7, ct = Math.cos(tilt), stl = Math.sin(tilt), Rb = R * rad * wide, dir = bi % 2 ? -1 : 1, a0 = t * (.12 + bi * .07) * dir + noise(t * .05 + bi * 4) * 1.5, arc = Math.PI * (1.35 + .4 * noise(t * .06 + bi * 3));
-    let prev = null;
-    for (let q = 0; q <= 150; q++) {
-      const u = q / 150, a = a0 + u * arc, bi_ = Math.floor(b0 + u * (b1 - b0)), bin = au ? (au.freq[bi_] + au.freq[bi_ + 1] + au.freq[Math.max(0, bi_ - 1)] + (fx.sp ? fx.sp[bi * 151 + q] * 3 : 0)) / (255 * (fx.sp ? 6 : 3)) : 0; if (au) { (fx.sp || (fx.sp = new Float32Array(453)))[bi * 151 + q] = bin * 255; }
-      const w = Math.sin(k * a + t * spd * dir) * (.6 + .4 * Math.sin(a * 2 - t * .5)) + .3 * Math.sin((k * 2 + 1) * a - t * spd * 1.7), r = Rb * (1 + A * w + bin * bin * .34);
-      const x = Math.cos(a) * r + Math.cos(a * lobes + t * .3) * Rb * .13, z = Math.sin(a) * r + Math.sin(a * lobes + t * .3) * Rb * .13, p = proj(x, z * stl, z * ct);
-      if (prev) { g.strokeStyle = `hsla(${bh + u * 30},96%,${66 + bin * 25}%,${Math.sin(u * Math.PI) * (.34 + .5 * Math.sqrt(e) + liveE * .6) * (.5 + .5 * d.growth + (d.training ? .3 : 0))})`; g.lineWidth = 1 + bin * 2.2; g.beginPath(); g.moveTo(prev[0], prev[1]); g.lineTo(p[0], p[1]); g.stroke(); }
-      prev = p;
-    }
+  // the voids themselves: punched out of the light, with a broken, flickering rim
+  const geomPoles = [];
+  if (!mini) poles.forEach((P, j) => {
+    const p = proj(P.c[0], P.c[1], P.c[2]), rad = P.sig * (.3 + .06 * d.growth) * p[3] * (1 + .12 * noise(t * .5 + j * 4) + kick * .15), path = new Path2D();
+    for (let q = 0; q <= 44; q++) { const a = q / 44 * Math.PI * 2, r = rad * (1 + .3 * noise(a * .9 + t * .3 + j * 9) + .05 * noise(a * 3 - t * .5 + j) + (au ? au.wave[(q * 11) % 512] * .5 * lv : 0)), X = p[0] + Math.cos(a) * r, Y = p[1] + Math.sin(a) * r; q ? path.lineTo(X, Y) : path.moveTo(X, Y); }
+    path.closePath(); geomPoles.push({ x: p[0], y: p[1], rad, j, c: P.c, z2: p[2] });
+    g.globalCompositeOperation = 'destination-out'; const vg = g.createRadialGradient(p[0], p[1], 0, p[0], p[1], rad * 1.25); vg.addColorStop(0, 'rgba(0,0,0,1)'); vg.addColorStop(.45, 'rgba(0,0,0,.9)'); vg.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = vg; g.fill(path);
+    g.globalCompositeOperation = 'lighter'; g.setLineDash([rad * (.5 + .4 * Math.abs(noise(t * .2 + j))), rad * (.2 + .5 * Math.abs(noise(t * .3 + j * 5)))]); g.lineDashOffset = t * 14 * (j % 2 ? 1 : -1);
+    g.strokeStyle = `hsla(${(hue2 + j * 40) % 360},100%,80%,${.1 + .3 * d.learned + lv * .4 + kick * .3})`; g.lineWidth = .7 + kick; g.stroke(path); g.setLineDash([]);
   });
 
-  // knots: nested torus-knot membranes. Unsettled until it has learned; they ring with live sound.
-  const layers = !n ? 0 : mini ? 1 : 1 + Math.min(4, Math.floor(Math.log2(d.epochs + 1) / 1.6)), lowA = .2 + d.low * .3, highA = clamp(d.high * 1.2 + d.noise * .05, .012, .2), kH = 9 + Math.round(d.seed * 9);
-  const chaos = (n ? (1 - d.learned) * (d.epochs ? .07 : .12) : .03) + (d.digesting ? .06 : 0) + L.startle * .12;
-  for (let l = 0; l < layers; l++) {
-    const [p_, q_] = KNOTS[(l + Math.floor(d.seed * 6)) % KNOTS.length], Rl = R * (.42 + .17 * l), spin = t * (.2 + .11 * l) * (l % 2 ? 1 : -1) * (d.training ? 2 : 1) + noise(t * .08 + l * 5 + sd) * 1.2;
-    const tx = l * 1.1 + d.seed * 4 + noise(t * .05 + l * 7) * .5, ctx_ = Math.cos(tx), stx = Math.sin(tx), pts = mini ? 90 : 240;
-    for (let pass = 0; pass < (mini ? 1 : 2); pass++) {
-      g.beginPath();
-      for (let j = 0; j <= pts; j++) {
-        const a = j / pts * Math.PI * 2, wv = au ? au.wave[(j * 2) % au.wave.length] : 0, ph = spin + pass * .09;
-        const mod = 1 + lowA * Math.cos(q_ * a + ph) + highA * Math.sin(kH * a - spin * 2) + chaos * Math.sin(a * 31 + t * 8 + l) * Math.sin(a * 7 - t * 5) + wv * .5 * lv + kick * .08;
-        const r = Rl * mod, x = r * Math.cos(p_ * a), z0 = r * Math.sin(p_ * a), y0 = Rl * lowA * 1.5 * Math.sin(q_ * a + ph), p = proj(x, y0 * ctx_ - z0 * stx, y0 * stx + z0 * ctx_);
-        j ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]);
-      }
-      g.strokeStyle = `hsla(${(hue + l * 34 + pass * 20) % 360},96%,${60 + l * 5}%,${(mini ? .55 : .26 + .08 * l) * (.55 + d.growth * .45) * (pass ? .5 : 1) + lv * .2})`; g.lineWidth = mini ? .7 : pass ? .6 : 1; g.stroke();
-    }
-  }
-
-  // cymatic dust: specks gather on the nodal lines of a standing wave over a sphere, and the pattern keeps shifting
-  if (n && !mini) {
-    const N = 620, m1 = 2 + d.low * 4 + noise(t * .03 + sd) * 1.5 + (au ? au.bass * 3 : 0), m2 = 2 + d.bright * 5 + noise(t * .025 + sd + 8) * 1.5 + (au ? au.high * 4 : 0), Rd = R * (1.18 + .1 * (layers - 1)), sharp = 2 + d.learned * 6;
-    for (let i = 0; i < N; i++) {
-      const yy = 1 - 2 * (i + .5) / N, rr = Math.sqrt(1 - yy * yy), lon = i * 2.39996, lat = Math.asin(yy), Y = Math.sin(m1 * lon + t * .25) * Math.sin(m2 * lat + t * .17), node = Math.pow(1 - Math.abs(Y), sharp);
-      if (node < .08) continue;
-      const r = Rd * (1 + Y * .1 + lv * .25 * Y + kick * .06), p = proj(Math.cos(lon) * rr * r, yy * r, Math.sin(lon) * rr * r), al = node * clamp(.55 + p[2] / (Rd * 2), .1, 1) * (.45 + d.growth * .5 + lv * .5);
-      g.fillStyle = `hsla(${(hue2 + Y * 60 + 360) % 360},100%,78%,${clamp(al, 0, 1)})`; const s = (.8 + node * 1.1) * p[3]; g.fillRect(p[0] - s / 2, p[1] - s / 2, s, s);
-    }
-  }
-
-  // core: a restless spark that leans toward whatever has its attention
-  const kx = cx + L.look[0] * R * .35, ky = cy + L.look[1] * R * .35;
-  const ng = g.createRadialGradient(kx, ky, 0, cx, cy, R * (n ? .95 : 1.6));
-  ng.addColorStop(0, `hsla(${hue2},100%,88%,${clamp(.5 + .25 * L.breath + lv * .5 + kick * .3, 0, 1)})`); ng.addColorStop(.22, `hsla(${hue},100%,62%,.4)`); ng.addColorStop(1, 'hsla(0,0%,0%,0)');
-  g.fillStyle = ng; g.beginPath(); g.arc(cx, cy, R * (n ? .95 : 1.6), 0, 7); g.fill();
-  if (!mini) {
-    const rays = 7 + Math.round(d.seed * 6); g.beginPath();
-    for (let j = 0; j <= rays * 2; j++) { const a = j / (rays * 2) * Math.PI * 2 + L.yaw * .7, long = j % 2 === 0, r = R * (long ? .16 + .34 * Math.abs(noise(t * 1.7 + j * 3.1 + sd)) * (.5 + d.learned + lv * 2 + kick) : .05); j ? g.lineTo(kx + Math.cos(a) * r, ky + Math.sin(a) * r) : g.moveTo(kx + Math.cos(a) * r, ky + Math.sin(a) * r); }
-    g.fillStyle = `hsla(${hue2},100%,90%,${.5 + lv * .4})`; g.fill();
-    if (n) for (let k = 0; k < 3; k++) {                             // ripples leave the core, never quite round
-      const u = (t * d.bpm / 60 * .5 + k / 3) % 1, rr = R * .9 * u + 1; g.beginPath();
-      for (let j = 0; j <= 48; j++) { const a = j / 48 * Math.PI * 2, r = rr * (1 + .12 * noise(a * 3 + t * 1.3 + k * 9) + (au ? au.wave[j * 4 % au.wave.length] * .4 : 0)), p = proj(Math.cos(a) * r, 0, Math.sin(a) * r); j ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); }
-      g.strokeStyle = `hsla(${hue2},100%,82%,${(1 - u) * (.14 + .6 * d.learned + lv * .4)})`; g.lineWidth = .8 + (1 - u) * 1.2; g.stroke();
-    }
-  }
-
-  // shockwaves: eating a track, an epoch, a beat, a poke. A ragged crown, tilted with the body.
-  fx.waves = fx.waves.filter(w => t - w.t0 < (w.soft ? 1.6 : 2.6));
-  if (!mini) for (const w of fx.waves) {
-    const age = t - w.t0; if (age < 0) continue; const durW = w.soft ? 1.6 : 2.6, u = age / durW, rx = R * (1 + easeOut(u) * (w.soft ? 4.5 : 8));
-    g.beginPath(); for (let j = 0; j <= 90; j++) { const a = j / 90 * Math.PI * 2, r = rx * (1 + .07 * Math.sin(a * 9 + w.t0 * 7) + .06 * noise(a * 5 + w.t0 * 3 + t)), p = proj(Math.cos(a) * r, 0, Math.sin(a) * r); j ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); }
-    g.strokeStyle = `hsla(${w.hue},100%,75%,${(1 - u) * (w.soft ? .4 : .9)})`; g.lineWidth = (w.soft ? 1.2 : 2.4) * (1 - u) + .4; g.stroke();
-    if (!w.soft && u < .25) { g.fillStyle = `hsla(${w.hue},100%,80%,${(.25 - u) * 1.6})`; g.beginPath(); g.arc(cx, cy, R * 1.6, 0, 7); g.fill(); }
-  }
+  // pings: where you touched empty space
+  fx.pings = fx.pings.filter(pg => t - pg.t0 < 1.4);
+  if (!mini) for (const pg of fx.pings) { const u = (t - pg.t0) / 1.4; g.beginPath(); for (let q = 0; q <= 30; q++) { const a = q / 30 * Math.PI * 2, r = (6 + u * 46) * (1 + .2 * noise(a * 3 + pg.t0 * 5 + t * 2)); q ? g.lineTo(pg.x + Math.cos(a) * r, pg.y + Math.sin(a) * r) : g.moveTo(pg.x + Math.cos(a) * r, pg.y + Math.sin(a) * r); } g.strokeStyle = `hsla(${hue2},100%,80%,${(1 - u) * .6})`; g.lineWidth = 1; g.stroke(); }
   g.restore();
+  if (!mini) fx.geom = { poles: geomPoles, unproj, R, growth: d.growth, learned: d.learned, K };
 }
 
-/* notice what changed since the last look, so new tracks sprout and epochs ripple */
+/* notice what changed since the last look, so new tracks stream in and epochs ripple through it */
 function gymFx(c) {
   const fx = fxOf(c.slug), now = performance.now() / 1000;
-  if (fx.names) { let k = 0; for (const f of c.food) if (!fx.names.has(f.name)) { fx.births[f.name] = now + k * .16; fx.waves.push({ t0: now + k * .16, hue: hueOf(f.bright ?? .3) }); k++; } }
+  if (fx.names) { let k = 0; for (const f of c.food) if (!fx.names.has(f.name)) { fx.births[f.name] = now + k * .16; fx.waves.push({ t0: now + k * .16, pole: f.limb || k }); k++; } }
   fx.names = new Set(c.food.map(f => f.name));
-  if (fx.epochs != null && c.epochs > fx.epochs) fx.waves.push({ t0: now, hue: hueOf(dna(c).bright), soft: true });
+  if (fx.epochs != null && c.epochs > fx.epochs) fx.waves.push({ t0: now, pole: c.epochs, soft: true });
   fx.epochs = c.epochs;
+}
+
+/* ---------- its voice ----------
+   Synthesised on the spot and sent through the same analyser, so it also reacts to its own sound.
+   Untrained it is noisy, detuned and short of breath. Training makes it purer, richer in overtones and longer. */
+let ECHO = null;
+function voiceOut() {
+  if (!ECHO) { const a = ac(), dl = a.createDelay(1), fb = a.createGain(), lp = a.createBiquadFilter(), inp = a.createGain(); dl.delayTime.value = .31; fb.gain.value = .42; lp.type = 'lowpass'; lp.frequency.value = 2600;
+    inp.connect(bus()); inp.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(bus()); ECHO = inp; }
+  return ECHO;
+}
+const ALIEN_SCALE = [1, 1.0802, 1.1905, 1.3333, 1.4815, 1.6071, 1.8];        // steps of an unfamiliar tuning
+const noteOf = v => 98 * Math.pow(2, Math.floor(clamp(v, 0, .999) * 21 / 7)) * ALIEN_SCALE[Math.floor(clamp(v, 0, .999) * 21) % 7];
+function tone(freq, o = {}) {
+  const a = ac(), t0 = a.currentTime + (o.when || 0), dur = o.dur || 1, g = a.createGain(); g.gain.setValueAtTime(.0001, t0); g.gain.exponentialRampToValueAtTime(o.gain || .16, t0 + (o.attack || .006)); g.gain.exponentialRampToValueAtTime(.0001, t0 + dur); g.connect(voiceOut());
+  const ratios = o.ratios || [...Array(o.partials || 1)].map((_, k) => k + 1);
+  ratios.forEach((r, k) => { const os = a.createOscillator(), pg = a.createGain(); os.type = o.type || 'sine'; const fq = freq * r * (1 + (Math.random() - .5) * (o.detune || 0)); os.frequency.setValueAtTime(fq, t0);
+    if (o.bend) os.frequency.exponentialRampToValueAtTime(Math.max(20, fq * (1 + o.bend)), t0 + dur); pg.gain.value = 1 / (k * k * .8 + 1); os.connect(pg); pg.connect(g); os.start(t0); os.stop(t0 + dur + .05); });
+  if (o.noise > 0) { const len = Math.floor(a.sampleRate * Math.min(dur, .7)), b = a.createBuffer(1, len, a.sampleRate), ch = b.getChannelData(0); for (let i = 0; i < len; i++) ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+    const s = a.createBufferSource(), ng = a.createGain(), fl = a.createBiquadFilter(); fl.type = 'bandpass'; fl.frequency.value = freq * (o.noiseAt || 2); fl.Q.value = 1.5; s.buffer = b; ng.gain.value = o.noise; s.connect(fl); fl.connect(ng); ng.connect(g); s.start(t0); }
+}
+
+/* touch: what happens depends on what you touched, where, and how far it has come */
+function gymTouch(x, y) {
+  const c = Gym.cur; if (!c) return; const fx = fxOf(c.slug), G = fx.geom, L = fx.life; if (!G || !L) return;
+  ac().resume(); const t = performance.now() / 1000, gr = G.growth, pure = clamp(.25 * gr + .75 * G.learned, 0, 1), rnd = Math.random;
+  const pole = G.poles.reduce((b, p) => { const dd = Math.hypot(p.x - x, p.y - y) / p.rad; return dd < b.d ? { d: dd, p } : b; }, { d: 1e9, p: null });
+  if (pole.p && pole.d < .85) {                                      // a void: it swallows, flinches, and answers from deep down
+    const lim = (c.limbs || []).find(l => l.id === pole.p.j), base = 41 * ALIEN_SCALE[pole.p.j % 7] * (1 + rnd() * .02);
+    tone(base, { dur: 1.6 + gr * 3, attack: .12, gain: .22, partials: 1 + Math.round(gr * 5), detune: (1 - pure) * .05, bend: -.12 * (1 - pure), noise: (1 - pure) * .25, noiseAt: 1.5 });
+    tone(base * (lim ? ALIEN_SCALE[(lim.count + 2) % 7] : 1.4815) * 2, { dur: 1 + gr * 2.5, attack: .3, gain: .07 * (.3 + pure), when: .08, detune: (1 - pure) * .03 });
+    L.startle = 1; fx.waves.push({ t0: t, o: pole.p.c }); return;
+  }
+  let best = -1, bd = 24 * 24; const H_ = fx.hits || []; for (let k = 0; k < H_.length; k += 3) { const dd = (H_[k + 1] - x) ** 2 + (H_[k + 2] - y) ** 2; if (dd < bd) { bd = dd; best = H_[k]; } }
+  if (best >= 0) {                                                   // a strand: it rings at that track's pitch, and its kin ring with it
+    const f = c.food[best], fq = noteOf(f.bright ?? .3) * (1 + (rnd() - .5) * .01);
+    tone(fq, { dur: .45 + gr * 2.6, gain: .2, type: pure > .5 ? 'sine' : 'triangle', partials: 1 + Math.round(gr * 4), detune: (1 - pure) * .045, bend: -(1 - pure) * .07, noise: (1 - pure) * .4 + .03, noiseAt: 3 });
+    if (gr > .3) tone(fq * ALIEN_SCALE[4], { dur: .4 + gr * 2, gain: .06 * gr, when: .06 + rnd() * .05, detune: (1 - pure) * .03 });
+    fx.pluck[best] = { t0: t, a: 1 }; let k2 = 0; c.food.forEach((o, j) => { if (j !== best && (o.limb || 0) === (f.limb || 0) && k2 < 14) { k2++; fx.pluck[j] = { t0: t + .05 + rnd() * .25, a: .12 + rnd() * .18 }; } });
+    return;
+  }
+  const near = pole.p && pole.d < 4.5, z2 = pole.p ? pole.p.z2 : 0;
+  if (near) {                                                        // the flow itself: a glassy chime, and a new eddy forms right there
+    const fq = 320 + rnd() * 900; tone(fq, { dur: .9 + gr * 2.2, gain: .12, ratios: [1, 2.76, 5.4, 8.93].slice(0, 2 + Math.round(gr * 2)), detune: (1 - pure) * .03, noise: (1 - pure) * .18, noiseAt: 4 });
+    const ax = [rnd() - .5, rnd() - .5, rnd() - .5], al = Math.hypot(...ax) || 1; fx.temps.push({ c: G.unproj(x, y, z2), ax: ax.map(v => v / al), s: rnd() > .5 ? 1 : -1, t0: t }); fx.waves.push({ t0: t, o: G.unproj(x, y, z2), soft: true }); return;
+  }
+  tone(700 + rnd() * 1400, { dur: .22 + gr * .3, gain: .07, bend: rnd() > .5 ? 1.2 : -.6, detune: 0 });   // empty space: a small sonar chirp, and it takes note of where
+  fx.pings.push({ x, y, t0: t }); L.sx = x; L.sy = y;
 }
 
 /* ---------- screen ---------- */
@@ -321,7 +319,7 @@ function gymBuild() {
     c ? h('div', { id: 'gym-caption' }, h('h1', {}, c.name), h('div', { id: 'gym-stats' })) : h('div', { id: 'gym-caption' }, h('h1', {}, 'no creatures yet'), h('div', {}, 'name one on the left and press hatch')));
   stage.addEventListener('mousemove', e => { const r = stage.getBoundingClientRect(); Gym.mouse = { x: e.clientX - r.left, y: e.clientY - r.top }; });
   stage.addEventListener('mouseleave', () => { Gym.mouse = null; });
-  stage.addEventListener('mousedown', e => { if (e.target.tagName === 'CANVAS') Gym.poke = true; });
+  stage.addEventListener('mousedown', e => { if (e.target.tagName === 'CANVAS') { const r = stage.getBoundingClientRect(); gymTouch(e.clientX - r.left, e.clientY - r.top); } });
 
   const right = h('div', { id: 'gym-right' });
   if (c) {
@@ -348,7 +346,7 @@ function gymBuild() {
         return h('div', { class: 'food-row' + (Gym.playing === f.name ? ' playing' : ''), style: `--c:hsl(${hueOf(f.bright ?? .3)},90%,60%)` }, h('button', { class: 'food-play', title: 'Play this track to the entity', onclick: () => gymPlay(c.slug, f.name) }, Gym.playing === f.name ? '■' : '▶'), h('div', {}, h('b', { title: f.name }, f.name), h('small', {}, `${Math.round(f.secs)}s · ~${Math.round(f.bpm || 0)} bpm · bass ${Math.round((f.low || 0) * 100)}% · bright ${Math.round((f.bright || 0) * 100)}%`), cap),
           h('button', { title: 'Take this track away', disabled: running, onclick: () => gymDo(() => api(`/api/gym/${c.slug}/food/${encodeURIComponent(f.name)}`, { method: 'DELETE' })) }, '×'));
       }) : h('p', { class: 'gym-note' }, 'Nothing yet. Drop audio files anywhere on this screen.')),
-      h('div', { class: 'acts' }, h('button', { disabled: running, onclick: () => { const i = $('#gym-pick'); i.value = ''; i.click(); } }, '+ feed files…'), h('button', { disabled: running, title: 'Pick a folder. Tracks are linked where they are, not copied.', onclick: gymPickFolder }, '+ feed a folder…')),
+      h('div', { class: 'acts' }, h('button', { disabled: running, onclick: () => { const i = $('#gym-pick'); i.value = ''; i.click(); } }, '+ feed audio or video…'), h('button', { disabled: running, title: 'Pick a folder. Tracks are linked where they are, not copied.', onclick: gymPickFolder }, '+ feed a folder…')),
       ...((c.limbs || []).length > 1 ? [h('h3', {}, 'limbs'),
         h('p', { class: 'gym-note' }, 'Tracks that sound alike grow together as one limb. Each limb learns its own word: put it in a caption to call that side of the creature.'),
         h('div', { class: 'limbs' }, c.limbs.map(l => h('div', { class: 'limb-row', style: `--c:hsl(${hueOf(l.mean.bright)},90%,60%)` }, h('i'), h('span', {}, l.tags.join(' · ')), h('small', {}, l.count + ' tracks'), h('code', { title: 'The trigger word of this limb' }, l.trigger))))] : []),
@@ -374,7 +372,7 @@ function gymBuild() {
       h('p', { class: 'gym-note' }, 'Training uses the Apple GPU and pauses the ace-step module. Stopping keeps the last checkpoint (saved every 5 epochs).'));
   }
   const keepPicker = $('#gym-picker'); if (keepPicker) stage.append(keepPicker);
-  el.replaceChildren(left, stage, right, h('input', { id: 'gym-pick', type: 'file', multiple: true, accept: 'audio/*,.wav,.mp3,.flac,.aiff,.aif,.ogg,.m4a', hidden: true, onchange: e => gymFeedFiles([...e.target.files]) }));
+  el.replaceChildren(left, stage, right, h('input', { id: 'gym-pick', type: 'file', multiple: true, accept: 'audio/*,video/*,.wav,.mp3,.flac,.aiff,.aif,.ogg,.m4a,.mp4,.mov,.mkv,.webm', hidden: true, onchange: e => gymFeedFiles([...e.target.files]) }));
 }
 
 /* delete with a second click instead of a system dialog */
@@ -418,14 +416,14 @@ function gymFolderPicker(res) {
       const gcb = h('input', { type: 'checkbox' }); gcb.checked = all; gcb.onchange = () => { fs.forEach(f => gcb.checked ? chosen.add(f.path) : chosen.delete(f.path)); draw(); };
       return h('div', { class: 'pick-group' }, h('label', { class: 'pick-head' }, gcb, h('b', {}, gname || '(top level)'), h('small', {}, fs.length + ' files')),
         fs.map(f => { const cb = h('input', { type: 'checkbox' }); cb.checked = chosen.has(f.path); cb.onchange = () => { cb.checked ? chosen.add(f.path) : chosen.delete(f.path); update(); };
-          return h('label', { class: 'pick-row', title: f.rel }, cb, h('span', {}, gname ? f.rel.slice(gname.length + 1) : f.rel), h('small', {}, `${fmt(f.secs)} · ${f.mb} MB`)); }));
+          return h('label', { class: 'pick-row', title: f.rel }, cb, h('span', {}, (f.video ? '▸ ' : '') + (gname ? f.rel.slice(gname.length + 1) : f.rel)), h('small', {}, `${fmt(f.secs)} · ${f.mb} MB`)); }));
     }));
     update();
   };
   minIn.oninput = filt.oninput = draw;
   const box = h('div', { id: 'gym-picker' },
     h('div', { class: 'drawer-head' }, h('span', {}, res.name), h('button', { onclick: () => box.remove() }, '×')),
-    h('p', { class: 'gym-note' }, `Found ${res.files.length} audio files. Tick the finished tracks that sound like the creature you want. Loops, stems and one-shots teach it less. Files are linked where they are, not copied.`),
+    h('p', { class: 'gym-note' }, `Found ${res.files.length} audio and video files (▸ marks videos: only their sound is used). Tick the finished tracks that sound like the creature you want. Loops, stems and one-shots teach it less. Files are linked where they are, not copied.`),
     h('div', { class: 'pick-tools' }, h('label', {}, h('span', {}, 'hide shorter than (s)'), minIn), filt,
       h('button', { onclick: () => { visible().forEach(f => chosen.add(f.path)); draw(); } }, 'all shown'), h('button', { onclick: () => { chosen.clear(); draw(); } }, 'none')),
     list, sum,

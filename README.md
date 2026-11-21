@@ -65,7 +65,7 @@ Stable Audio Open is gated: accept the license on its
 Press **◍ gym**. A creature is a LoRA adapter for ACE-Step, trained on audio you feed it.
 
 1. **Hatch** one by giving it a name.
-2. **Feed** it: drop your tracks on the gym screen, press `◍` on any result on the canvas, or use
+2. **Feed** it (audio or video files; only the sound is used): drop your tracks on the gym screen, press `◍` on any result on the canvas, or use
    **feed a folder** to scan a whole folder and tick the tracks you want (they are linked, not copied).
    10–30 tracks in one style is a good start. Describe its sound in tags, since good captions matter a lot.
 3. **Train** it. Training runs on the Apple GPU with ACE-Step's own trainer, saves a checkpoint every
@@ -74,17 +74,20 @@ Press **◍ gym**. A creature is a LoRA adapter for ACE-Step, trained on audio y
 
 To delete a creature, press the × on its row or *delete creature* in the gym (click twice to confirm). Your original audio is never touched.
 
-**What you see** is the entity: sound given a semi-physical form, drawn from what it ate and how far it has trained.
+**What you see** is the entity: a void creature made of sound. It has no body and no centre; it is a flow.
 
-- Every track is a **string** that vibrates as a standing wave and forks at the tip once trained (colour from brightness,
-  harmonics from tempo, swing from dynamics). New tracks sprout with a shockwave when you feed it.
-- Its body is nested **torus-knot membranes** inside a shell of **cymatic dust**: specks that settle on the nodal lines of a
-  standing wave. Bass, mids and treble orbit it as open ribbons. Marks of its own **script** appear on a spiral, one per ten epochs.
-- **It hears.** Press ▶ on a track in the food list, or play anything on the canvas: the ribbons trace the live spectrum,
-  the knots ring with the waveform, the body kicks on the beat, and the string of the playing track lights up.
-- **It behaves.** It wanders and breathes unevenly, gets curious about your pointer or ignores it, flinches if you move fast
-  near it or poke it, and single strings twitch on their own.
-- While it trains, light runs down every string into the core, and the knots settle as the loss falls.
+- **Voids:** dark lobes that wander, merge and part. Light bends around them.
+- **Currents:** every track is a family of strands streaming through the field the voids create (colour from brightness,
+  weight from bass). Untrained, the field is turbulent smoke. As it learns, the strands settle into folded orbits.
+  New tracks stream in when you feed it.
+- **Dust and script:** thousands of specks ride the same flow, so it never repeats. Marks of its own script appear near
+  the voids, one per ten epochs.
+- **It hears.** Press ▶ on a track in the food list, or play anything on the canvas: the sound stirs the field, shakes the
+  strands with the live waveform, and the voids kick on the beat.
+- **It behaves.** It wanders, breathes unevenly, and drifts toward your pointer when it is curious.
+- **It answers touch, in its own voice.** A void swallows and answers with a deep tone. A strand rings at its track's pitch,
+  and its kin ring with it. The open flow chimes and forms a new eddy where you touched. Empty space gets a small chirp.
+  Untrained, the voice is noisy, detuned and short. Training makes it purer, richer and longer.
 
 **Limbs.** Tracks that sound alike are grouped automatically (k-means on tempo, bass, brightness, dynamics and noise) and
 grow together as one limb. Each limb gets a description and its own trigger word, which goes into the training

@@ -165,7 +165,7 @@ def feed(slug: str, src: Path, name: str) -> dict:
     while dst.exists():
         dst = food / f"{stem}-{i}.wav"
         i += 1
-    r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-ar", "48000", "-ac", "2", str(dst)], capture_output=True, text=True)
+    r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vn", "-ar", "48000", "-ac", "2", str(dst)], capture_output=True, text=True)
     if r.returncode != 0 or not dst.exists():
         raise RuntimeError("Could not read that audio file. " + r.stderr.strip()[-200:])
     f = dict(features(dst), name=dst.name, caption="", fed=time.strftime("%Y-%m-%d %H:%M:%S"))
@@ -241,7 +241,17 @@ def auto_caption(c: dict, f: dict) -> str:
     return f.get("caption") or ", ".join(p for p in parts if p) or Path(f["name"]).stem
 
 
-AUDIO_EXT = {".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".m4a", ".opus"}
+VIDEO_EXT = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi"}            # videos are fine: only their sound is used
+AUDIO_EXT = {".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".m4a", ".opus"} | VIDEO_EXT
+
+
+def _probe_secs(f: Path):
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "format=duration", "-of", "csv=p=0", str(f)],
+                           capture_output=True, text=True, timeout=8)
+        return round(float(r.stdout.strip()), 1)
+    except Exception:
+        return None
 
 
 def scan(folder: str) -> dict:
@@ -260,10 +270,12 @@ def scan(folder: str) -> dict:
             info = sf.info(str(f))
             secs = round(info.frames / info.samplerate, 1)
         except Exception:
-            secs = None
+            secs = _probe_secs(f)
+            if secs is None and f.suffix.lower() in VIDEO_EXT:
+                continue                                 # a video with no sound in it
         rel = f.relative_to(root)
         files.append({"path": str(f), "rel": str(rel), "group": rel.parts[0] if len(rel.parts) > 1 else "", "secs": secs,
-                      "mb": round(f.stat().st_size / 1e6, 1)})
+                      "mb": round(f.stat().st_size / 1e6, 1), "video": f.suffix.lower() in VIDEO_EXT})
     return {"folder": str(root), "name": root.name, "files": files}
 
 
