@@ -322,6 +322,29 @@ def create_app():
         subprocess.run(["open", "-R", str(f)])
         return {"path": str(f), "name": f.name}
 
+    @app.post("/api/gym/{slug}/film")
+    async def gym_film(slug: str, request: Request):
+        data = await request.body()
+        is_mp4, is_webm = data[4:8] == b"ftyp", data[:4] == b"\x1a\x45\xdf\xa3"
+        if not (is_mp4 or is_webm) or len(data) > 2_000_000_000:
+            raise HTTPException(400, "not a video")
+        d = OUTPUTS_DIR / "recordings"
+        d.mkdir(parents=True, exist_ok=True)
+        stem = f"{gym.slugify(slug)}-film-{time.strftime('%Y%m%d-%H%M%S')}"
+        raw = d / (stem + (".raw.mp4" if is_mp4 else ".raw.webm"))
+        raw.write_bytes(data)
+        out = d / (stem + ".mp4")
+        # the browser's own recording is tidied into a normal MP4: H.264 picture, AAC sound, playable everywhere
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(raw), "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                            "-crf", "17", "-preset", "fast", "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", str(out)], capture_output=True, text=True)
+        if r.returncode or not out.exists():
+            out = raw                                   # keep what the browser made rather than lose the take
+        else:
+            raw.unlink(missing_ok=True)
+        secs = _probe(out)
+        subprocess.run(["open", "-R", str(out)])
+        return {"path": str(out), "name": out.name, "seconds": secs}
+
     @app.post("/api/gym/{slug}/tape")
     async def gym_tape(slug: str, request: Request):
         data = await request.body()
@@ -334,6 +357,13 @@ def create_app():
         subprocess.run(["open", "-R", str(f)])
         rate = int.from_bytes(data[28:32], "little") or 1
         return {"path": str(f), "name": f.name, "seconds": round((len(data) - 44) / rate, 1)}
+
+    def _probe(f: Path) -> float:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(f)], capture_output=True, text=True)
+        try:
+            return round(float(r.stdout.strip()), 1)
+        except ValueError:
+            return 0.0
 
     def _rec_dir(slug: str, rid: str) -> Path:
         if not re.fullmatch(r"\d{8}-\d{6}", rid):

@@ -147,14 +147,17 @@ longer and truer. (The app keeps a 12-second mono excerpt of each fed track in `
 style, through the creature's adapter once it has trained, and the creature performs it. The clip is saved to the library.
 It cannot sing while it trains.
 
-**Capture.** *◉ capture* stops time and saves a still far sharper than the screen (up to 3840 px, averaged over 36 frames) to
+**Capture.** *◉ still* stops time and saves a still far sharper than the screen (up to 3840 px, averaged over 36 frames) to
 `outputs/captures/`.
 
-**Record a time-lapse.** *● record* takes a frame at intervals and joins them into a video in `outputs/recordings/`. Start it, then
+**Record a time-lapse.** *● time-lapse* takes a frame at intervals and joins them into a video in `outputs/recordings/`. Start it, then
 start training: it spreads about 1600 frames over the run (roughly a minute of video), holds on the result for two seconds
 when training ends, and finishes by itself. Each frame is drawn from a separate copy of the creature on its own clock, so in
 the video it moves at its natural pace while its growth is sped up. Keep the vivarium open while it records. There is no
 sound in the video.
+
+**Film it.** *● film* records the picture at normal speed together with the sound, as one MP4 in `outputs/recordings/`: use it to
+record yourself playing the creature. (*● time-lapse* is the silent, sped-up one; *◉ still* is a single sharp image.)
 
 **Record its sound.** *● sound* records everything you hear from it (touches, drags, strikes, songs, tracks you play) and saves a
 16-bit stereo WAV to `outputs/recordings/` when you stop. It is separate from the time-lapse, which has no sound.

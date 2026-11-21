@@ -370,7 +370,7 @@ function gymBuild() {
       h('span', { class: 'row-del', data: { label: '×' }, title: 'Delete this creature', onclick: e => { e.stopPropagation(); gymDelete(e.currentTarget, x); } }, '×')))),
     h('div', { class: 'gym-new' }, nameIn, hatchB));
 
-  const stage = h('div', { id: 'gym-stage' }, nebCanvas(), h('div', { id: 'gym-fps' }), h('button', { id: 'gym-shot', title: 'Save a still of it, far sharper than the screen (up to 3840 px), to outputs/captures', onclick: () => nebCapture() }, '◉ capture'), h('button', { id: 'gym-rec', title: 'Record a time-lapse: frames are taken at intervals and joined into a video in outputs/recordings. Start it, then start training, and it stops by itself when training ends. Keep the vivarium open.', onclick: () => gymRecToggle() }, Gym.rec ? '■ stop recording' : '● record'), h('button', { id: 'gym-tape', title: 'Record the sound: everything you hear from it (touches, drags, strikes, songs, tracks you play) is saved as a WAV in outputs/recordings.', onclick: () => tapeToggle() }, TAPE.on ? '■ stop sound' : '● sound'), h('div', { id: 'gym-train', hidden: true }),
+  const stage = h('div', { id: 'gym-stage' }, nebCanvas(), h('div', { id: 'gym-fps' }), h('div', { id: 'gym-tools' }, h('button', { id: 'gym-shot', title: 'Save a still of it, far sharper than the screen (up to 3840 px), to outputs/captures', onclick: () => nebCapture() }, '◉ still'), h('button', { id: 'gym-rec', title: 'Record a time-lapse: frames are taken at intervals and joined into a video in outputs/recordings. Start it, then start training, and it stops by itself when training ends. Keep the vivarium open.', onclick: () => gymRecToggle() }, Gym.rec ? '■ stop time-lapse' : '● time-lapse'), h('button', { id: 'gym-tape', title: 'Record the sound: everything you hear from it (touches, drags, strikes, songs, tracks you play) is saved as a WAV in outputs/recordings.', onclick: () => tapeToggle() }, TAPE.on ? '■ stop sound' : '● sound'), h('button', { id: 'gym-film', title: 'Film it: records the picture at normal speed together with the sound, as one video in outputs/recordings. Use it to record yourself playing the creature.', onclick: () => filmToggle() }, FILM.on ? '■ stop filming' : '● film')), h('div', { id: 'gym-train', hidden: true }),
     c ? h('div', { id: 'gym-caption' }, h('h1', {}, c.name), h('div', { id: 'gym-stats' })) : h('div', { id: 'gym-caption' }, h('h1', {}, 'no creatures yet'), h('div', {}, 'name one on the left and press hatch')));
   stage.addEventListener('mousemove', e => { const r = stage.getBoundingClientRect(); Gym.mouse = { x: e.clientX - r.left, y: e.clientY - r.top }; });
   stage.addEventListener('mouseleave', () => { Gym.mouse = null; });
@@ -448,6 +448,28 @@ function gymBreed(c, e) {
     gymDo(() => api('/api/gym_breed', { json: { a: c.slug, b: sel.value, name } })).then(() => toast(`“${name}” is born`)); } }, 'breed');
   host.append(h('div', { class: 'breed-form', style: 'display:flex;gap:6px;margin-top:8px;flex-basis:100%' }, sel, nm, go));
 }
+/* ---------- film it ----------
+   Picture and sound together, at normal speed: the canvas as a video stream plus the same audio point the sound recorder
+   uses, encoded by the browser as you go and saved as one video when you stop. */
+const FILM = { on: false };
+function filmToggle() { FILM.on ? filmStop() : filmStart(); }
+function filmLabel() { const b = $('#gym-film'); if (b) b.textContent = FILM.on ? '■ stop filming' : '● film'; }
+function filmStart() {
+  const cv = NEB.canvas; if (!NEB.ok || !cv || !cv.captureStream || typeof MediaRecorder === 'undefined') return toast('this window cannot record video', true);
+  const a = ac(); a.resume(); const dest = a.createMediaStreamDestination(); bus().connect(dest);
+  const stream = new MediaStream([...cv.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
+  const type = ['video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t));
+  let mr; try { mr = new MediaRecorder(stream, Object.assign({ videoBitsPerSecond: 18e6, audioBitsPerSecond: 256e3 }, type ? { mimeType: type } : {})); } catch (e) { try { bus().disconnect(dest); } catch {} return toast('could not start filming: ' + e.message, true); }
+  const chunks = [], slug = Gym.cur ? Gym.cur.slug : 'creature';
+  mr.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  mr.onstop = async () => { try { bus().disconnect(dest); } catch {} stream.getTracks().forEach(t => t.stop());
+    const blob = new Blob(chunks, { type: mr.mimeType || type || 'video/mp4' }); if (blob.size < 2000) return toast('nothing was filmed', true);
+    toast('saving the film…');
+    try { const r = await fetch(`/api/gym/${slug}/film`, { method: 'POST', headers: { 'Content-Type': blob.type || 'video/mp4' }, body: blob }).then(x => x.json()); toast(r.name ? `saved ${r.name} (${r.seconds}s)` : 'could not save the film: ' + (r.detail || ''), !r.name); } catch (e) { toast('could not save the film: ' + e.message, true); } };
+  mr.start(1000); FILM.on = true; FILM.mr = mr; FILM.stopAt = setTimeout(filmStop, 600000); filmLabel(); toast('filming with sound. Play it. Ten minutes at most.');
+}
+function filmStop() { if (!FILM.on) return; FILM.on = false; clearTimeout(FILM.stopAt); filmLabel(); try { FILM.mr.stop(); } catch {} }
+
 /* ---------- record its sound ----------
    Everything that plays goes through one point (the analyser the creature listens with). While this is on, that signal is
    copied, and when you stop it is saved as a 16-bit stereo WAV. */
@@ -483,7 +505,7 @@ async function gymRecToggle() {
     Gym.rec = { slug: c.slug, id: r.id, i: 0, sent: 0, every: 0, next: 0, vt: performance.now() / 1000, seen: false, tail: -1, busy: false };
     toast('recording. Start training whenever you like; it stops by itself when training ends.'); gymRecLabel(); } catch (e) { toast('could not start recording: ' + e.message, true); }
 }
-function gymRecLabel() { const b = $('#gym-rec'); if (b) b.textContent = Gym.rec ? '■ stop recording' : '● record'; }
+function gymRecLabel() { const b = $('#gym-rec'); if (b) b.textContent = Gym.rec ? '■ stop time-lapse' : '● time-lapse'; }
 async function gymRecStop() {
   const r = Gym.rec; if (!r) return; Gym.rec = null; gymRecLabel();
   if (!r.i) { toast('nothing was recorded'); return; }

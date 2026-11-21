@@ -352,3 +352,7 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 
 #gym-tape { position: absolute; top: 9px; left: 250px; z-index: 3; font: 9.5px var(--mono); letter-spacing: .12em; padding: 4px 9px; opacity: .55; }
 #gym-tape:hover { opacity: 1; }
+
+#gym-tools { position: absolute; top: 9px; left: 14px; z-index: 3; display: flex; gap: 6px; }
+#gym-tools button { position: static; font: 9.5px var(--mono); letter-spacing: .12em; padding: 4px 9px; opacity: .55; }
+#gym-tools button:hover { opacity: 1; }
