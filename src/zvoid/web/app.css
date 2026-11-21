@@ -349,3 +349,6 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 
 #gym-rec { position: absolute; top: 9px; left: 112px; z-index: 3; font: 9.5px var(--mono); letter-spacing: .12em; padding: 4px 9px; opacity: .55; }
 #gym-rec:hover { opacity: 1; }
+
+#gym-tape { position: absolute; top: 9px; left: 250px; z-index: 3; font: 9.5px var(--mono); letter-spacing: .12em; padding: 4px 9px; opacity: .55; }
+#gym-tape:hover { opacity: 1; }

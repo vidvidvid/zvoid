@@ -322,6 +322,19 @@ def create_app():
         subprocess.run(["open", "-R", str(f)])
         return {"path": str(f), "name": f.name}
 
+    @app.post("/api/gym/{slug}/tape")
+    async def gym_tape(slug: str, request: Request):
+        data = await request.body()
+        if not (data[:4] == b"RIFF" and data[8:12] == b"WAVE") or len(data) > 400_000_000:
+            raise HTTPException(400, "not a WAV")
+        d = OUTPUTS_DIR / "recordings"
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / f"{gym.slugify(slug)}-sound-{time.strftime('%Y%m%d-%H%M%S')}.wav"
+        f.write_bytes(data)
+        subprocess.run(["open", "-R", str(f)])
+        rate = int.from_bytes(data[28:32], "little") or 1
+        return {"path": str(f), "name": f.name, "seconds": round((len(data) - 44) / rate, 1)}
+
     def _rec_dir(slug: str, rid: str) -> Path:
         if not re.fullmatch(r"\d{8}-\d{6}", rid):
             raise HTTPException(400, "bad recording id")

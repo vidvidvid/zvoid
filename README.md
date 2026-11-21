@@ -156,6 +156,9 @@ when training ends, and finishes by itself. Each frame is drawn from a separate 
 the video it moves at its natural pace while its growth is sped up. Keep the vivarium open while it records. There is no
 sound in the video.
 
+**Record its sound.** *● sound* records everything you hear from it (touches, drags, strikes, songs, tracks you play) and saves a
+16-bit stereo WAV to `outputs/recordings/` when you stop. It is separate from the time-lapse, which has no sound.
+
 **Breed.** Two trained creatures can have a child (*breed…*). Its adapter is the exact average of its parents' (their low-rank
 matrices are stacked, so nothing is retrained), it inherits links to all of their food, and it can be trained further.
 Both parents need the same capacity settings.

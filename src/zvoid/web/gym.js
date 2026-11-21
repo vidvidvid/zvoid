@@ -370,7 +370,7 @@ function gymBuild() {
       h('span', { class: 'row-del', data: { label: '×' }, title: 'Delete this creature', onclick: e => { e.stopPropagation(); gymDelete(e.currentTarget, x); } }, '×')))),
     h('div', { class: 'gym-new' }, nameIn, hatchB));
 
-  const stage = h('div', { id: 'gym-stage' }, nebCanvas(), h('div', { id: 'gym-fps' }), h('button', { id: 'gym-shot', title: 'Save a still of it, far sharper than the screen (up to 3840 px), to outputs/captures', onclick: () => nebCapture() }, '◉ capture'), h('button', { id: 'gym-rec', title: 'Record a time-lapse: frames are taken at intervals and joined into a video in outputs/recordings. Start it, then start training, and it stops by itself when training ends. Keep the vivarium open.', onclick: () => gymRecToggle() }, Gym.rec ? '■ stop recording' : '● record'), h('div', { id: 'gym-train', hidden: true }),
+  const stage = h('div', { id: 'gym-stage' }, nebCanvas(), h('div', { id: 'gym-fps' }), h('button', { id: 'gym-shot', title: 'Save a still of it, far sharper than the screen (up to 3840 px), to outputs/captures', onclick: () => nebCapture() }, '◉ capture'), h('button', { id: 'gym-rec', title: 'Record a time-lapse: frames are taken at intervals and joined into a video in outputs/recordings. Start it, then start training, and it stops by itself when training ends. Keep the vivarium open.', onclick: () => gymRecToggle() }, Gym.rec ? '■ stop recording' : '● record'), h('button', { id: 'gym-tape', title: 'Record the sound: everything you hear from it (touches, drags, strikes, songs, tracks you play) is saved as a WAV in outputs/recordings.', onclick: () => tapeToggle() }, TAPE.on ? '■ stop sound' : '● sound'), h('div', { id: 'gym-train', hidden: true }),
     c ? h('div', { id: 'gym-caption' }, h('h1', {}, c.name), h('div', { id: 'gym-stats' })) : h('div', { id: 'gym-caption' }, h('h1', {}, 'no creatures yet'), h('div', {}, 'name one on the left and press hatch')));
   stage.addEventListener('mousemove', e => { const r = stage.getBoundingClientRect(); Gym.mouse = { x: e.clientX - r.left, y: e.clientY - r.top }; });
   stage.addEventListener('mouseleave', () => { Gym.mouse = null; });
@@ -448,6 +448,30 @@ function gymBreed(c, e) {
     gymDo(() => api('/api/gym_breed', { json: { a: c.slug, b: sel.value, name } })).then(() => toast(`“${name}” is born`)); } }, 'breed');
   host.append(h('div', { class: 'breed-form', style: 'display:flex;gap:6px;margin-top:8px;flex-basis:100%' }, sel, nm, go));
 }
+/* ---------- record its sound ----------
+   Everything that plays goes through one point (the analyser the creature listens with). While this is on, that signal is
+   copied, and when you stop it is saved as a 16-bit stereo WAV. */
+const TAPE = { on: false };
+function tapeToggle() { TAPE.on ? tapeStop() : tapeStart(); }
+function tapeLabel() { const b = $('#gym-tape'); if (b) b.textContent = TAPE.on ? '■ stop sound' : '● sound'; }
+function tapeStart() {
+  const a = ac(); a.resume(); const n = a.createScriptProcessor(4096, 2, 2), mute = a.createGain(); mute.gain.value = 0;
+  TAPE.L = []; TAPE.R = []; TAPE.len = 0; TAPE.slug = Gym.cur ? Gym.cur.slug : 'creature';
+  n.onaudioprocess = e => { const ib = e.inputBuffer, l = ib.getChannelData(0), r = ib.numberOfChannels > 1 ? ib.getChannelData(1) : l; TAPE.L.push(new Float32Array(l)); TAPE.R.push(new Float32Array(r)); TAPE.len += l.length;
+    if (TAPE.len > a.sampleRate * 900) tapeStop(); };                                    // fifteen minutes at most
+  bus().connect(n); n.connect(mute); mute.connect(a.destination); TAPE.node = n; TAPE.mute = mute; TAPE.on = true; tapeLabel(); toast('recording sound. Touch it, drag it, play something.');
+}
+async function tapeStop() {
+  if (!TAPE.on) return; TAPE.on = false; tapeLabel();
+  try { bus().disconnect(TAPE.node); } catch {} try { TAPE.node.disconnect(); TAPE.mute.disconnect(); } catch {} TAPE.node.onaudioprocess = null;
+  const n = TAPE.len, sr = ac().sampleRate; if (n < sr * .2) return toast('nothing was recorded');
+  const buf = new ArrayBuffer(44 + n * 4), v = new DataView(buf), w = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 4, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 2, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 4, true); v.setUint16(32, 4, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 4, true);
+  let o = 44; for (let k = 0; k < TAPE.L.length; k++) { const l = TAPE.L[k], r = TAPE.R[k]; for (let i = 0; i < l.length; i++) { v.setInt16(o, Math.max(-1, Math.min(1, l[i])) * 32767, true); v.setInt16(o + 2, Math.max(-1, Math.min(1, r[i])) * 32767, true); o += 4; } }
+  TAPE.L = TAPE.R = null;
+  try { const r = await fetch(`/api/gym/${TAPE.slug}/tape`, { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: buf }).then(x => x.json()); toast(r.name ? `saved ${r.name} (${r.seconds}s)` : 'could not save the sound', !r.name); } catch (e) { toast('could not save the sound: ' + e.message, true); }
+}
+
 /* ---------- time-lapse ----------
    While it is on, a frame is taken at intervals and the frames are joined into a video. Each frame is drawn from a separate
    copy of the creature on a clock that advances one video frame at a time, so in the video it moves at its natural pace
