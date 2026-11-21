@@ -652,7 +652,7 @@ function nebFrame(c, t, mouse, onScreen) {
   const pointer = mouse ? unproj(L.sx, L.sy, dist) : null;
   N.slots.forEach((s, j) => {
     const on = j < K, limb = limbs && limbs[j], share = limb ? limb.count / n : 1 / K;
-    const yy = K > 1 ? 1 - 2 * (j + .5) / K : 0, rr = Math.sqrt(1 - yy * yy), ph = j * 2.39996 + d.bright * 9 + d.low * 5 + d.bpm * .021 + d.seed * .6, base = [Math.cos(ph) * rr, yy * .75, Math.sin(ph) * rr];
+    const yy = K > 1 ? clamp(1 - 2 * (j + .5) / K, -1, 1) : 0, rr = Math.sqrt(Math.max(0, 1 - yy * yy)), ph = j * 2.39996 + d.bright * 9 + d.low * 5 + d.bpm * .021 + d.seed * .6, base = [Math.cos(ph) * rr, yy * .75, Math.sin(ph) * rr];
     const sm_ = limb ? limb.mean : d, S_ = { noise: clamp((sm_.noise ?? .2) * 1.25, 0, 1), dyn: clamp(((sm_.dyn ?? .3) - .15) * 1.8, 0, 1), bright: clamp(((sm_.bright ?? .3) - .12) * 2.2, 0, 1), low: clamp(((sm_.low ?? .3) - .35) * 1.9, 0, 1), bpm: clamp(((sm_.bpm ?? 100) - 65) / 110, 0, 1), loud: clamp(sm_.loud ?? .5, 0, 1) };   // this limb's sound, stretched so real music spans the range
     const wn = nvec(t * .045, j * 13 + sd), an = nvec(t * .038, j * 29 + sd + 50), spread = n ? (.75 + .45 * d.growth) * (.78 + .55 * S_.dyn) : 0;
     const tp = [base[0] * spread + wn[0] * .45, base[1] * spread + wn[1] * .45 - .5, base[2] * spread + wn[2] * .45];
@@ -665,7 +665,9 @@ function nebFrame(c, t, mouse, onScreen) {
     const tl = n ? (1.1 + 2.0 * d.growth + .5 * clamp(d.minutes / 30, 0, 1)) * (.55 + .9 * Math.sqrt(share)) * (1 + .06 * (L.breath - .5)) * (.72 + .75 * S_.bright) * (1.2 - .42 * S_.low) * (.86 + .28 * S_.loud) : .5;
     const trd = (n ? (.4 + .5 * Math.sqrt(share)) * (.7 + .85 * S_.low) * (1.12 - .4 * S_.bright) * (.86 + .28 * S_.loud) : .45) * (1 + (au ? au.bass * .38 : 0) + kick * .1) * (1 - .18 * L.startle) * (1 + s.ring * .22 * Math.sin(t * 19));
     const tc = hsl2rgb(hueOf(limb ? limb.mean.bright : d.bright) + (limb ? 0 : j * 24) + noise(t * .02 + j + sd) * 14, .72, .56), tw = on ? (limb || !limbs ? 1 : .6) : 0, e = N.fresh ? 1 : ease;
-    for (let k = 0; k < 3; k++) { s.p[k] += (tp[k] - s.p[k]) * e; s.a[k] += (ta[k] - s.a[k]) * e; s.col[k] += (tc[k] - s.col[k]) * e; }
+    for (let k = 0; k < 3; k++) { if (!isFinite(s.p[k])) s.p[k] = tp[k]; if (!isFinite(s.a[k])) s.a[k] = ta[k]; if (!isFinite(s.col[k])) s.col[k] = tc[k];
+      s.p[k] += (tp[k] - s.p[k]) * e; s.a[k] += (ta[k] - s.a[k]) * e; s.col[k] += (tc[k] - s.col[k]) * e; }
+    if (!isFinite(s.len)) s.len = tl; if (!isFinite(s.rad)) s.rad = trd; if (!isFinite(s.w)) s.w = 0;
     [S_.noise, S_.dyn, S_.bright, S_.low, S_.bpm, clamp(share * K * .5, 0, 1)].forEach((v, k) => { s.tr[k] += ((n ? v : s.tr[k]) - s.tr[k]) * e; });
     s.len += (tl - s.len) * e * .6; s.rad += (trd - s.rad) * Math.min(1, e * 4); s.w += (tw - s.w) * e; s.ring *= Math.exp(-dt * 2.2);
   });
