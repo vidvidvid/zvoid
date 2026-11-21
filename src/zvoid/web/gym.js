@@ -193,10 +193,31 @@ function gymFx(c, at) {
    Synthesised on the spot and sent through the same analyser, so it also reacts to its own sound.
    Untrained it is noisy, detuned and short of breath. Training makes it purer, richer in overtones and longer. */
 let ECHO = null;
-function voiceOut() {
-  if (!ECHO) { const a = ac(), dl = a.createDelay(1), fb = a.createGain(), lp = a.createBiquadFilter(), inp = a.createGain(); dl.delayTime.value = .31; fb.gain.value = .42; lp.type = 'lowpass'; lp.frequency.value = 2600;
-    inp.connect(bus()); inp.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(bus()); ECHO = inp; ECHO.dl = dl; ECHO.fb = fb; }
-  return ECHO;
+/* The space it answers in is alive too. Two delay lines feed each other, their times drift like a worn tape, their tone and
+   length wander, and every sound decides for itself how much of that space it enters: some stay dry and close, some trail off
+   for a long time. So the same touch never comes back the same way twice. */
+const ECHO_SENDS = [.05, .28, .62, 1];
+function voiceOut(send) {
+  if (!ECHO) { const a = ac(), mk = () => a.createGain(), dlA = a.createDelay(1.5), dlB = a.createDelay(1.5), fbA = mk(), fbB = mk(), xAB = mk(), xBA = mk(), lpA = a.createBiquadFilter(), lpB = a.createBiquadFilter(), wet = mk(), inB = mk();
+    dlA.delayTime.value = .31; dlB.delayTime.value = .19; fbA.gain.value = .42; fbB.gain.value = .3; xAB.gain.value = .22; xBA.gain.value = .15; inB.gain.value = .5; wet.gain.value = 1;
+    lpA.type = lpB.type = 'lowpass'; lpA.frequency.value = 2600; lpB.frequency.value = 1900;
+    dlA.connect(lpA); lpA.connect(fbA); fbA.connect(dlA); lpA.connect(xAB); xAB.connect(dlB); lpA.connect(wet);
+    inB.connect(dlB); dlB.connect(lpB); lpB.connect(fbB); fbB.connect(dlB); lpB.connect(xBA); xBA.connect(dlA); lpB.connect(wet); wet.connect(bus());
+    for (const [par, hz, depth] of [[dlA.delayTime, .13, .0035], [dlA.delayTime, .31, .0012], [dlB.delayTime, .09, .005], [dlB.delayTime, .47, .0009]]) {   // slow, uneven wobbles of the delay times: a faint drift in pitch, never a loop you can count
+      const o = a.createOscillator(), g = mk(); o.frequency.value = hz * (.8 + Math.random() * .4); g.gain.value = depth; o.connect(g); g.connect(par); o.start(); }
+    const ins = ECHO_SENDS.map(lv => { const i = mk(), sg = mk(); sg.gain.value = lv; i.connect(bus()); i.connect(sg); sg.connect(dlA); sg.connect(inB); i.dl = dlA; i.fb = fbA; return i; });
+    ECHO = { ins, dl: dlA, fb: fbA, base: .42, w: [0, 0, 0, 0] };
+    setInterval(() => {                                                                               // its length, its tone and the second line's timing wander by themselves
+      if (a.state !== 'running') return; const t = a.currentTime, W = ECHO.w, step = (i, k) => (W[i] = clamp(W[i] * .9 + (Math.random() - .5) * k, -1, 1));
+      fbA.gain.setTargetAtTime(clamp(ECHO.base * (1 + .55 * step(0, .5)), .04, .72), t, .5); fbB.gain.setTargetAtTime(clamp(.3 + .3 * step(1, .5), .05, .6), t, .5);
+      lpA.frequency.setTargetAtTime(2400 * Math.pow(2, step(2, .5)), t, .6); lpB.frequency.setTargetAtTime(1700 * Math.pow(2, step(3, .5)), t, .6);
+      if (Math.random() < .06) dlB.delayTime.setTargetAtTime(clamp(dlA.delayTime.value * [.5, .62, .75, 1.33, 1.5, 2][Math.floor(Math.random() * 6)], .04, 1.2), t, .35);   // now and then the second line slides to a new place
+    }, 450);
+  }
+  let k = 0;
+  if (send == null) { const r = Math.random(); k = r < .3 ? 0 : r < .74 ? 1 : r < .93 ? 2 : 3; }     // left to itself: often close, usually some, sometimes a long tail
+  else { let bd = 9; ECHO_SENDS.forEach((lv, i) => { if (Math.abs(lv - send) < bd) { bd = Math.abs(lv - send); k = i; } }); }
+  return ECHO.ins[k];
 }
 /* ---------- its memory ----------
    Its real voice is made of what it ate: short excerpts of its own tracks, played back as overlapping grains.
@@ -218,7 +239,7 @@ function grainOne(buf, o = {}) {
   const a = ac(), t0 = a.currentTime + (o.when || 0), dur = Math.min(o.dur || .25, buf.duration * .9), src = a.createBufferSource(), g = a.createGain(), rate = o.rate || 1;
   src.buffer = buf; src.playbackRate.value = rate; const off = clamp((o.pos ?? Math.random()) * buf.duration, 0, Math.max(0, buf.duration - dur * rate - .01)), at = Math.min(dur * .4, o.attack || .03);
   g.gain.setValueAtTime(.0001, t0); g.gain.exponentialRampToValueAtTime(o.gain || .3, t0 + at); g.gain.setValueAtTime(o.gain || .3, t0 + dur * .55); g.gain.exponentialRampToValueAtTime(.0001, t0 + dur);
-  src.connect(g); g.connect(voiceOut()); src.start(t0, off, dur * rate + .05); src.stop(t0 + dur + .1);
+  src.connect(g); g.connect(voiceOut(o.echo)); src.start(t0, off, dur * rate + .05); src.stop(t0 + dur + .1);
 }
 /* a cloud of grains from one track. pure 0..1 = how well it remembers. Returns false if that track is not in memory yet. */
 function grainCloud(slug, name, o = {}) {
@@ -231,7 +252,7 @@ function grainCloud(slug, name, o = {}) {
 const ALIEN_SCALE = [1, 1.0802, 1.1905, 1.3333, 1.4815, 1.6071, 1.8];        // steps of an unfamiliar tuning
 const noteOf = v => 98 * Math.pow(2, Math.floor(clamp(v, 0, .999) * 21 / 7)) * ALIEN_SCALE[Math.floor(clamp(v, 0, .999) * 21) % 7];
 function tone(freq, o = {}) {
-  const a = ac(), t0 = a.currentTime + (o.when || 0), dur = o.dur || 1, g = a.createGain(); g.gain.setValueAtTime(.0001, t0); g.gain.exponentialRampToValueAtTime(o.gain || .16, t0 + (o.attack || .006)); g.gain.exponentialRampToValueAtTime(.0001, t0 + dur); g.connect(voiceOut());
+  const a = ac(), t0 = a.currentTime + (o.when || 0), dur = o.dur || 1, g = a.createGain(); g.gain.setValueAtTime(.0001, t0); g.gain.exponentialRampToValueAtTime(o.gain || .16, t0 + (o.attack || .006)); g.gain.exponentialRampToValueAtTime(.0001, t0 + dur); g.connect(voiceOut(o.echo));
   const ratios = o.ratios || [...Array(o.partials || 1)].map((_, k) => k + 1);
   ratios.forEach((r, k) => { const os = a.createOscillator(), pg = a.createGain(); os.type = o.type || 'sine'; const fq = freq * r * (1 + (Math.random() - .5) * (o.detune || 0)); os.frequency.setValueAtTime(fq, t0);
     if (o.bend) os.frequency.exponentialRampToValueAtTime(Math.max(20, fq * (1 + o.bend)), t0 + dur); pg.gain.value = 1 / (k * k * .8 + 1); os.connect(pg); pg.connect(g); os.start(t0); os.stop(t0 + dur + .05); });

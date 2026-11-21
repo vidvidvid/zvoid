@@ -983,8 +983,8 @@ function nebRespond(fx, hit, base) {
   let v; do { v = GESTURES[Math.floor(rnd() * GESTURES.length)]; } while (v === NEB.lastGesture || (hit.kind === 'space' && (v === 'still' || v === 'reverse')));
   NEB.lastGesture = v;
   const E = voiceOut();                               // the room it answers in changes too: short and tight, or long and smeared
-  E.dl.delayTime.setTargetAtTime({ taps: .31, gallop: .11, rise: .19, fall: .23, shimmer: .52, swarm: .07, reverse: .4, still: .6 }[v], a.currentTime, .04);
-  E.fb.gain.setTargetAtTime({ taps: .3, gallop: .2, rise: .25, fall: .25, shimmer: .5, swarm: .35, reverse: .15, still: .08 }[v], a.currentTime, .04);
+  E.dl.delayTime.setTargetAtTime({ taps: .31, gallop: .11, rise: .19, fall: .23, shimmer: .52, swarm: .07, reverse: .4, still: .6 }[v] * (.8 + rnd() * .45), a.currentTime, .04 + rnd() * .25);   // each kind of answer has its own room, never quite the same size, and sometimes it slides into it
+  ECHO.base = { taps: .3, gallop: .2, rise: .25, fall: .25, shimmer: .5, swarm: .35, reverse: .15, still: .08 }[v] * (.7 + rnd() * .7); E.fb.gain.setTargetAtTime(ECHO.base, a.currentTime, .04);
   const say = (dly, mult, gk, extra) => tone(f0 * mult, Object.assign({}, base, { when: dly, gain: (base.gain || .16) * gk * (base.gainK || 1) }, extra || {}));
   const step = i => ALIEN_SCALE[i % 7] * Math.pow(2, Math.floor(i / 7)), up = [0, 1, 0], rv = () => { const x = [rnd() - .5, rnd() - .5, rnd() - .5], l = Math.hypot(...x) || 1; return x.map(c => c / l); };
   if (v === 'taps') { say(0, 1, 1); [.33, .66, 1].forEach((d, i) => say(d, 1, .5 / (i + 1), { noise: 0 })); fx.waves.push({ t0: t, o: p, taps: [[0, 1], [.33, .5], [.66, .3], [1, .18]] }); }
@@ -1047,7 +1047,7 @@ function nebDrag(x, y, speed) {
   const a = ac(), D = NEB.drag, now = a.currentTime, t = performance.now() / 1000, gr = G.growth, pure = clamp(.25 * gr + .75 * G.learned, 0, 1), hit = nebUnder(c, G, x, y, !!NEB.drag.track);   // once you are playing a limb, the voids inside it do not interrupt
   a.resume(); D.on = true; D.p = hit.p;
   if (!D.v) { const g = a.createGain(), g2 = a.createGain(), lp = a.createBiquadFilter(), o1 = a.createOscillator(), o2 = a.createOscillator(); g.gain.value = 0; lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 4;
-    o1.type = 'sawtooth'; o2.type = 'sine'; g2.gain.value = .5; o1.connect(lp); o2.connect(g2); g2.connect(lp); lp.connect(g); g.connect(voiceOut()); o1.start(); o2.start(); D.v = { g, lp, o1, o2 }; }
+    o1.type = 'sawtooth'; o2.type = 'sine'; g2.gain.value = .5; o1.connect(lp); o2.connect(g2); g2.connect(lp); lp.connect(g); g.connect(voiceOut(.28)); o1.start(); o2.start(); D.v = { g, lp, o1, o2 }; }
   const wob = 1 + (1 - pure) * .03 * Math.sin(t * 23), lvl = clamp(speed / 1400, .025, .16) * (hit.kind === 'space' ? .35 : hit.kind === 'haze' ? .7 : 1);
   D.v.o1.frequency.setTargetAtTime(hit.freq * wob, now, .05); D.v.o2.frequency.setTargetAtTime(hit.freq * (hit.kind === 'void' ? .5 : ALIEN_SCALE[4]) * (1 + (1 - pure) * .012), now, .05);
   D.v.lp.frequency.setTargetAtTime(500 + speed * 1.6 + pure * 1800, now, .08);
@@ -1072,7 +1072,7 @@ function nebDragTick() {                                 // the grains keep comi
   const stut = tr[0] > .45 && rnd() < tr[0] * .3 ? Math.floor(rnd() * 3) * .06 : 0;                                                          // a noisy limb stutters
   const jit = ((rnd() - .5) * (.05 + 1.6 * e * e + .35 * tr[0] + .5 * (1 - pure)) - stut) / b.duration;                                    // toward the edge, the grains scatter in time
   const rate = (1 - .38 * tr[3] + .28 * tr[2]) * (rnd() < e * .32 ? (rnd() < .5 ? .5 : 2) : 1) * (1 + (1 - pure) * (rnd() - .5) * .05);     // a bassy limb sings low and slow, a bright one high; the edge throws octaves
-  grainOne(b, { pos: clamp(D.head + jit, 0, 1), dur: (.26 + .2 * tr[3] + pure * .12) * (1 - .78 * e) * (.8 + rnd() * .4), gain: clamp(.16 + sp / 2600, .16, .36) * (1 - .3 * e), rate, attack: .03 * (1 - .7 * e) + .004 });
+  grainOne(b, { pos: clamp(D.head + jit, 0, 1), dur: (.26 + .2 * tr[3] + pure * .12) * (1 - .78 * e) * (.8 + rnd() * .4), gain: clamp(.16 + sp / 2600, .16, .36) * (1 - .3 * e), rate, echo: rnd() < .12 ? 1 : .05 + .6 * e, attack: .03 * (1 - .7 * e) + .004 });
 }
 function nebDragEnd() {
   const D = NEB.drag; D.on = false; D.track = null; D.lobe = null; D.limb = null; D.buf = null; D.speed = 0;
