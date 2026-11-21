@@ -638,10 +638,11 @@ function nebFrame(c, t, mouse, onScreen) {
     const fdt = Math.min(.1, t - NEB.last) * (NEB.half ? .5 : 1);   // at half frame rate, a frame that takes two display frames is on time, not late
     NEB.acc += fdt; NEB.fast = (NEB.fast || 0) + fdt; NEB.fastN = (NEB.fastN || 0) + 1;
     if (fdt < .012) NEB.short = (NEB.short || 0) + 1;                          // many short frames means a fast display, where real headroom is visible
-    const drop = ms => { NEB.cap = NEB.q; NEB.capT = t; NEB.q = Math.max(.62, NEB.q * Math.max(.8, Math.min(.92, Math.sqrt(16.7 / ms)))); NEB.acc = 0; NEB.frames = 0; NEB.fast = 0; NEB.fastN = 0; };
+    const drop = ms => { NEB.q = Math.max(.62, NEB.q * Math.max(.8, Math.min(.92, Math.sqrt(16.7 / ms)))); NEB.cap = NEB.q; NEB.capT = t; NEB.hold = Math.min(600, (NEB.hold || 20) * 2);   // it could not hold that size: stay at the smaller one, and wait longer each time before trying a step up again
+      NEB.acc = 0; NEB.frames = 0; NEB.fast = 0; NEB.fastN = 0; };
     if (NEB.fastN >= 8) { const ms = NEB.fast / NEB.fastN * 1000; NEB.fast = 0; NEB.fastN = 0; if (ms > (NEB.half ? 24 : 20) && NEB.frames >= 0) drop(ms); }   // falling behind (a touch, a wave): give up resolution at once
     if (++NEB.frames >= 40) { const ms = NEB.acc / NEB.frames * 1000; NEB.ms = ms; const room = 17.4; NEB.short = 0;   // on a fast display we can see real headroom, so keep some for when it is touched
-      if (ms > (NEB.half ? 21 : 18.5)) drop(ms); else if (ms < room) { if (NEB.cap && t - NEB.capT > 25) NEB.cap = 0; NEB.q = Math.min(NEB.qMax || 1, NEB.cap ? NEB.cap * .9 : 1, NEB.q * 1.06); }
+      if (ms > (NEB.half ? 21 : 18.5)) drop(ms); else if (ms < room && (!NEB.cap || t - NEB.capT > NEB.hold)) { NEB.capT = t; NEB.q = Math.min(NEB.qMax || 1, NEB.q * 1.06); }
       NEB.acc = 0; NEB.frames = 0; } }
   if (!REC) NEB.last = t;
   if (NEB.frames === 0 && NEB.hud !== false) { const hud = document.getElementById('gym-fps'); if (hud && Gym.sing) hud.textContent = Gym.sing.msg; else if (hud && NEB.ms) hud.textContent = (Gym.rec ? `● rec ${Gym.rec.i} · ` : '') + `${Math.round(1000 / NEB.ms)} fps · ${NEB.tw || 0}×${NEB.th || 0}`; }
