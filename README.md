@@ -109,9 +109,11 @@ frames are blended, so edges are smooth and there is no grain. It is shown at yo
 picks the highest internal resolution that holds full frame rate on your machine (shown small in the top right).
 The dust has a grain that runs along each limb, like fibre, and faint veins that pulse outward from the base.
 
-- **It is fed from outside.** Now and then a thread of energy reaches in from far outside the frame, sometimes forked, lands on
-  a limb and sends pulses into it. Each pulse that arrives is felt: the dust there dissolves, regrows and lights up. They
-  come more often while it trains or hears sound.
+- **It is struck from outside.** Rarely, energy reaches it from far outside the frame and lands on a real part of it: a limb's
+  tip, a point on its spine, or its core. It is never the same twice running: a jagged bolt that re-strikes and hops between
+  parts, a slow thick tendril that hums and carries beads of light inward, a discharge between two of its own parts, a web
+  from three sides, a fork, or one bare flicker. Every strike is heard (a crack, then the struck limb rings in its own note)
+  and felt (the dust there dissolves, regrows and lights up). They come more often while it trains or hears sound.
 - **The space it lives in** is made of slow folded clouds in the creature's own colours, with dark lanes, two depths of stars,
   and a faint web of threads that brightens with sound and training.
 - **Touch changes its matter.** A touch sends a front that dissolves the dust as it passes; the dust grows back thicker

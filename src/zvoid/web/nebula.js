@@ -36,8 +36,8 @@ uniform vec4 uAud;       // bass, mid, high, level
 uniform vec4 uLife;      // learned, growth, turbulence, kick
 uniform vec3 uLight, uKey, uAmb;
 uniform float uB, uFrame, uFine;
-uniform vec4 uEvO[4];     // energy veins reaching in from outside: where each starts, and how strong it is
-uniform vec4 uEvA[4];     // where each lands on the body, and where its pulse is along it (0 = outside, 1 = the body)
+uniform vec3 uEvP[51];    // energy arcs from outside: three jagged paths of 17 points each, re-struck by the app like lightning
+uniform vec4 uEvI[3];     // each arc's brightness, where its bead of light is along it, the flare where it lands, its tint
 uniform vec4 uTouch;     // xyz where the pointer is dragging, w strength
 uniform float uForm;     // 0 = cloud, 1 = fully formed (grows with training)
 uniform vec4 uGy;        // lattice: scale, drift speed, morph between two minimal surfaces, sheet thickness
@@ -255,8 +255,8 @@ void main() {
           if (kind > .5) g *= exp(-el * el * .1);
           if (kind > 1.5) { float an = g * .7; q = uWave[k].xyz + e * cos(an) + cross(wn, e) * sin(an) + wn * dot(wn, e) * (1. - cos(an)); }   // twist the dust around an axis
           else q += (kind > .5 ? wn : e / el) * g * .1;
-          ring += g; melt += g; grow += exp(-(dw + 1.6) * (dw + 1.6)) * a * (kind > .5 ? exp(-el * el * .1) : 1.);
-          if (kind < .5) bloom += a * exp(-el * el * 4.5);   // where it was touched stays lit for a while, like a flush under skin
+          ring += g; float tg0 = uWaveK[k].z; melt += g * (.2 + .8 * tg0); grow += exp(-(dw + 1.6) * (dw + 1.6)) * a * (kind > .5 ? exp(-el * el * .1) : 1.);
+          if (kind < .5) bloom += a * tg0 * exp(-el * el * 4.5);   // where it was touched stays lit for a while, like a flush under skin
         }
       }
       if (uTouch.w > 0.) { vec3 e2 = q - uTouch.xyz; float tg = exp(-dot(e2, e2) * 2.6) * uTouch.w; q += normalize(e2 + 1e-4) * tg * .18; ring += tg * .7; melt += tg * .8; bloom += tg * .5; }   // your finger in the dust
@@ -264,7 +264,7 @@ void main() {
       vec3 lF = normalize(uLight - p); lF.x *= sx; vec3 rdF = vec3(rd.x * sx, rd.yz);
       gLite = false; vec3 tint; float halo; float sh = shapes(q, tint, halo); float hAlong = gH; ring += gTip * 1.3;
       if (halo + sh < .012) continue;
-      float cv = carve(q);
+      bloom = min(bloom, .9); float cv = carve(q);
       float rip = ripples(q) * uReson.x;
       float haze = n3(q * .7 + vec3(0., uT * .02, 3.)), wisp = w.x / turb + .5;
       float sapD = (hAlong - uSweep.x) / .04, sap = uSweep.y * (smoothstep(uSweep.x + .05, uSweep.x - .03, hAlong) * .3 + exp(-sapD * sapD) * 1.5);   // training: light rises through each pillar, base to tip, once per epoch
@@ -286,9 +286,9 @@ void main() {
           }
         }
       }
-      if (uBuild.x > .2 && bd > .22) { float k = 1. + 1.1 * uBuild.x; t += ds * (k - 1.); ds *= k; }   // the veil is thin and soft: stride through it, away from the frame
+      if (uBuild.x > .2 && bd > .22) { float k = 1. + .55 * uBuild.x; t += ds * (k - 1.); ds *= k; }   // the veil is thin and soft: stride through it, away from the frame
       float gas = (halo * .55 + sh * .25) * haze * haze * (.45 + wisp) * cv * max(0., 1. + rip * 2.4);
-      C += T * mix(uAmb, tint, .45 + .4 * clamp(sh, 0., 1.)) * gas * ds * (.62 + ring * 2.5 + bloom * 2.2 + melt * 1.5 + uAud.w * .6);
+      C += T * mix(uAmb, tint, .45 + .4 * clamp(sh, 0., 1.)) * gas * ds * (.62 + ring * 2.5 + bloom * 1.1 + melt * .6 + uAud.w * .6);
       if (sh > .02) {
         vec3 fq = q * 1.6 + vec3(0., -uT * .03, uT * .015) + uSeed;
         float f = fbm(fq);
@@ -317,7 +317,6 @@ void main() {
           for (int k = 0; k < 8; k++) { float sb = uStar[k].w; if (sb > 0.) { vec3 ds = uStar[k].xyz - p; lit += alb * vec3(1., .9, .8) * sb * .5 / (dot(ds, ds) * 6. + .15); } }
           lit *= 1. + uAud.z * 1.6 * n3(q * 7. + uT * 2.) * (1. - dust) + ring * 1.5 + max(0., rip) * 1.1;
           lit += (tint * .7 + vec3(.5, .3, .26)) * bloom * .9;
-          { vec3 fa2 = gBa / (length(gBa) + 1e-4), fm = fq - fa2 * dot(fq, fa2) * .85; lit *= .8 + .42 * n3(fm * 19. + 2.) * (.6 + .8 * n3(fm * 43. - 7.)); }   // surface detail finer than the dust itself: it only changes how it is lit, so it adds no noise
           float va = n3(q * 2.7 + uSeed + vec3(0., uT * .012, 0.)), vb = n3(q * 2.7 + 19.7 - uSeed);               // veins: lines where two folded sheets cross
           float vein = smoothstep(.075, 0., abs(va - .5)) * smoothstep(.075, 0., abs(vb - .5));
           lit += (tint * .9 + vec3(.3, .14, .12)) * vein * (.3 + 1.5 * pow(.5 + .5 * sin(hAlong * 9. - uT * 1.6 + va * 5.), 4.)) * (1. + uAud.x * 2. + ring * 6. + bloom * 5.);   // a pulse runs out along them from the base; a touch fires them like nerves
@@ -334,16 +333,20 @@ void main() {
     float sb = uStar[k].w;
     if (sb > 0.) { vec3 so = uStar[k].xyz - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; C += vec3(1., .93, .86) * sb * (.0022 / (dot(dv, dv) + .0005)) * mix(1., T, .55) * step(0., tc); }
   }
-  for (int k = 0; k < 4; k++) {                // energy veins: threads that reach in from far outside, pulse into the body, and let go
-    float ei = uEvO[k].w;
+  for (int k = 0; k < 3; k++) {                // energy arcs: they strike in from far outside onto a part of the body, crawl, re-strike, and let go
+    float ei = uEvI[k].x;
     if (ei > 0.) {
-      vec3 O = uEvO[k].xyz, ab = uEvA[k].xyz - O, w0 = ro - O; float fk = float(k) * 7.3;
-      float a1 = dot(ab, ab), b1 = dot(ab, rd), sA = clamp((dot(ab, w0) - b1 * dot(rd, w0)) / max(a1 - b1 * b1, 1e-4), 0., 1.);
-      vec3 n1 = normalize(cross(ab, vec3(.3, 1., .2))), n2 = normalize(cross(ab, n1)); float env = sin(3.14159 * sA) * (1. - sA * .5);
-      vec3 P = O + ab * sA + (n1 * (sin(sA * 9. + fk + uT * .7) + .5 * sin(sA * 23. - uT * 1.3 + fk * 2.) + .2 * sin(sA * 61. + uT * 3.)) + n2 * (sin(sA * 7. - fk + uT * .5) + .5 * sin(sA * 19. + uT * 1.1) + .2 * sin(sA * 53. - uT * 2.6))) * .17 * env;
-      vec3 so = P - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; float d2 = dot(dv, dv), pd = (sA - uEvA[k].w) / .06, pulse = exp(-pd * pd);
-      float wd = .00009 * (1. + pulse * 5.), g = wd / (d2 + wd) * (.35 + pulse * 2.6) + exp(-d2 * 110.) * .05 * (1. + pulse * 4.);
-      if (tc > 0.) C += mix(mix(uKey, uAmb, fract(fk * .37)), vec3(.82, .95, 1.), .55) * g * ei * (.8 + .2 * sin(uT * 37. + fk)) * mix(1., T, .75);
+      float dm = 1e9, sm = 0.;
+      for (int i = 0; i < 16; i++) {
+        vec3 A = uEvP[k * 17 + i], u = uEvP[k * 17 + i + 1] - A, w0 = ro - A;
+        float a = dot(u, u), b = dot(u, rd), c = dot(u, w0), d = dot(rd, w0), sc = clamp((c - b * d) / max(a - b * b, 1e-5), 0., 1.), tr = sc * b - d;
+        vec3 dv = w0 + rd * tr - u * sc; float d2 = tr > 0. ? dot(dv, dv) : 1e9;
+        if (d2 < dm) { dm = d2; sm = (float(i) + sc) / 16.; }
+      }
+      float fl = uEvI[k].z, pd = (sm - uEvI[k].y) / .06, bead = exp(-pd * pd), wide = floor(uEvI[k].w), wd = .00011 * (1. + fl * 3. + bead * 4.) * (.5 + sm) * (1. + wide * 1.1);
+      float g = wd / (dm + wd) * (.45 + fl * 1.8 + bead * 2.5) + exp(-dm * 130.) * .045 * (1. + fl * 4.);
+      vec3 so = uEvP[k * 17 + 16] - ro; float tc = dot(so, rd); vec3 dl = so - rd * tc; g += exp(-dot(dl, dl) * 70.) * fl * .35 * step(0., tc);   // the flare where it lands
+      C += mix(mix(uKey, uAmb, fract(uEvI[k].w)), vec3(.84, .95, 1.), .55 - wide * .15) * g * ei * mix(1., T, .7);
     }
   }
   for (int k = 0; k < 12; k++) {               // digesting: the tracks it has yet to eat drift around it as motes
@@ -380,8 +383,8 @@ void main() {
   }
   av /= 9.;
   vec3 h = clamp(texture2D(uHist, uv).rgb, mn - .015, mx + .015);
-  float mv = smoothstep(.06, .25, length(av - h));            // where the picture really changed, follow it faster
-  gl_FragColor = vec4(mix(h, mix(c, av, .35 + .6 * mv), clamp(uMix + mv * .22, 0., 1.)), 1.);   // half of each new frame is its own neighbourhood average: grain never gets in, and where things move it blurs instead of going grainy
+  float mv = smoothstep(.12, .45, length(av - h));            // where the picture really changed, follow it faster
+  gl_FragColor = vec4(mix(h, mix(c, av, .35 + .3 * mv), clamp(uMix + mv * .16, 0., 1.)), 1.);   // half of each new frame is its own neighbourhood average: grain never gets in, and where things move it blurs instead of going grainy
 }`;
 /* Draw the blended image on the screen at the display's full resolution, with a little sharpening. */
 const NEB_PRESENT = `precision highp float;
@@ -417,9 +420,9 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine', 'uEvO', 'uEvA']) NEB.U[n] = gl.getUniformLocation(pr, n);
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine', 'uEvP', 'uEvI']) NEB.U[n] = gl.getUniformLocation(pr, n);
   gl.uniform1i(NEB.U.uNoise, 0);
-  NEB.gl = gl;
+  NEB.gl = gl; NEB.nz = r;
 }
 /* Three off-screen targets at the render resolution: this frame, and two that take turns holding the running blend. */
 function nebTargets(W, H, CW, CH) {   // this frame at the render resolution; the running blend at the display's resolution, so it survives render-resolution changes
@@ -465,7 +468,9 @@ function nebFrame(c, t, mouse) {
       NEB.acc = 0; NEB.frames = 0; } }
   NEB.last = t;
   if (NEB.frames === 0 && NEB.hud !== false) { const hud = document.getElementById('gym-fps'); if (hud && NEB.ms) hud.textContent = `${Math.round(1000 / NEB.ms)} fps · ${NEB.tw || 0}×${NEB.th || 0}`; }
-  const dpr = devicePixelRatio || 1, cw = cv.clientWidth, ch = cv.clientHeight, sc = dpr * NEB.q, W = Math.max(2, Math.round(cw * sc)), H = Math.max(2, Math.round(ch * sc));
+  if ((fx.waves && fx.waves.some(w => t - w.t0 < 1.6)) || NEB.drag.on || (fx.ev && fx.ev.length)) NEB.busyT = t;   // while it is being touched or struck, each frame costs more:
+  const busy = NEB.busyT != null && t - NEB.busyT < 1.2;                                                              // render a little smaller for that moment so it never stutters. The frame blend hides the step.
+  const dpr = devicePixelRatio || 1, cw = cv.clientWidth, ch = cv.clientHeight, sc = dpr * NEB.q * (busy ? .8 : 1), W = Math.max(2, Math.round(cw * sc)), H = Math.max(2, Math.round(ch * sc));
   const CW = Math.max(2, Math.round(cw * dpr)), CH = Math.max(2, Math.round(ch * dpr));   // the canvas itself is always at the display's full resolution
   if (cv.width !== CW || cv.height !== CH) { cv.width = CW; cv.height = CH; }
   nebTargets(W, H, CW, CH);
@@ -527,9 +532,9 @@ function nebFrame(c, t, mouse) {
   for (const w of fx.waves) for (const [dly, amp] of (w.taps || [[0, 1], [.55, .55], [1.15, .3], [1.85, .16]])) {           // each front can come back, like reverb taps
     const age = t - w.t0 - dly, life = w.life || 2.6; if (age < 0 || age > life) continue;
     const sl = N.slots[(w.pole || 0) % K], o = w.o || [sl.p[0] + sl.a[0] * sl.len * .5, sl.p[1] + sl.a[1] * sl.len * .5, sl.p[2] + sl.a[2] * sl.len * .5], sp = w.speed || 2.1, mode = w.mode || 0;
-    taps.push({ o, r: w.implode ? Math.max(0, 2.6 - age * sp) : mode === 1 ? age * sp - 1.4 : mode === 2 ? age * sp * .6 : age * sp, a: (1 - age / life) * (w.soft ? .5 : 1) * amp * (w.amp || 1), k: w.width || 2.2, mode, n: w.n || [0, 1, 0] });
+    taps.push({ o, r: w.implode ? Math.max(0, 2.6 - age * sp) : mode === 1 ? age * sp - 1.4 : mode === 2 ? age * sp * .6 : age * sp, a: (1 - age / life) * (w.soft ? .5 : 1) * amp * (w.amp || 1), k: w.width || 2.2, mode, n: w.n || [0, 1, 0], g: w.pole != null ? 0 : 1 });   // g: a touch or a strike, which also dissolves and flushes; beats and training pulses only ripple
   }
-  taps.sort((a, b) => b.a - a.a).slice(0, 6).forEach((tp, k) => { wave.set([tp.o[0], tp.o[1], tp.o[2], tp.r], k * 4); wamp[k] = tp.a; wk.set([tp.k, tp.mode, 0, 0], k * 4); wnv.set([tp.n[0], tp.n[1], tp.n[2], 0], k * 4); });
+  taps.sort((a, b) => b.a - a.a).slice(0, 6).forEach((tp, k) => { wave.set([tp.o[0], tp.o[1], tp.o[2], tp.r], k * 4); wamp[k] = tp.a; wk.set([tp.k, tp.mode, tp.g, 0], k * 4); wnv.set([tp.n[0], tp.n[1], tp.n[2], 0], k * 4); });
 
   // resonance: each pillar emits at its limb's tempo; the tail keeps everything ringing after sound stops
   L.tail = Math.max(lv, (L.tail || 0) * Math.exp(-dt / 1.3));
@@ -607,23 +612,56 @@ function nebFrame(c, t, mouse) {
   let ext = 1.5; N.slots.forEach(sl => { if (sl.w > .01) ext = Math.max(ext, Math.hypot(sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 3.4, Math.hypot(...sl.p) + sl.rad * 3.4); });
   gl.uniform4f(U.uSweep, pg.i, trn * (tr && tr.stage !== 'train' ? .6 : 1), 0, 0);
   gl.uniform1f(U.uB, Math.min(6, ext + .8)); gl.uniform1f(U.uFrame, (NEB.fr = (NEB.fr || 0) + 1) % 1024);
-  { // energy veins: now and then a thread reaches in from far outside, sends pulses into a limb, and lets go
-    const ev = fx.ev || (fx.ev = []), rnd = Math.random, R = Math.max(3.8, ext * 2.1), act = 1 + trn * 1.5 + lv * 2.5;
-    if (fx.evNext == null) fx.evNext = t + 2 + rnd() * 3;
-    if (t > fx.evNext && ev.length < 3 && N.slots.length) {
-      const th = rnd() * 6.283, z = rnd() * 1.6 - .8, r = Math.sqrt(1 - z * z), dir = [r * Math.cos(th), z, r * Math.sin(th)], mk = () => ({ t0: t, life: 2.8 + rnd() * 3.2, dir, j: Math.floor(rnd() * Math.min(K, N.slots.length)), hh: .25 + rnd() * .75, mx: rnd() < .5 ? -1 : 1, hits: 0, rate: .75 + rnd() * .5 });
-      ev.push(mk()); if (rnd() < .45 && ev.length < 4) ev.push(mk());                // sometimes it forks: two threads from one place
-      fx.evNext = t + (3 + rnd() * 7) / act;
+  { // energy arcs: rarely, something far outside strikes a part of the body. The arc is jagged, re-strikes like lightning, hops between parts, and is heard.
+    const ev = fx.ev || (fx.ev = []), rnd = Math.random, R = Math.max(3.8, ext * 2.1), act = 1 + trn * 1.2 + lv * 2;
+    const V = (x, y, z) => NEB.nz[((y + 17 * (z - 1)) & 255) * 256 + ((x + 37 * (z - 1)) & 255)] / 255, sstep = f => f * f * (3 - 2 * f);
+    const n3 = (x, y, z) => { const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z), fx_ = sstep(x - ix), fy = sstep(y - iy), fz = sstep(z - iz), L2 = k => { const a = V(ix, iy, iz + k), b = V(ix + 1, iy, iz + k), c2 = V(ix, iy + 1, iz + k), e2 = V(ix + 1, iy + 1, iz + k); return a + (b - a) * fx_ + (c2 - a) * fy + (a - b - c2 + e2) * fx_ * fy; }; const lo = L2(0); return lo + (L2(1) - lo) * fz; };
+    const sdv = d.seed * 40, tt = fx.clock * .035, tS = 1.1 + turb * 1.4;
+    const warp = q => { const x = q[0] * .45 + sdv, y = q[1] * .45 + sdv, z = q[2] * .45 + sdv; return [(n3(x, y + tt, z) - .5) * tS, (n3(x + 31.4, y - tt, z + 7.7) - .5) * tS, (n3(x + 5.2, y + 13.1, z + tt) - .5) * tS]; };
+    const land = e => { const sl = N.slots[e.j] || N.slots[0], mx = e.j && n ? e.mx : 1, A = [(sl.p[0] + sl.a[0] * sl.len * e.hh) * mx, sl.p[1] + sl.a[1] * sl.len * e.hh, sl.p[2] + sl.a[2] * sl.len * e.hh];
+      let q = A; for (let k = 0; k < 2; k++) { const w = warp(q); q = [A[0] - w[0], A[1] - w[1], A[2] - w[2]]; } return q; };   // the dust is displaced by turbulence, so find where that part of the body really appears
+    const part = e => { e.j = Math.floor(rnd() * Math.min(K, N.slots.length)); e.hh = [1, 1, .66, .33, 0][Math.floor(rnd() * 5)]; e.mx = rnd() < .5 ? -1 : 1; };   // a limb's tip, a point on its spine, or the core
+    const strike = (e, first) => {
+      const kd = e.kd; if (!first && rnd() < kd.hop) part(e);
+      const th = rnd() * 6.283, zz = rnd() * 2 - 1, rr = Math.sqrt(1 - zz * zz), k0 = first ? 0 : .82; let dx = e.dir[0] * k0 + rr * Math.cos(th) * (1 - k0), dy = e.dir[1] * k0 + zz * (1 - k0), dz = e.dir[2] * k0 + rr * Math.sin(th) * (1 - k0); const dl = Math.hypot(dx, dy, dz) || 1; e.dir = [dx / dl, dy / dl, dz / dl];
+      const A = land(e), T = e.tgt; T.set(e.from ? land(e.from) : [e.dir[0] * R, e.dir[1] * R, e.dir[2] * R], 0); T.set(A, 48);   // most come from far outside; some jump between two parts of the body
+      const mid = (a, b, amp) => { if (b - a < 2) return; const m = (a + b) >> 1, ux = T[b * 3] - T[a * 3], uy = T[b * 3 + 1] - T[a * 3 + 1], uz = T[b * 3 + 2] - T[a * 3 + 2], ul = Math.hypot(ux, uy, uz) || 1;
+        let ox = rnd() - .5, oy = rnd() - .5, oz = rnd() - .5; const pr = (ox * ux + oy * uy + oz * uz) / (ul * ul); ox -= ux * pr; oy -= uy * pr; oz -= uz * pr; const ol = Math.hypot(ox, oy, oz) || 1, kk = ul * amp * (.4 + rnd() * .9) / ol;
+        T[m * 3] = (T[a * 3] + T[b * 3]) / 2 + ox * kk; T[m * 3 + 1] = (T[a * 3 + 1] + T[b * 3 + 1]) / 2 + oy * kk; T[m * 3 + 2] = (T[a * 3 + 2] + T[b * 3 + 2]) / 2 + oz * kk; mid(a, m, amp * kd.dec); mid(m, b, amp * kd.dec); };
+      mid(0, 16, kd.amp); if (first) e.pts.set(T);
+      e.last = t; e.flash = first ? 1.3 : (.5 + rnd() * .5) * kd.re; e.next = t + kd.gap();
+      if (!first && kd.re < .5) return;                                   // a slow tendril only drifts: it does not strike again
+      fx.waves.push({ t0: t, o: A, taps: first ? [[0, 1], [.22, .4]] : [[0, .4]], speed: 2.6, width: 2.8, amp: first ? .7 : .16, life: first ? 1.6 : .8 });   // the body feels every strike
+      const sl = N.slots[e.j]; if (sl) sl.ring = 1; if (first && fx.life) fx.life.beat = t;
+      try { const a = ac(); if (a.state === 'running') { const lb = limbs && limbs[e.j] ? limbs[e.j].mean.bright : (d.bright ?? .3), f0 = noteOf(lb), pure = clamp(.25 * d.growth + .75 * d.learned, 0, 1);   // and it is heard: a crack, then the struck limb rings in its own note
+        if (first && kd.soft) tone(f0 * (rnd() < .5 ? 1 : 1.5), { dur: 2.5 + d.growth * 3, gain: .09, attack: .5, partials: 1 + Math.round(d.growth * 3), detune: (1 - pure) * .03 });   // a tendril hums as it takes hold
+        else if (first) { tone(2200 + rnd() * 2400, { dur: .07, gain: .06, bend: -.9, noise: .7, noiseAt: 1 }); if (!kd.dry) tone(f0 / 2, { when: .02, dur: 1.1 + d.growth * 2.4, gain: .15, attack: .004, partials: 2 + Math.round(d.growth * 3), detune: (1 - pure) * .04, bend: -.12, noise: .35, noiseAt: 5 }); }
+        else tone(f0 * ALIEN_SCALE[Math.floor(rnd() * 7)] * (rnd() < .3 ? 2 : 1), { dur: .1 + rnd() * .25, gain: .045, bend: rnd() < .5 ? .25 : -.3, noise: .25, noiseAt: 6 }); } } catch (_) {}
+    };
+    if (fx.evNext == null) fx.evNext = t + 6 + rnd() * 9;
+    if (t > fx.evNext && !ev.length && N.slots.length) {
+      // never the same twice running: a bolt, a slow tendril, a discharge between two of its own parts, a web from three sides, a fork, or one bare flicker
+      const KD = { bolt: { amp: .3, dec: .78, hop: .35, re: 1, ease: 24, wide: 0, gap: () => .1 + rnd() * rnd() * .9, life: () => 1.1 + rnd() * rnd() * 3.4 },
+        tendril: { amp: .2, dec: .42, hop: .12, re: .2, ease: 1.6, wide: 2, soft: true, gap: () => 1 + rnd() * 1.8, life: () => 4 + rnd() * 5 },
+        crawl: { amp: .42, dec: .7, hop: .5, re: 1, ease: 30, wide: 0, inner: true, gap: () => .07 + rnd() * .3, life: () => .8 + rnd() * 1.6 },
+        flicker: { amp: .36, dec: .8, hop: 0, re: 1, ease: 40, wide: 1, dry: true, gap: () => 9, life: () => .16 + rnd() * .2 } };
+      let kind; do { const x = rnd(); kind = x < .28 ? 'bolt' : x < .5 ? 'tendril' : x < .68 ? 'crawl' : x < .8 ? 'web' : x < .9 ? 'fork' : 'flicker'; } while (kind === fx.evLast); fx.evLast = kind;
+      const rdir = () => { const z = rnd() * 1.6 - .8, th = rnd() * 6.283, r0 = Math.sqrt(1 - z * z); return [r0 * Math.cos(th), z, r0 * Math.sin(th)]; }, d0 = rdir();
+      const cnt = kind === 'web' ? 3 : kind === 'fork' ? 2 : kind === 'tendril' && rnd() < .3 ? 2 : 1, kd = KD[kind] || KD.bolt, h0 = rnd();
+      for (let i = 0; i < cnt; i++) { const e = { t0: t + i * (kind === 'web' ? .05 + rnd() * .2 : .1 + rnd() * .5), life: kd.life(), kd, dir: kind === 'fork' ? d0 : rdir(), pts: new Float32Array(51), tgt: new Float32Array(51), flash: 0, last: -9, born: false, hue: kind === 'web' ? h0 : rnd() };
+        part(e); if (kd.inner) { e.from = {}; part(e.from); if (e.from.j === e.j && e.from.hh === e.hh) e.from.hh = e.hh > .5 ? 0 : 1; } ev.push(e); }
+      fx.evNext = t + (12 + rnd() * 30) / act;
     }
     for (let i = ev.length - 1; i >= 0; i--) if (t - ev[i].t0 > ev[i].life) ev.splice(i, 1);
-    const eo = new Float32Array(16), ea = new Float32Array(16);
-    ev.slice(0, 4).forEach((e, i) => {
-      const sl = N.slots[e.j] || N.slots[0], mx = e.j && n ? e.mx : 1, A = [(sl.p[0] + sl.a[0] * sl.len * e.hh) * mx, sl.p[1] + sl.a[1] * sl.len * e.hh, sl.p[2] + sl.a[2] * sl.len * e.hh];
-      const age = t - e.t0, cyc = age * e.rate / 1.25, ph = (cyc % 1) * 1.25, inten = Math.min(1, age / .5) * Math.min(1, (e.life - age) / .8);
-      if (Math.floor(cyc + .2) > e.hits) { e.hits = Math.floor(cyc + .2); if (age > .6) fx.waves.push({ t0: t, o: A, taps: [[0, .45]], speed: 2.2, width: 3.2, amp: .5, life: 1.4 }); }   // each pulse that arrives is felt by the body
-      eo.set([e.dir[0] * R, e.dir[1] * R, e.dir[2] * R, inten], i * 4); ea.set([A[0], A[1], A[2], ph], i * 4);
+    const ep = new Float32Array(153), ei = new Float32Array(12);
+    ev.slice(0, 3).forEach((e, i) => {
+      const age = t - e.t0; if (age < 0) return;
+      if (!e.born) { e.born = true; strike(e, true); } else if (t > e.next) strike(e, false);
+      const A = land(e), kf = Math.min(1, dt * e.kd.ease); e.tgt.set(A, 48); if (e.from) e.tgt.set(land(e.from), 0); for (let k = 0; k < 51; k++) e.pts[k] += (e.tgt[k] - e.pts[k]) * (k >= 48 ? 1 : kf);
+      e.flash *= Math.exp(-dt * 6);
+      ep.set(e.pts, i * 51); ei.set([Math.min(1, age / .06) * Math.min(1, (e.life - age) / .35) * (e.kd.soft ? .55 + .25 * Math.sin(age * 2.3) : .22 + .78 * Math.min(1, e.flash)), e.kd.soft ? (age * .7) % 1.5 : (t - e.last) / .14, Math.min(1.5, e.flash), e.hue * .999 + e.kd.wide], i * 4);   // a tendril carries slow beads of light inward, over and over
     });
-    gl.uniform4fv(U.uEvO, eo); gl.uniform4fv(U.uEvA, ea);
+    gl.uniform3fv(U.uEvP, ep); gl.uniform4fv(U.uEvI, ei);
   }
   const D = NEB.drag; D.s += ((D.on ? 1 : 0) - D.s) * Math.min(1, dt * (D.on ? 9 : 2.2)); gl.uniform4f(U.uTouch, D.p[0], D.p[1], D.p[2], D.s < .01 ? 0 : D.s);
   gl.uniform1f(U.uFine, NEB.fine == null ? .42 : NEB.fine); gl.uniform3fv(U.uLight, light); gl.uniform3fv(U.uKey, key); gl.uniform3fv(U.uAmb, amb);
@@ -633,7 +671,7 @@ function nebFrame(c, t, mouse) {
   gl.uniform1i(R.u.uCur, 1); gl.uniform1i(R.u.uHist, 3 - fl); gl.viewport(0, 0, CW, CH); gl.uniform2f(R.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(R.u.uTx, 1 / W, 1 / H); gl.uniform2f(R.u.uJit, jx / W, jy / H); gl.uniform1f(R.u.uMix, NEB.fresh ? 1 : .05); NEB.fresh = false;
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.useProgram(O.p); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, CW, CH);   // and show it at full resolution
-  gl.uniform1i(O.u.uTex, 2 + fl); gl.uniform1i(O.u.uNoise, 0); gl.uniform2f(O.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(O.u.uTx, 1 / CW, 1 / CH); gl.uniform1f(O.u.uSharp, .14);
+  gl.uniform1i(O.u.uTex, 2 + fl); gl.uniform1i(O.u.uNoise, 0); gl.uniform2f(O.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(O.u.uTx, 1 / CW, 1 / CH); gl.uniform1f(O.u.uSharp, .1);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   // where things are on screen, for touch
