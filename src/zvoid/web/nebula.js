@@ -55,7 +55,7 @@ uniform vec4 uBuild;     // how far each part of the frame is built along every 
 float gFront;            // how close the last sampled point was to where the frame is being built right now
 uniform vec4 uFract;     // branching: depth (grows with training), life-cycle rate
 float gTip; vec3 gTint; bool gLite;
-const int STEPS = 80;
+const int STEPS = 68;
 vec3 gPa, gBa; float gR0, gBest;   // the pillar nearest the last sampled point, in its own frame
 vec4 gTr, gTr2;           // the sound of the limb the last sampled point belongs to
 float gSeam;             // how deep in a groove of the body the last sampled point was
@@ -114,9 +114,9 @@ float shapes(vec3 q, out vec3 tint, out float halo) {
       vec4 tr = uTrait[i];
       float prof = (1. - (.28 + .58 * tr.z) * h) * (1. + tr.w * .5 * (1. - h) * (1. - h));       // bright food: long and tapering to a point. Bassy food: a heavy, swollen base
       float sd = length(pa - ba * h) - r0 * prof;
-      if (tr.x > .02) { float kq = 6.5 / r0, sp = sin(pa.x * kq) * sin(pa.y * kq * 1.13 + 1.) * sin(pa.z * kq * .91 + 2.); sd -= r0 * tr.x * (.5 * pow(max(sp, 0.), 3.) - .1 * max(-sp, 0.)); }   // noisy food: a ragged, spiny surface
+      if (tr.x > .02 && !gLite) { float kq = 6.5 / r0, sp = sin(pa.x * kq) * sin(pa.y * kq * 1.13 + 1.) * sin(pa.z * kq * .91 + 2.); sd -= r0 * tr.x * (.5 * pow(max(sp, 0.), 3.) - .1 * max(-sp, 0.)); }   // noisy food: a ragged, spiny surface
       if (w > .5 && sd / r0 < gBest) { gBest = sd / r0; gPa = pa; gBa = ba; gR0 = r0; gTint = uCol[i].rgb; if (!gLite) { gTr = tr; gTr2 = uTrait2[i]; } }
-      float di = smoothstep(.9, -.6, sd / r0) * w, hl = smoothstep(2.6, -.4, sd / r0) * w;
+      float di = smoothstep(.9, -.6, sd / r0) * w, hl = smoothstep(2.0, -.4, sd / r0) * w;
       d += di; halo += hl * hl; tint += uCol[i].rgb * (di + hl * .25); gH += h * (di + hl * .25);
     }
   }
@@ -129,7 +129,7 @@ float shapes(vec3 q, out vec3 tint, out float halo) {
 float nearest(vec3 p) {                      // distance to the outer edge of anything visible; lets rays leap over empty space
   float m = 1e3; p.x = mix(p.x, abs(p.x), uSym);
   for (int i = 0; i < 6; i++) {
-    if (uCol[i].w > 0.) { vec3 ba = uAxis[i].xyz * uAxis[i].w, pa = p - uPole[i].xyz; float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.); m = min(m, length(pa - ba * h) - uPole[i].w * 2.7 - .75 - uAxis[i].w * .3 * min(uFract.x, 1.)); }   // room for its branches
+    if (uCol[i].w > 0.) { vec3 ba = uAxis[i].xyz * uAxis[i].w, pa = p - uPole[i].xyz; float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.); m = min(m, length(pa - ba * h) - uPole[i].w * (2.1 + .5 * uTrait[i].w) - .75 - uAxis[i].w * .3 * min(uFract.x, 1.)); }   // room for its branches
   }
   return m;
 }
@@ -254,7 +254,7 @@ void main() {
       vec3 s = p * .45 + uSeed;
       vec3 w = (vec3(n3(s + vec3(0., tt, 0.)), n3(s + vec3(31.4, -tt, 7.7)), n3(s + vec3(5.2, 13.1, tt))) - .5) * turb;
       vec3 q = p + w; float ring = 0., melt = 0., grow = 0., bloom = 0.;   // a front does not just push the dust: it dissolves it as it passes, and the dust grows back thicker behind it
-      for (int k = 0; k < 8; k++) {            // shock fronts from touch, feeding, beats, and their echoes
+      for (int k = 0; k < 6; k++) {            // shock fronts from touch, feeding, beats, and their echoes
         float a = uWaveAmp[k];
         if (a > 0.) {
           vec3 e = q - uWave[k].xyz, wn = uWaveN[k].xyz; float el = length(e) + 1e-3, kind = uWaveK[k].y;
@@ -270,7 +270,9 @@ void main() {
       float sx = uSym > .5 && q.x < 0. ? -1. : 1.; q.x = mix(q.x, abs(q.x), uSym);                 // mirror symmetry: one side is the reflection of the other
       vec3 lF = normalize(uLight - p); lF.x *= sx; vec3 rdF = vec3(rd.x * sx, rd.yz);
       gLite = false; vec3 tint; float halo; float sh = shapes(q, tint, halo); float hAlong = gH; ring += gTip * 1.3;
-      if (halo + sh < .012) continue;
+      if (halo + sh < .03) continue;
+      float gk = 1.;
+      if (sh < .02) { gk = 1.9; t += dt * .9; }            // out in the thin gas there is nothing fine to resolve: take longer strides
       bloom = min(bloom, .9); float cv = carve(q);
       float rip = ripples(q) * uReson.x;
       float haze = n3(q * .7 + vec3(0., uT * .02, 3.)), wisp = w.x / turb + .5;
@@ -293,9 +295,9 @@ void main() {
           }
         }
       }
-      if (uBuild.x > .2 && bd > .22) { float k = 1. + .55 * uBuild.x; t += ds * (k - 1.); ds *= k; }   // the veil is thin and soft: stride through it, away from the frame
+      if (uBuild.x > .2 && bd > .22) { float k = 1. + uBuild.x * (bd > .5 ? 1.7 : 1.); t += ds * (k - 1.); ds *= k; }   // the veil is thin and soft: stride through it, away from the frame
       float gas = (halo * .55 + sh * .25) * haze * haze * (.45 + wisp) * cv * max(0., 1. + rip * 2.4);
-      C += T * mix(uAmb, tint, .45 + .4 * clamp(sh, 0., 1.)) * gas * ds * (.62 + ring * 2.5 + bloom * 1.1 + melt * .6 + uAud.w * .6);
+      C += T * mix(uAmb, tint, .45 + .4 * clamp(sh, 0., 1.)) * gas * ds * gk * (.62 + ring * 2.5 + bloom * 1.1 + melt * .6 + uAud.w * .6);
       if (sh > .02) {
         vec3 fq = q * 1.6 + vec3(0., -uT * .03, uT * .015) + uSeed;
         float f = fbm(fq);
@@ -317,7 +319,7 @@ void main() {
         }
         if (dust > .01) {
           vec3 l = normalize(uLight - p);
-          if (shv < 0.) { if (mod(float(i), 2.) < 1.) { shv = dustLo(q + lF * .32); lastSh = shv; } else shv = lastSh; }   // shadows change slowly along a ray: work one out every other step
+          if (shv < 0.) { if (mod(float(i), 3.) < 1.) { shv = dustLo(q + lF * .32); lastSh = shv; } else shv = lastSh; }   // shadows change slowly along a ray: work one out every other step
           float shd = exp(-shv * 8.5);
           vec3 alb = mix(tint, vec3(.62, .46, .36), .4);                       // dusty, a little warm
           vec3 lit = alb * (uKey * shd * 1.45 + uAmb * .07) + tint * (1. - dust) * .26;   // thin edges glow in their own colour
@@ -382,16 +384,18 @@ void main() {
 const NEB_RESOLVE = `precision highp float;
 uniform sampler2D uCur, uHist; uniform vec2 uPx, uTx, uJit; uniform float uMix;
 void main() {
-  vec2 uv = gl_FragCoord.xy * uPx, cu = uv + uJit;   // undo this frame's sub-pixel shift, so the blend gains real detail beyond the render resolution
-  vec3 c = texture2D(uCur, cu).rgb, mn = c, mx = c, av = c;
+  vec2 uv = gl_FragCoord.xy * uPx, cu = uv + uJit;           // undo this frame's sub-pixel shift
+  vec2 tc = (floor(cu / uTx) + .5) * uTx, dd = (cu - tc) / uTx;   // the one rendered sample nearest this screen pixel, and how far off it is
+  vec3 c = texture2D(uCur, tc).rgb, mn = c, mx = c, av = c;
   for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
     if (i == 0 && j == 0) continue;
-    vec3 s = texture2D(uCur, cu + vec2(float(i), float(j)) * uTx).rgb; mn = min(mn, s); mx = max(mx, s); av += s;
+    vec3 s = texture2D(uCur, tc + vec2(float(i), float(j)) * uTx).rgb; mn = min(mn, s); mx = max(mx, s); av += s;
   }
   av /= 9.;
   vec3 h = clamp(texture2D(uHist, uv).rgb, mn - .015, mx + .015);
-  float mv = smoothstep(.12, .45, length(av - h));            // where the picture really changed, follow it faster
-  gl_FragColor = vec4(mix(h, mix(c, av, .35 + .3 * mv), clamp(uMix + mv * .16, 0., 1.)), 1.);   // half of each new frame is its own neighbourhood average: grain never gets in, and where things move it blurs instead of going grainy
+  float mv = smoothstep(.08, .32, length(av - h));            // where the picture really changed, follow it at once
+  float w = exp(-dot(dd, dd) * 2.6) * 1.9;                    // a sample counts most for the screen pixel it actually landed on: over many frames this
+  gl_FragColor = vec4(mix(h, mix(c, texture2D(uCur, cu).rgb, .12 + .7 * mv), uMix > .99 ? 1. : clamp(uMix * w + mv * .3, 0., 1.)), 1.);   // builds detail finer than the render resolution
 }`;
 /* Draw the blended image on the screen at the display's full resolution, with a little sharpening. */
 const NEB_PRESENT = `precision highp float;
@@ -679,10 +683,10 @@ function nebFrame(c, t, mouse) {
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   const fl = NEB.flip = 1 - (NEB.flip || 0), R = NEB.res, O = NEB.out;                 // blend into the running image
   gl.useProgram(R.p); gl.bindFramebuffer(gl.FRAMEBUFFER, NEB.tg[1 + fl].fb);
-  gl.uniform1i(R.u.uCur, 1); gl.uniform1i(R.u.uHist, 3 - fl); gl.viewport(0, 0, CW, CH); gl.uniform2f(R.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(R.u.uTx, 1 / W, 1 / H); gl.uniform2f(R.u.uJit, jx / W, jy / H); gl.uniform1f(R.u.uMix, NEB.fresh ? 1 : .05); NEB.fresh = false;
+  gl.uniform1i(R.u.uCur, 1); gl.uniform1i(R.u.uHist, 3 - fl); gl.viewport(0, 0, CW, CH); gl.uniform2f(R.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(R.u.uTx, 1 / W, 1 / H); gl.uniform2f(R.u.uJit, jx / W, jy / H); gl.uniform1f(R.u.uMix, NEB.fresh ? 1 : .085); NEB.fresh = false;
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.useProgram(O.p); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, CW, CH);   // and show it at full resolution
-  gl.uniform1i(O.u.uTex, 2 + fl); gl.uniform1i(O.u.uNoise, 0); gl.uniform2f(O.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(O.u.uTx, 1 / CW, 1 / CH); gl.uniform1f(O.u.uSharp, .1);
+  gl.uniform1i(O.u.uTex, 2 + fl); gl.uniform1i(O.u.uNoise, 0); gl.uniform2f(O.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(O.u.uTx, 1 / CW, 1 / CH); gl.uniform1f(O.u.uSharp, .15);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   // where things are on screen, for touch
