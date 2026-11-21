@@ -65,7 +65,8 @@ Stable Audio Open is gated: accept the license on its
 Press **◍ gym**. A creature is a LoRA adapter for ACE-Step, trained on audio you feed it.
 
 1. **Hatch** one by giving it a name.
-2. **Feed** it: drop your tracks on the gym screen, or press `◍` on any result on the canvas.
+2. **Feed** it: drop your tracks on the gym screen, press `◍` on any result on the canvas, or use
+   **feed a folder** to scan a whole folder and tick the tracks you want (they are linked, not copied).
    10–30 tracks in one style is a good start. Describe its sound in tags, since good captions matter a lot.
 3. **Train** it. Training runs on the Apple GPU with ACE-Step's own trainer, saves a checkpoint every
    10 epochs, and can be stopped and continued any time.

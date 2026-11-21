@@ -191,7 +191,7 @@ function gymBuild() {
         return h('div', { class: 'food-row', style: `--c:hsl(${hueOf(f.bright ?? .3)},90%,60%)` }, h('i'), h('div', {}, h('b', { title: f.name }, f.name), h('small', {}, `${Math.round(f.secs)}s · ~${Math.round(f.bpm || 0)} bpm · bass ${Math.round((f.low || 0) * 100)}% · bright ${Math.round((f.bright || 0) * 100)}%`), cap),
           h('button', { title: 'Take this track away', disabled: running, onclick: () => gymDo(() => api(`/api/gym/${c.slug}/food/${encodeURIComponent(f.name)}`, { method: 'DELETE' })) }, '×'));
       }) : h('p', { class: 'gym-note' }, 'Nothing yet. Drop audio files anywhere on this screen.')),
-      h('button', { onclick: () => { const i = $('#gym-pick'); i.value = ''; i.click(); } }, '+ feed audio…'),
+      h('div', { class: 'acts' }, h('button', { disabled: running, onclick: () => { const i = $('#gym-pick'); i.value = ''; i.click(); } }, '+ feed files…'), h('button', { disabled: running, title: 'Pick a folder. Tracks are linked where they are, not copied.', onclick: gymPickFolder }, '+ feed a folder…')),
       h('h3', {}, 'identity'),
       h('label', { title: 'Used as the caption for every track that has no caption of its own. Good tags make a much better creature.' }, h('span', {}, 'its sound, in tags'), style),
       h('label', { title: 'A made-up word the model learns to associate with this sound. Zvoid adds it to your caption automatically when the creature is active.' }, h('span', {}, 'trigger word'), tag),
@@ -209,9 +209,60 @@ function gymBuild() {
           : h('button', { class: 'hot', disabled: !c.food.length, onclick: () => go(false) }, c.epochs ? 'train more ▸' : 'train ▸'),
         !running && c.epochs ? h('button', { title: 'Forget everything it learned and train again from zero', onclick: () => { if (confirm(`Erase what “${c.name}” has learned and start over? Its food stays.`)) go(true); } }, 'start over') : null,
         !running ? h('button', { class: 'danger', onclick: () => { if (confirm(`Release “${c.name}” for good? This deletes its food copies and everything it learned.`)) gymDo(async () => { await api('/api/gym/' + c.slug, { method: 'DELETE' }); Gym.cur = null; }); } }, 'release') : null),
-      h('p', { class: 'gym-note' }, 'Training uses the Apple GPU and pauses the ace-step module. Stopping keeps the last checkpoint (saved every 10 epochs).'));
+      h('p', { class: 'gym-note' }, 'Training uses the Apple GPU and pauses the ace-step module. Stopping keeps the last checkpoint (saved every 5 epochs).'));
   }
   el.replaceChildren(left, stage, right, h('input', { id: 'gym-pick', type: 'file', multiple: true, accept: 'audio/*,.wav,.mp3,.flac,.aiff,.aif,.ogg,.m4a', hidden: true, onchange: e => gymFeedFiles([...e.target.files]) }));
+}
+
+/* ---------- feed a whole folder: scan, choose, link (no copies) ---------- */
+async function gymPickFolder() {
+  if (!Gym.cur) return toast('hatch a creature first', true);
+  let path; try { path = (await api('/api/pick_folder', { method: 'POST' })).path; } catch (e) { return toast(String(e.message || e), true); }
+  if (!path) return;
+  $('#gym-status').textContent = 'looking through the folder…';
+  let res; try { res = await api('/api/gym_scan', { json: { path } }); } catch (e) { return toast(String(e.message || e), true); }
+  if (!res.files.length) return toast('no audio found in that folder', true);
+  gymFolderPicker(res);
+}
+function gymFolderPicker(res) {
+  const fmt = s => s == null ? '?' : s >= 60 ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : Math.round(s) + 's';
+  const minIn = h('input', { type: 'number', min: 0, step: 5, value: 30, style: 'width:70px' }), filt = h('input', { placeholder: 'filter by name…', spellcheck: 'false' });
+  const list = h('div', { class: 'pick-list' }), sum = h('div', { class: 'pick-sum' }), feedB = h('button', { class: 'hot' }, 'feed');
+  const chosen = new Set();
+  const visible = () => res.files.filter(f => (f.secs == null || f.secs >= (+minIn.value || 0)) && f.rel.toLowerCase().includes(filt.value.toLowerCase()));
+  const update = () => { const sel = res.files.filter(f => chosen.has(f.path)), mins = sel.reduce((a, f) => a + Math.min(f.secs || 0, 240), 0) / 60;
+    sum.textContent = `${sel.length} of ${res.files.length} selected · ~${Math.round(mins)} min of training audio` + (sel.length > 60 ? ' · that is a lot: each epoch will be slow' : '');
+    feedB.textContent = `feed ${sel.length} track${sel.length === 1 ? '' : 's'}`; feedB.disabled = !sel.length; };
+  const draw = () => {
+    const vis = visible(), groups = [...new Set(vis.map(f => f.group))];
+    list.replaceChildren(...groups.map(gname => {
+      const fs = vis.filter(f => f.group === gname), all = fs.every(f => chosen.has(f.path));
+      const gcb = h('input', { type: 'checkbox' }); gcb.checked = all; gcb.onchange = () => { fs.forEach(f => gcb.checked ? chosen.add(f.path) : chosen.delete(f.path)); draw(); };
+      return h('div', { class: 'pick-group' }, h('label', { class: 'pick-head' }, gcb, h('b', {}, gname || '(top level)'), h('small', {}, fs.length + ' files')),
+        fs.map(f => { const cb = h('input', { type: 'checkbox' }); cb.checked = chosen.has(f.path); cb.onchange = () => { cb.checked ? chosen.add(f.path) : chosen.delete(f.path); update(); };
+          return h('label', { class: 'pick-row', title: f.rel }, cb, h('span', {}, gname ? f.rel.slice(gname.length + 1) : f.rel), h('small', {}, `${fmt(f.secs)} · ${f.mb} MB`)); }));
+    }));
+    update();
+  };
+  minIn.oninput = filt.oninput = draw;
+  const box = h('div', { id: 'gym-picker' },
+    h('div', { class: 'drawer-head' }, h('span', {}, res.name), h('button', { onclick: () => box.remove() }, '×')),
+    h('p', { class: 'gym-note' }, `Found ${res.files.length} audio files. Tick the finished tracks that sound like the creature you want. Loops, stems and one-shots teach it less. Files are linked where they are, not copied.`),
+    h('div', { class: 'pick-tools' }, h('label', {}, h('span', {}, 'hide shorter than (s)'), minIn), filt,
+      h('button', { onclick: () => { visible().forEach(f => chosen.add(f.path)); draw(); } }, 'all shown'), h('button', { onclick: () => { chosen.clear(); draw(); } }, 'none')),
+    list, sum,
+    h('div', { class: 'acts' }, feedB, h('button', { onclick: () => box.remove() }, 'cancel')));
+  feedB.onclick = async () => {
+    const paths = [...chosen]; feedB.disabled = true; let skipped = [];
+    for (let i = 0; i < paths.length; i += 5) {
+      sum.textContent = `eating ${Math.min(i + 5, paths.length)} / ${paths.length}…`;
+      try { const r = await api(`/api/gym/${Gym.cur.slug}/feed_links`, { json: { paths: paths.slice(i, i + 5) } }); skipped = skipped.concat(r.skipped || []); Gym.cur = r; }
+      catch (e) { toast(String(e.message || e), true); break; }
+    }
+    box.remove(); await gymLoad(Gym.cur.slug);
+    toast(skipped.length ? `fed, but ${skipped.length} file${skipped.length > 1 ? 's' : ''} could not be read` : `“${Gym.cur.name}” ate ${paths.length} track${paths.length === 1 ? '' : 's'}`, !!skipped.length);
+  };
+  $('#gym-picker')?.remove(); $('#gym-stage').append(box); draw();
 }
 
 /* feed a result from the canvas straight to a creature */

@@ -165,6 +165,70 @@ def feed(slug: str, src: Path, name: str) -> dict:
     return _view(c)
 
 
+AUDIO_EXT = {".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".m4a", ".opus"}
+
+
+def scan(folder: str) -> dict:
+    """List the audio in a folder (and its subfolders) so the user can choose what to feed."""
+    root = Path(folder).expanduser().resolve()
+    home = Path.home().resolve()
+    if not root.is_dir() or not (home in root.parents or root == home or str(root).startswith("/Volumes/")):
+        raise ValueError("Pick a folder inside your home folder or on an external drive.")
+    files = []
+    for f in sorted(root.rglob("*")):
+        if len(files) >= 3000:
+            break
+        if f.suffix.lower() not in AUDIO_EXT or not f.is_file() or any(part.startswith(".") for part in f.relative_to(root).parts):
+            continue
+        try:
+            info = sf.info(str(f))
+            secs = round(info.frames / info.samplerate, 1)
+        except Exception:
+            secs = None
+        rel = f.relative_to(root)
+        files.append({"path": str(f), "rel": str(rel), "group": rel.parts[0] if len(rel.parts) > 1 else "", "secs": secs,
+                      "mb": round(f.stat().st_size / 1e6, 1)})
+    return {"folder": str(root), "name": root.name, "files": files}
+
+
+def feed_links(slug: str, paths: list[str]) -> dict:
+    """Feed files where they are: the creature keeps a link, not a copy. Returns the creature plus what was skipped."""
+    c = _load(slug)
+    food = _dir(slug) / "food"
+    known = {f.get("src") for f in c["food"]}
+    skipped = []
+    for raw in paths:
+        src = Path(raw).expanduser().resolve()
+        if str(src) in known:
+            continue
+        if not src.is_file() or src.suffix.lower() not in AUDIO_EXT:
+            skipped.append(src.name)
+            continue
+        stem = re.sub(r"[^\w\- ]+", "_", src.stem)[:60] or "track"
+        try:
+            sf.info(str(src))
+            dst = food / f"{stem}{src.suffix.lower()}"
+            i = 2
+            while dst.exists() or dst.is_symlink():
+                dst = food / f"{stem}-{i}{src.suffix.lower()}"
+                i += 1
+            dst.symlink_to(src)
+            feats = features(dst)
+        except Exception:
+            try:                                        # a format we can't read directly: fall back to a converted copy
+                _save(c)
+                c = _load(slug) if feed(slug, src, src.name) else c
+                c["food"][-1]["src"] = str(src)
+                known.add(str(src))
+            except Exception:
+                skipped.append(src.name)
+            continue
+        c["food"].append(dict(feats, name=dst.name, caption="", src=str(src), fed=time.strftime("%Y-%m-%d %H:%M:%S")))
+        known.add(str(src))
+    _save(c)
+    return dict(_view(c), skipped=skipped)
+
+
 def unfeed(slug: str, name: str) -> dict:
     c = _load(slug)
     c["food"] = [f for f in c["food"] if f["name"] != name]
@@ -188,13 +252,16 @@ def train(slug: str, opt: dict, before=None) -> dict:
             before()                                  # free the generation model's memory
         more = max(1, int(opt.get("epochs", 100)))
         fresh = bool(opt.get("fresh"))
+        lora = _dir(slug) / "lora"
+        if not fresh and not any((lora / "checkpoints").glob("epoch_*")) and c["epochs"]:
+            c["history"], c["epochs"] = [], 0          # an earlier session died before its first checkpoint: nothing to resume
         base = 0 if fresh else c["epochs"]
         if fresh:
             shutil.rmtree(_dir(slug) / "lora", ignore_errors=True)
             c["history"], c["epochs"] = [], 0
         run = dict(opt, target_epochs=base + more, style=c.get("style", ""), tag=c.get("tag", ""),
                    captions={f["name"]: f.get("caption", "") for f in c["food"]},
-                   save_every=max(1, min(int(opt.get("save_every", 10)), more)))
+                   save_every=max(1, min(int(opt.get("save_every", 5)), more)))
         run.pop("epochs", None)
         c["sessions"] = c.get("sessions", 0) + 1
         c["settings"] = {k: run[k] for k in ("rank", "lr", "dropout", "max_duration") if k in run}

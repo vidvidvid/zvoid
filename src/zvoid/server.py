@@ -273,6 +273,21 @@ def create_app():
         finally:
             tmp.unlink(missing_ok=True)
 
+    @app.post("/api/pick_folder")
+    def pick_folder():
+        """Native macOS folder chooser. Returns {"path": null} if cancelled."""
+        r = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder with prompt "Choose a folder of audio to feed")'],
+                           capture_output=True, text=True)
+        return {"path": r.stdout.strip() or None}
+
+    @app.post("/api/gym_scan")
+    def gym_scan(body: dict):
+        return gym_call(gym.scan, str(body.get("path", "")))
+
+    @app.post("/api/gym/{slug}/feed_links")
+    def gym_feed_links(slug: str, body: dict):
+        return gym_call(gym.feed_links, slug, [str(p) for p in (body.get("paths") or [])][:50])
+
     @app.delete("/api/gym/{slug}/food/{name}")
     def gym_unfeed(slug: str, name: str):
         return gym_call(gym.unfeed, slug, name)

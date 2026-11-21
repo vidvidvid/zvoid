@@ -38,7 +38,7 @@ def main():
     ckpt = _MODELS / "checkpoints"
     food, tensors, out = cdir / "food", cdir / "tensors", cdir / "lora"
     variant = opt.get("variant", "turbo")
-    files = sorted(f for f in food.iterdir() if f.suffix.lower() in AUDIO)
+    files = sorted(f for f in food.iterdir() if f.suffix.lower() in AUDIO and f.exists())  # skips links whose original moved
     if not files:
         raise RuntimeError("This creature has not been fed yet. Drop some audio on it first.")
 

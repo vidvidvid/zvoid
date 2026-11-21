@@ -407,6 +407,8 @@ async function loadSample(n, file) {
 addEventListener('dragover', e => { e.preventDefault(); });
 addEventListener('drop', e => {
   e.preventDefault();
+  const isDir = [...(e.dataTransfer.items || [])].some(i => { try { const en = i.webkitGetAsEntry && i.webkitGetAsEntry(); return en && en.isDirectory; } catch { return false; } });
+  if (isDir) { if (typeof Gym !== 'undefined' && Gym.open && Gym.cur) { toast('choose that folder in the dialog so it can be linked without copying'); return gymPickFolder(); } return toast('open the gym to feed a whole folder to a creature'); }
   const files = [...(e.dataTransfer.files || [])].filter(f => /audio|\.(wav|mp3|flac|aiff?|ogg|m4a)$/i.test(f.type + f.name));
   if (!files.length) return;
   if (typeof Gym !== 'undefined' && Gym.open) return gymFeedFiles(files);
