@@ -104,6 +104,12 @@ To delete a creature, press the × on its row or *delete creature* in the gym (c
   **Drag** across it to push through the dust and bow it: a continuous voice whose pitch follows what you pass over.
   Untrained, the voice is noisy, detuned and short. Training makes it purer, richer and longer.
 
+How it is drawn: once per frame the creature's whole volume (limbs, branches, voids, turbulence, shock fronts) is worked out
+one time into a 128³ 3D texture. The rays that make the picture then only look values up in it and add the fine grain, the
+skeleton and the light. This is several times faster than recomputing everything at every step of every ray, which is what
+the older single-pass renderer did (it remains as a fallback where 3D float textures are missing). The app log
+(`~/Library/Logs/Zvoid.log`) says which one is in use.
+
 The picture is built up over many frames: each frame looks through a slightly different spot inside every pixel, and the
 frames are blended, so edges are smooth and there is no grain. It is shown at your display's full resolution. The renderer
 picks the highest internal resolution that holds full frame rate on your machine (shown small in the top right).

@@ -409,6 +409,73 @@ void main() {
   gl_FragColor = vec4(c, 1.);
 }`;
 
+/* The restructured renderer. Once per frame the creature's whole volume (its limbs, branches, voids, the turbulence and the
+   shock fronts moving through it) is worked out one time, into a 3D texture. The rays then only look values up in that
+   texture and add the fine grain, the skeleton and the light. Before, every one of those things was recomputed at every
+   step of every ray. The shaders are derived from the single-pass one above, which stays as the fallback. */
+const NEB_VN = 128;
+function nebSources() {
+  const cut = NEB_FRAG.indexOf('void main()'), common = NEB_FRAG.slice(0, cut); let main = NEB_FRAG.slice(cut);
+  const i0 = main.indexOf('      vec3 s = p * .45 + uSeed;'), i1 = main.indexOf('      float haze = n3('); if (i0 < 0 || i1 < 0) throw new Error('march layout changed');
+  const sub = (src, a, b) => { if (!src.includes(a)) throw new Error('missing: ' + a.slice(0, 50)); return src.replace(a, b); };
+  let field = main.slice(i0, i1);
+  field = sub(field, '      vec3 lF = normalize(uLight - p); lF.x *= sx; vec3 rdF = vec3(rd.x * sx, rd.yz);\n', '');
+  field = sub(field, '      if (halo + sh < .03) continue;\n', '');
+  field = sub(field, '      float gk = 1.;\n', '');
+  field = sub(field, '      if (sh < .02) { gk = 1.9; t += dt * .9; }', '      //');
+  field = sub(field, '      float sx = uSym', '      vec3 dsp = q - p;\n      float sx = uSym');
+  const head = '#version 300 es\n#define texture2D texture\nprecision highp float; precision highp sampler3D;\n';
+  const bake = head + 'layout(location = 0) out vec4 o0; layout(location = 1) out vec4 o1; layout(location = 2) out vec4 o2; layout(location = 3) out vec4 o3; uniform float uZ;\n' + common +
+    'void main() {\n  vec3 p = vec3(gl_FragCoord.xy / ' + NEB_VN + '. * 2. - 1., uZ * 2. - 1.) * uB;\n  float turb = 1.1 + uLife.z * 1.4, tt = uT * .035;\n' + field +
+    '  o0 = vec4(sh, halo, hAlong, gTip); o1 = vec4(tint, cv); o2 = vec4(dsp, ring); o3 = vec4(grow * .3 - melt * .6, bloom, rip, melt);\n}';
+  const look = `      vec3 vc = p / (2. * uB) + .5; vec4 v0 = texture(uV0, vc); float sh = v0.x, halo = v0.y;
+      if (halo + sh < .03) continue;
+      float gk = 1.;
+      if (sh < .02) { gk = 1.9; t += dt * .9; }
+      vec4 v1 = texture(uV1, vc), v2 = texture(uV2, vc), v3 = texture(uV3, vc);
+      vec3 tint = v1.rgb, w = v2.xyz, q = p + w; float cv = v1.a, ring = v2.w, hAlong = v0.z, eadj = v3.x, bloom = v3.y, rip = v3.z, melt = v3.w;
+      float sx = uSym > .5 && q.x < 0. ? -1. : 1.; q.x = mix(q.x, abs(q.x), uSym);
+      vec3 lF = normalize(uLight - p); lF.x *= sx; vec3 rdF = vec3(rd.x * sx, rd.yz);
+      gBest = 1e3; if (sh > .02) nearPillar(q);
+`;
+  main = main.slice(0, i0) + look + main.slice(i1);
+  main = sub(main, '- melt * .6 + grow * .3', '+ eadj');
+  if (!main.includes('dustLo(q + lF * .32)')) throw new Error('missing shadow call');
+  main = main.split('dustLo(q + lF * .32)').join('shadowAt(p + normalize(uLight - p) * .32, q + lF * .32)');
+  const extra = `uniform sampler3D uV0, uV1, uV2, uV3; out vec4 fragColor;
+#define gl_FragColor fragColor
+float nearPillar(vec3 q) {                   // which limb a point belongs to, for the frame and the grain. The dust itself comes from the volume.
+  gBest = 1e3;
+  for (int i = 0; i < 6; i++) {
+    if (uCol[i].w > .5) {
+      vec3 ba = uAxis[i].xyz * uAxis[i].w, pa = q - uPole[i].xyz; float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.), r0 = uPole[i].w; vec4 tr = uTrait[i];
+      float sd = length(pa - ba * h) - r0 * (1. - (.28 + .58 * tr.z) * h) * (1. + tr.w * .5 * (1. - h) * (1. - h));
+      if (sd / r0 < gBest) { gBest = sd / r0; gPa = pa; gBa = ba; gR0 = r0; gTr = tr; gTr2 = uTrait2[i]; }
+    }
+  }
+  return gBest;
+}
+float shadowAt(vec3 ps, vec3 qs) {           // how much dust lies toward the light: two lookups and two noise fetches
+  vec3 c = ps / (2. * uB) + .5; float s = texture(uV0, c).x;
+  if (s < .02) return 0.;
+  return smoothstep(-.3, .3, s + (fbm2(qs * 1.6 + vec3(0., -uT * .03, uT * .015) + uSeed) - .47) * 1.6 - .8) * texture(uV1, c).a;
+}
+`;
+  let march = head + common + extra + main;
+  march = sub(march, 'const int STEPS = 68;', 'const int STEPS = 88;');           // steps are cheap now, so take more of them
+  march = sub(march, 'mod(float(i), 3.) < 1.', 'mod(float(i), 2.) < 1.');
+  return { bake, march };
+}
+function nebScene(W, H) {                         // send this frame's values to each program, fill the volume, then draw the picture from it
+  const gl = NEB.gl, V = NEB.vol, play = P => { gl.useProgram(P.p); for (const [fn, name, args] of NEB.calls) { const l = P.u[name]; if (l) gl[fn](l, ...args); } };
+  if (V) {
+    play(V.bake); gl.viewport(0, 0, V.n, V.n);
+    for (let z = 0; z < V.n; z++) { gl.bindFramebuffer(gl.FRAMEBUFFER, V.fbs[z]); gl.uniform1f(V.bake.u.uZ, (z + .5) / V.n); gl.drawArrays(gl.TRIANGLES, 0, 3); }
+    play(V.march);
+  } else play(NEB.main);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, NEB.tg[0].fb); gl.viewport(0, 0, W, H); gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
 function nebInit(cv) {
   const opts = { antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: false };
   let gl = cv.getContext('webgl2', opts); const gl2 = !!gl; if (!gl) gl = cv.getContext('webgl', opts);
@@ -416,11 +483,24 @@ function nebInit(cv) {
   NEB.hdr = gl2 && !!gl.getExtension('EXT_color_buffer_float');   // 16-bit targets, so frames can be blended without banding
   const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
   const vs = sh(gl.VERTEX_SHADER, 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0., 1.); }');
-  const mk = (src, names) => { const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, src)); gl.bindAttribLocation(p, 0, 'a'); gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); const u = {}; for (const n of names) u[n] = gl.getUniformLocation(p, n); return { p, u }; };
+  const vs3 = gl2 ? sh(gl.VERTEX_SHADER, '#version 300 es\nin vec2 a; void main(){ gl_Position = vec4(a, 0., 1.); }') : null;
+  const mk = (src, names, v) => { const p = gl.createProgram(); gl.attachShader(p, v || vs); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, src)); gl.bindAttribLocation(p, 0, 'a'); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); const u = {}; for (const n of names) u[n] = gl.getUniformLocation(p, n);
+    const nu = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); for (let i = 0; i < nu; i++) { const nm = gl.getActiveUniform(p, i).name.replace(/\[0\]$/, ''); u[nm] = gl.getUniformLocation(p, nm); } return { p, u }; };
   NEB.res = mk(NEB_RESOLVE, ['uCur', 'uHist', 'uPx', 'uTx', 'uJit', 'uMix']); NEB.out = mk(NEB_PRESENT, ['uTex', 'uNoise', 'uPx', 'uTx', 'uSharp']);
-  const pr = mk(NEB_FRAG, []).p; NEB.pr = pr;
-  gl.useProgram(pr);
+  NEB.vol = null;
+  if (NEB.hdr && !NEB.noVol) try {
+    const S = nebSources(), n = NEB_VN, V = { n, bake: mk(S.bake, [], vs3), march: mk(S.march, [], vs3), tex: [], fbs: [] };
+    for (let k = 0; k < 4; k++) { const t = gl.createTexture(); gl.activeTexture(gl.TEXTURE4 + k); gl.bindTexture(gl.TEXTURE_3D, t); gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA16F, n, n, n, 0, gl.RGBA, gl.HALF_FLOAT, null);
+      for (const [a, b] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_3D, a, b); V.tex.push(t); }
+    for (let z = 0; z < n; z++) { const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f); for (let k = 0; k < 4; k++) gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + k, V.tex[k], 0, z);
+      gl.drawBuffers([0, 1, 2, 3].map(k => gl.COLOR_ATTACHMENT0 + k)); if (z === 0 && gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error('volume target incomplete'); V.fbs.push(f); }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.activeTexture(gl.TEXTURE0);
+    gl.useProgram(V.march.p); for (let k = 0; k < 4; k++) gl.uniform1i(V.march.u['uV' + k], 4 + k); gl.uniform1i(V.march.u.uNoise, 0); gl.useProgram(V.bake.p); gl.uniform1i(V.bake.u.uNoise, 0);
+    NEB.vol = V;
+  } catch (e) { console.warn('volume renderer unavailable, using the single-pass one:', e.message); NEB.vol = null; NEB.volErr = String(e.message); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.activeTexture(gl.TEXTURE0); }
+  if (!NEB.vol) { NEB.main = mk(NEB_FRAG, []); gl.useProgram(NEB.main.p); gl.uniform1i(NEB.main.u.uNoise, 0); }
+  NEB.calls = []; NEB.shim = new Proxy(gl, { get: (g, k) => typeof k === 'string' && k.startsWith('uniform') ? (loc, ...a) => { NEB.calls.push([k, loc, a]); } : (typeof g[k] === 'function' ? g[k].bind(g) : g[k]) });   // uniforms are recorded by name, then sent to whichever programs draw this frame
   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   // noise texture: G is R shifted by (37,17), which lets one fetch give two layers of 3D noise
@@ -431,8 +511,7 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uTrait', 'uTrait2', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine', 'uEvP', 'uEvI']) NEB.U[n] = gl.getUniformLocation(pr, n);
-  gl.uniform1i(NEB.U.uNoise, 0);
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uTrait', 'uTrait2', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine', 'uEvP', 'uEvI']) NEB.U[n] = n;
   NEB.gl = gl; NEB.nz = r;
 }
 /* Three off-screen targets at the render resolution: this frame, and two that take turns holding the running blend. */
@@ -467,7 +546,7 @@ const hsl2rgb = (h, s, l) => { h = ((h % 360) + 360) % 360 / 360; const q = l < 
 const nvec = (t, k) => [noise(t + k), noise(t * 1.07 + k + 31.7), noise(t * .93 + k + 77.1)];
 
 function nebFrame(c, t, mouse) {
-  const gl = NEB.gl, cv = NEB.canvas, U = NEB.U, d = dna(c), fx = fxOf(c.slug), n = d.n, sd = d.seed * 100;
+  const GL = NEB.gl, gl = NEB.shim, cv = NEB.canvas, U = NEB.U, d = dna(c), fx = fxOf(c.slug), n = d.n, sd = d.seed * 100;
   // resolution: as sharp as this machine can hold at full frame rate
   if (NEB.last) {
     const fdt = Math.min(.1, t - NEB.last); NEB.acc += fdt; NEB.fast = (NEB.fast || 0) + fdt; NEB.fastN = (NEB.fastN || 0) + 1;
@@ -485,8 +564,8 @@ function nebFrame(c, t, mouse) {
   const CW = Math.max(2, Math.round(cw * dpr)), CH = Math.max(2, Math.round(ch * dpr));   // the canvas itself is always at the display's full resolution
   if (cv.width !== CW || cv.height !== CH) { cv.width = CW; cv.height = CH; }
   nebTargets(W, H, CW, CH);
-  gl.useProgram(NEB.pr); gl.bindFramebuffer(gl.FRAMEBUFFER, NEB.tg[0].fb);
-  gl.viewport(0, 0, W, H);
+  NEB.calls.length = 0;
+  NEB.nf = (NEB.nf || 0) + 1; if ((NEB.nf === 2 || NEB.nf === 200) && typeof _clog === 'function') _clog(`info: entity renderer ${NEB.vol ? 'volume' : 'single-pass' + (NEB.volErr ? ' (' + NEB.volErr.slice(0, 160) + ')' : '')}, frame ${NEB.nf}, ${NEB.ms ? NEB.ms.toFixed(1) + ' ms' : 'timing…'}, ${NEB.tw}x${NEB.th}`);   // one line in the app log saying which renderer is in use
   const fr = (NEB.fr || 0) + 1, hal = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
   const jx = hal(fr % 16 + 1, 2) - .5, jy = hal(fr % 16 + 1, 3) - .5;   // a different spot inside the pixel every frame
 
@@ -680,14 +759,14 @@ function nebFrame(c, t, mouse) {
   }
   const D = NEB.drag; D.s += ((D.on ? 1 : 0) - D.s) * Math.min(1, dt * (D.on ? 9 : 2.2)); gl.uniform4f(U.uTouch, D.p[0], D.p[1], D.p[2], D.s < .01 ? 0 : D.s);
   gl.uniform1f(U.uFine, NEB.fine == null ? .42 : NEB.fine); gl.uniform3fv(U.uLight, light); gl.uniform3fv(U.uKey, key); gl.uniform3fv(U.uAmb, amb);
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  nebScene(W, H);
   const fl = NEB.flip = 1 - (NEB.flip || 0), R = NEB.res, O = NEB.out;                 // blend into the running image
-  gl.useProgram(R.p); gl.bindFramebuffer(gl.FRAMEBUFFER, NEB.tg[1 + fl].fb);
-  gl.uniform1i(R.u.uCur, 1); gl.uniform1i(R.u.uHist, 3 - fl); gl.viewport(0, 0, CW, CH); gl.uniform2f(R.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(R.u.uTx, 1 / W, 1 / H); gl.uniform2f(R.u.uJit, jx / W, jy / H); gl.uniform1f(R.u.uMix, NEB.fresh ? 1 : .085); NEB.fresh = false;
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
-  gl.useProgram(O.p); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, CW, CH);   // and show it at full resolution
-  gl.uniform1i(O.u.uTex, 2 + fl); gl.uniform1i(O.u.uNoise, 0); gl.uniform2f(O.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(O.u.uTx, 1 / CW, 1 / CH); gl.uniform1f(O.u.uSharp, .15);
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  GL.useProgram(R.p); GL.bindFramebuffer(GL.FRAMEBUFFER, NEB.tg[1 + fl].fb);
+  GL.uniform1i(R.u.uCur, 1); GL.uniform1i(R.u.uHist, 3 - fl); GL.viewport(0, 0, CW, CH); GL.uniform2f(R.u.uPx, 1 / CW, 1 / CH); GL.uniform2f(R.u.uTx, 1 / W, 1 / H); GL.uniform2f(R.u.uJit, jx / W, jy / H); GL.uniform1f(R.u.uMix, NEB.fresh ? 1 : .085); NEB.fresh = false;
+  GL.drawArrays(GL.TRIANGLES, 0, 3);
+  GL.useProgram(O.p); GL.bindFramebuffer(GL.FRAMEBUFFER, null); GL.viewport(0, 0, CW, CH);   // and show it at full resolution
+  GL.uniform1i(O.u.uTex, 2 + fl); GL.uniform1i(O.u.uNoise, 0); GL.uniform2f(O.u.uPx, 1 / CW, 1 / CH); GL.uniform2f(O.u.uTx, 1 / CW, 1 / CH); GL.uniform1f(O.u.uSharp, .15);
+  GL.drawArrays(GL.TRIANGLES, 0, 3);
 
   // where things are on screen, for touch
   fx.ngeom = { K, proj, unproj, dist, growth: d.growth, learned: d.learned,
