@@ -82,6 +82,9 @@ def _creature(dit, p, ctx):
     lora = cdir / "lora"
     found = [x for x in [lora / "final", *(lora / "checkpoints").glob("epoch_*")] if (x / "adapter_config.json").exists()] if slug else []
     final = max(found, key=lambda x: (x / "adapter_config.json").stat().st_mtime) if found else lora / "final"
+    at = Path(str(p.get("creature_at") or "").strip() or "/nonexistent")   # an earlier stage of it, for hearing how it learned
+    if slug and (at / "adapter_config.json").exists():
+        final, found = at, found or [at]
     want = None
     if slug:
         if not found:

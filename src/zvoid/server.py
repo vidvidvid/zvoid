@@ -410,8 +410,123 @@ def create_app():
         (d / f"f_{i:06d}.jpg").write_bytes(data)
         return {"ok": True}
 
+    def lapse_sound(slug: str, video: Path, e0: float, e1: float, job: dict):
+        """Give a time-lapse its sound: the creature's voice growing up, what it could really make at each stage it passed, and a song at the end."""
+        say = lambda m, f=None: job.update(msg=m, frac=f)
+        c, cdir = gym.get(slug), gym._dir(slug)
+        st = cdir / "stages"
+        st.mkdir(exist_ok=True)
+        pr = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "format=duration", "-of", "csv=p=0", str(video)], capture_output=True, text=True)
+        dur = float((pr.stdout or "0").strip() or 0)
+        if dur < 1:
+            raise RuntimeError("that video is too short to score")
+        say("gathering its memories…", .05)
+        limbs = []
+        for l in c.get("limbs") or [{"id": 0, "count": len(c["food"]), "mean": {}}]:
+            fs = sorted([f for f in c["food"] if (f.get("limb") or 0) == l["id"]] or c["food"], key=lambda f: f.get("core") or 0)[:3]
+            tracks = []
+            for f in fs:
+                try:
+                    tracks.append(str(gym.grain(slug, f["name"])))
+                except Exception:
+                    pass
+            if tracks:
+                limbs.append({"share": l["count"] / max(1, len(c["food"])), "low": (l.get("mean") or {}).get("low", .3), "tracks": tracks})
+        clips, song, tail = [], None, 0.0
+        e = engines.get("ace_step")
+        busy_here = gym._train.get("state") in ("running", "stopping") and not gym._train.get("remote")   # while it trains on this Mac the GPU is taken
+        if e and not busy_here:
+            main = max(c.get("limbs") or [{}], key=lambda l: l.get("count", 0))
+            caption = ", ".join(x for x in [c.get("style") or "", *((main.get("tags") or []) if not c.get("style") else []), "instrumental"] if x)
+            bpm = (main.get("mean") or {}).get("bpm")
+
+            def gen(at: Path, secs: float, out: Path, seed: int, label: str):
+                params = _coerce(e.spec, {"task": "text2music", "caption": caption, "lyrics": "[Instrumental]", "duration": secs, "thinking": False, "batch": 1,
+                                          "seed": seed, "creature": slug, "creature_strength": 1, **({"bpm": int(min(200, max(50, bpm)))} if bpm else {})})
+                params["creature_at"] = str(at)
+                run_dir = st / "_run"
+                shutil.rmtree(run_dir, ignore_errors=True)
+                run_dir.mkdir(parents=True)
+                outs = []
+                for ev in e.run(params, run_dir):
+                    if ev[0] == "progress":
+                        job.update(msg=f"{label}: {ev[1]}")
+                    else:
+                        outs = ev[1]
+                if outs:
+                    shutil.move(outs[0]["path"], out)
+                shutil.rmtree(run_dir, ignore_errors=True)
+
+            try:
+                stages = gym.stage_dirs(slug)
+                inside = sorted(ep for ep in stages if e0 < ep <= e1 + .5)
+                have = sorted(int(p.stem.split("_")[1]) for p in st.glob("epoch_*.wav") if e0 < int(p.stem.split("_")[1]) <= e1 + .5)
+                pick = inside if len(inside) <= 7 else sorted({inside[round(i * (len(inside) - 1) / 6)] for i in range(7)})
+                for k, ep in enumerate(pick):
+                    wav = st / f"epoch_{ep}.wav"
+                    if not wav.exists():
+                        say(f"hearing it as it was at epoch {ep}…", .1 + .5 * k / max(1, len(pick)))
+                        gen(stages[ep], 6, wav, 4242, f"epoch {ep}")
+                    if stages[ep].parent == st and wav.exists():
+                        shutil.rmtree(stages[ep], ignore_errors=True)        # its sound is kept; the snapshot itself is no longer needed
+                clips = [{"epoch": ep, "path": str(st / f"epoch_{ep}.wav")} for ep in sorted(set(pick) | set(have)) if (st / f"epoch_{ep}.wav").exists()]
+                final = cdir / "lora" / "final"
+                if (final / "adapter_config.json").exists() and e1 >= c.get("epochs", 0) - .5:      # the run reached where it is now: let it sing
+                    wav = st / f"song_{c['epochs']}.wav"
+                    if not wav.exists():
+                        say("asking it to sing…", .65)
+                        gen(final, 10, wav, 777, "its song")
+                    if wav.exists():
+                        song, tail = str(wav), 9.0
+            except Exception as ex:
+                job["info"]["note"] = f"made without generated clips: {str(ex)[:160]}"
+        say("composing the soundtrack…", .8)
+        py = gym.ENVS_DIR / "ace_step" / "bin" / "python"
+        wav = video.with_suffix(".soundtrack.wav")
+        spec = video.with_suffix(".soundtrack.json")
+        spec.write_text(json.dumps({"out": str(wav), "dur": dur, "tail": tail or 1.5, "e0": e0, "e1": e1, "history": c.get("history", []), "limbs": limbs, "clips": clips, "song": song,
+                                    "seed": abs(hash(video.name)) % 100000}), encoding="utf-8")
+        r = subprocess.run([str(py), str(Path(__file__).with_name("soundtrack_synth.py")), str(spec)], capture_output=True, text=True)
+        spec.unlink(missing_ok=True)
+        if r.returncode or not wav.exists():
+            raise RuntimeError("could not make the soundtrack: " + (r.stderr or "").strip()[-200:])
+        say("joining sound and picture…", .9)
+        out = video.with_name(video.stem + "-sound.mp4")
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-i", str(wav), "-filter_complex", f"[0:v]tpad=stop_mode=clone:stop_duration={(tail or 1.5):.2f}[v]",
+                            "-map", "[v]", "-map", "1:a", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "17", "-c:a", "aac", "-b:a", "256k", "-shortest", "-movflags", "+faststart", str(out)],
+                           capture_output=True, text=True)
+        wav.unlink(missing_ok=True)
+        if r.returncode or not out.exists():
+            raise RuntimeError("ffmpeg could not join them: " + (r.stderr or "").strip()[-200:])
+        return out, {"stages": [x["epoch"] for x in clips], "song": bool(song)}
+
+    def lapse_sound_job(slug: str, video: Path, e0: float, e1: float) -> dict:
+        job = {"id": uuid.uuid4().hex[:12], "engine": "timelapse", "state": "running", "msg": "starting", "frac": 0, "outputs": [], "info": {}, "error": None, "seed": None, "cancel": False}
+        jobs[job["id"]] = job
+
+        def work():
+            try:
+                out, info = lapse_sound(slug, video, e0, e1, job)
+                job["info"].update(info)
+                job.update(state="done", outputs=[{"path": str(out), "name": out.name, "type": "video"}], msg="sound added", frac=1)
+            except Exception as ex:
+                job.update(state="error", error=str(ex), msg="failed")
+
+        threading.Thread(target=work, daemon=True).start()
+        return job
+
+    @app.post("/api/gym/{slug}/lapse_sound")
+    def gym_lapse_sound(slug: str, body: dict):
+        """Add sound to a time-lapse that already exists. body: name (a file in outputs/recordings), e0, e1 (the epochs it covers)."""
+        video = OUTPUTS_DIR / "recordings" / Path(str(body.get("name", ""))).name
+        if not video.is_file() or video.suffix != ".mp4":
+            raise HTTPException(404, "no such time-lapse")
+        c = gym_call(gym.get, slug)
+        job = lapse_sound_job(slug, video, float(body.get("e0", 0)), float(body.get("e1", c.get("epochs", 0))))
+        return {"id": job["id"]}
+
     @app.post("/api/gym/{slug}/rec/{rid}/finish")
-    def gym_rec_finish(slug: str, rid: str):
+    def gym_rec_finish(slug: str, rid: str, body: dict | None = None):
         d = _rec_dir(slug, rid)
         frames = sorted(d.glob("f_*.jpg")) if d.is_dir() else []
         if not frames:
@@ -425,7 +540,14 @@ def create_app():
             raise HTTPException(400, "ffmpeg could not join the frames: " + (r.stderr or "").strip()[-200:])
         shutil.rmtree(d, ignore_errors=True)
         subprocess.run(["open", "-R", str(out)])
-        return {"path": str(out), "name": out.name, "frames": len(frames), "seconds": round(len(frames) / 30, 1)}
+        res = {"path": str(out), "name": out.name, "frames": len(frames), "seconds": round(len(frames) / 30, 1)}
+        b = body or {}
+        if b.get("e1") is not None and len(frames) >= 60:        # give it its sound, in the background
+            try:
+                res["sound_job"] = lapse_sound_job(slug, out, float(b.get("e0") or 0), float(b["e1"]))["id"]
+            except Exception:
+                pass
+        return res
 
     @app.delete("/api/gym/{slug}/food/{name}")
     def gym_unfeed(slug: str, name: str):

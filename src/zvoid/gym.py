@@ -503,9 +503,42 @@ def _remote_fetch(slug: str, r: dict):
     a.wait()
     if a.returncode or b.returncode:
         raise RuntimeError("could not bring the result back from the PC")
+    try:
+        _remote_stages(slug, r, cps)
+    except Exception:
+        pass                                           # hearing its stages later is a nicety: never let it block bringing the result home
     for _, n in cps[:-1]:
         _ps(r, f"Remove-Item -Recurse -Force {cdir}\\lora\\checkpoints\\{n}")
     return cps[-1][0] if cps else None
+
+
+def stage_dirs(slug: str) -> dict:
+    """The creature as it was at earlier points of its training: epoch -> a folder holding that adapter."""
+    d, out = _dir(slug), {}
+    for p in list((d / "lora" / "checkpoints").glob("epoch_*")) + list((d / "stages").glob("epoch_*")):
+        n = p.name.split("_")[1] if p.is_dir() else ""
+        if n.isdigit() and (p / "adapter_config.json").exists() and (p / "adapter_model.safetensors").exists():
+            out[int(n)] = p
+    return out
+
+
+def _remote_stages(slug: str, r: dict, cps: list):
+    """Before the PC's older checkpoints are cleared, keep a few of them (the adapter only) so the time-lapse can let you hear how it learned."""
+    if len(cps) < 2:
+        return
+    cdir, st = f"{r['dir']}\\app\\creatures\\{slug}", _dir(slug) / "stages"
+    st.mkdir(exist_ok=True)
+    pick = sorted({cps[round(i * (len(cps) - 2) / 6)] for i in range(7)} if len(cps) > 8 else set(cps[:-1]))
+    pick = [(e, n) for e, n in pick if not (st / f"epoch_{e}").exists() and not (st / f"epoch_{e}.wav").exists()]
+    if not pick:
+        return
+    want = " ".join(f"{n}/adapter_config.json {n}/adapter_model.safetensors" for _, n in pick)
+    a = subprocess.Popen(_ssh_base(r) + [f"tar -cf - -C {cdir}\\lora\\checkpoints " + want], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    b = subprocess.run(["tar", "-xf", "-", "-C", str(st)], stdin=a.stdout, capture_output=True, text=True)
+    a.wait()
+    for e, n in pick:
+        if (st / n).is_dir():
+            (st / n).rename(st / f"epoch_{e}")
 
 
 def _remote_kill(r: dict):
