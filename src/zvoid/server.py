@@ -319,7 +319,8 @@ def create_app():
         d.mkdir(parents=True, exist_ok=True)
         f = d / f"{gym.slugify(slug)}-{time.strftime('%Y%m%d-%H%M%S')}.png"
         f.write_bytes(data)
-        subprocess.run(["open", "-R", str(f)])
+        if request.query_params.get("quiet") != "1":
+            subprocess.run(["open", "-R", str(f)])
         return {"path": str(f), "name": f.name}
 
     @app.post("/api/gym/{slug}/film")

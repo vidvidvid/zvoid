@@ -875,7 +875,7 @@ function nebFrame(c, t, mouse, onScreen) {
       const g2 = c2.getContext('2d'), row = CW * 4, tmp = new Uint8ClampedArray(row); for (let y = 0; y < CH >> 1; y++) { const a0 = y * row, b0 = (CH - 1 - y) * row; tmp.set(px.subarray(a0, a0 + row)); px.copyWithin(a0, b0, b0 + row); px.set(tmp, b0); }
       g2.putImageData(new ImageData(px, CW, CH), 0, 0); c2.toBlob(b => sh.done(b), 'image/jpeg', .93); }
     else if (sh.n >= sh.frames) { NEB.shot = null; NEB.last = 0; NEB.frames = 0; NEB.acc = 0;
-      cv.toBlob(b => { if (sh.rec) return sh.done(b); if (!b) return toast('capture failed', true); fetch(`/api/gym/${sh.slug}/capture`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: b }).then(r => r.json()).then(r => toast(r.name ? 'saved ' + r.name : 'capture failed', !r.name)).catch(e => toast('capture failed: ' + e.message, true)); }, sh.rec ? 'image/jpeg' : 'image/png', .93); } }
+      cv.toBlob(b => { if (sh.rec) return sh.done(b); if (!b) return toast('capture failed', true); fetch(`/api/gym/${sh.slug}/capture${NEB.quietShot ? '?quiet=1' : ''}`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: b }).then(r => r.json()).then(r => toast(r.name ? 'saved ' + r.name : 'capture failed', !r.name)).catch(e => toast('capture failed: ' + e.message, true)); }, sh.rec ? 'image/jpeg' : 'image/png', .93); } }
 
   // where things are on screen, for touch
   fx.ngeom = { K, proj, unproj, dist, growth: d.growth, learned: d.learned,
