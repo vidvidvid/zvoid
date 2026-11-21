@@ -1,0 +1,10 @@
+.venv/
+.envs/
+outputs/
+__pycache__/
+*.pyc
+.DS_Store
+models/
+.webview/
+.claude/
+patches/

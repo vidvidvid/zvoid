@@ -1,0 +1,5 @@
+#!/bin/bash
+# Soundlab launcher. ./soundlab            → open the app
+#                    ./soundlab install X  → install engine X (or all)
+#                    ./soundlab list       → show engines
+cd "$(dirname "$0")" && exec uv run --quiet soundlab "$@"

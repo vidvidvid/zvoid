@@ -1,0 +1,26 @@
+{
+  "name": "Demucs stems",
+  "tab": "Stems",
+  "kind": "tool",
+  "action": "Split into stems",
+  "tagline": "Split any track into **drums, bass, vocals, other** (or 6 stems with guitar + piano). Use the stems as inputs for the other engines.",
+  "python": "3.11",
+  "requirements": ["torch", "torchaudio", "demucs==4.0.1", "soundfile", "librosa", "numpy<2"],
+  "disk": "80–320 MB per model",
+  "license": "MIT",
+  "label_param": "audio",
+  "params": [
+    {"name": "audio", "type": "audio", "label": "Track to split"},
+    {"name": "model", "type": "choice", "default": "htdemucs",
+     "choices": ["htdemucs", "htdemucs_ft", "htdemucs_6s", "hdemucs_mmi", "mdx_extra"],
+     "help": "htdemucs = fast and good. htdemucs_ft = best quality, 4× slower. htdemucs_6s adds guitar + piano."},
+    {"name": "two_stems", "type": "choice", "default": "all stems",
+     "choices": ["all stems", "vocals", "drums", "bass", "other", "guitar", "piano"],
+     "help": "Pick one to get just that stem plus everything else (e.g. vocals + instrumental)."},
+    {"name": "shifts", "type": "slider", "min": 0, "max": 10, "step": 1, "default": 1, "advanced": true,
+     "help": "Random-shift passes averaged together. Higher = slightly cleaner, slower."},
+    {"name": "overlap", "type": "slider", "min": 0, "max": 0.9, "step": 0.05, "default": 0.25, "advanced": true},
+    {"name": "device", "type": "choice", "default": "auto", "choices": ["auto", "mps", "cpu"], "advanced": true}
+  ],
+  "notes": "- Stems land next to each other in the run folder, ready to drag into your DAW.\n- Splitting a track you love, then feeding its **drums** into MusicGen continuation or its **melody stem** into MusicGen-Melody / Basic Pitch, is a great way to remix ideas."
+}

@@ -1,0 +1,27 @@
+{
+  "name": "Basic Pitch (audio → MIDI)",
+  "tab": "Audio → MIDI",
+  "kind": "tool",
+  "action": "Convert to MIDI",
+  "tagline": "Spotify's Basic Pitch turns audio into a **MIDI file** you can drag into your DAW. Works best on single instruments, so split stems first.",
+  "python": "3.11",
+  "requirements": ["basic-pitch[coreml]", "pretty_midi", "soundfile", "numpy<2", "setuptools<81"],
+  "disk": "< 50 MB",
+  "license": "Apache 2.0",
+  "label_param": "audio",
+  "params": [
+    {"name": "audio", "type": "audio", "label": "Audio to transcribe"},
+    {"name": "tempo", "type": "number", "default": 120, "help": "BPM written into the MIDI file, so it lines up with your project grid."},
+    {"name": "onset_threshold", "type": "slider", "min": 0.05, "max": 0.95, "step": 0.05, "default": 0.5,
+     "help": "Higher = fewer, more confident notes."},
+    {"name": "frame_threshold", "type": "slider", "min": 0.05, "max": 0.95, "step": 0.05, "default": 0.3,
+     "help": "Higher = notes end sooner, less smearing."},
+    {"name": "min_note_ms", "type": "slider", "min": 10, "max": 500, "step": 5, "default": 128, "advanced": true},
+    {"name": "min_freq", "type": "number", "default": 0, "advanced": true, "help": "Hz. 0 = no limit. Use ~30–250 for bass only."},
+    {"name": "max_freq", "type": "number", "default": 0, "advanced": true, "help": "Hz. 0 = no limit."},
+    {"name": "pitch_bends", "type": "bool", "default": false, "advanced": true, "help": "Write pitch bends (for vocals, guitar, synth slides)."},
+    {"name": "melodia_trick", "type": "bool", "default": true, "advanced": true, "help": "Cleans up melody lines. Turn off for chords/polyphony."},
+    {"name": "preview", "type": "bool", "default": true, "advanced": true, "help": "Also render a quick sine-wave preview so you can hear the MIDI here."}
+  ],
+  "notes": "- Bass, lead lines and vocals transcribe well. Full mixes get messy, so run **Stems** first.\n- Set **tempo** to your project BPM before dragging the .mid into Ableton."
+}
