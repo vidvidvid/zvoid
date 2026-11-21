@@ -86,7 +86,13 @@ def _creature(dit, p, ctx):
     if slug:
         if not found:
             raise ValueError(f"Creature “{slug}” hasn't been trained yet. Train it in the vivarium first.")
-        want = (str(final), (final / "adapter_model.safetensors").stat().st_mtime, id(dit))
+        load_dir = final
+        if "." in final.name:                       # checkpoint folders are named like epoch_20_loss_1.1957, and the loader uses the folder name
+            import re as _re                        # as a module name, where a dot is not allowed: load it through a link with a safe name
+            load_dir = lora / ("use_" + _re.sub(r"[^0-9A-Za-z_]", "_", final.name))
+            if not load_dir.exists():
+                load_dir.symlink_to(final.resolve(), target_is_directory=True)
+        want = (str(load_dir), (final / "adapter_model.safetensors").stat().st_mtime, id(dit))
     if _state.get("lora") != want:
         if _state.get("lora") and _state["lora"][2] == id(dit):
             dit.unload_lora()
