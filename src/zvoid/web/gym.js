@@ -239,6 +239,8 @@ function gymTouch(x, y) {
 const gymEl = () => $('#gym');
 async function openGym(slug) {
   Gym.open = true; gymEl().hidden = false; openDrawer(null);
+  if (Gym.list.length) { Gym.key = ''; gymRender(); cancelAnimationFrame(Gym.raf); gymFrame(); }               // show what we already know at once
+  else if (!gymEl().children.length) gymEl().replaceChildren(h('div', { style: 'grid-column:1/-1;display:grid;place-items:center;font:11px var(--mono);letter-spacing:.3em;color:var(--muted)' }, 'ENTERING THE GYM…'));
   await gymLoad(slug); clearInterval(Gym.timer); Gym.timer = setInterval(gymPoll, 1000);
   cancelAnimationFrame(Gym.raf); gymFrame();
 }
