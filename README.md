@@ -91,6 +91,9 @@ To delete a creature, press the × on its row or *delete creature* in the gym (c
 - **It behaves.** It drifts, breathes unevenly, and leans toward your pointer when it is curious.
 - **It answers touch, in its own voice.** A void flinches and answers with a deep tone. A pillar sings the track that lives
   at the height you touched. The haze chimes. Empty space gets a chirp. Each sends a shock front through the dust.
+  How it answers also varies, never the same twice running: plain echoes, a gallop of quick repeats, a rising or falling
+  run that sweeps a sheet of light through it, a slow shimmer of overtones, a swarm of small bursts, a breath in before a
+  strike (the dust implodes, then bursts), or one long still tone while the dust twists.
   **Drag** across it to push through the dust and bow it: a continuous voice whose pitch follows what you pass over.
   Untrained, the voice is noisy, detuned and short. Training makes it purer, richer and longer.
 

@@ -27,6 +27,8 @@ uniform vec4 uCol[6];    // rgb tint, w weight (0 = off)
 uniform vec4 uVoid[3];   // xyz, w radius
 uniform vec4 uWave[8];   // xyz origin, w radius
 uniform float uWaveAmp[8];
+uniform vec4 uWaveK[8];   // sharpness, kind (0 shell, 1 sheet, 2 twist)
+uniform vec4 uWaveN[8];   // direction of a sheet, or axis of a twist
 uniform vec4 uRip[6];    // per pillar: wavenumber, angular speed, phase, strength
 uniform vec4 uReson;     // ripple depth, reverb tail, reflected share, unused
 uniform vec4 uStar[8];   // xyz, w brightness
@@ -123,6 +125,22 @@ void main() {
   bg += vec3(.9, .95, 1.) * step(.9972, hs) * smoothstep(.45, 0., length(fract(gd) - .5)) * tw * (.5 + fract(hs * 57.) * .9);
 
   vec3 C = vec3(0.); float T = 1.;
+  // orbiting arcs: one ring per limb, broken into arcs that circle at its tempo. A thin plane, intersected exactly.
+  float tP = -1., ringA = 0.; vec3 ringC = vec3(0.);
+  if (uDisc.w > 0.) {
+    float dn = dot(rd, uDiscN), tq = abs(dn) > 1e-3 ? -dot(ro, uDiscN) / dn : -1.;
+    if (tq > 0.) {
+      vec3 pl = ro + rd * tq; float r = length(pl);
+      if (r > uDisc.x && r < uDisc.y) {
+        float ang = atan(dot(pl, uDiscU), dot(pl, uDiscV)), dd = 0., hm = 0.;
+        for (int j = 0; j < 8; j++) {
+          float rw = uRing[j].y;
+          if (rw > 0.) { float dr = (r - uRing[j].x) / .022, e = exp(-dr * dr) * smoothstep(-.15, .25, sin(ang * uRing[j].z + uT * uRing[j].w + float(j) * 2.4) - (1. - rw * 1.2)) * rw; dd += e; hm += e * fract(float(j) * .37 + .2); }
+        }
+        if (dd > .003) { ringA = 1. - exp(-dd * min(3.5, 1. / abs(dn)) * 1.1); ringC = mix(mix(uAmb, uKey, clamp(hm / dd, 0., 1.)), vec3(.9, .92, 1.), .45) * (.85 + uAud.w * 1.5 + uLife.w) * ringA; tP = tq; }
+      }
+    }
+  }
   float B = uB, b = dot(ro, rd), cc = dot(ro, ro) - B * B, h = b * b - cc;
   if (h > 0.) {
     h = sqrt(h);
@@ -131,26 +149,23 @@ void main() {
     float turb = 1.1 + uLife.z * 1.4, tt = uT * .035;
     for (int i = 0; i < STEPS; i++) {
       vec3 p = ro + rd * t;
-      float farP = nearest(p), farD = discDist(p), far = min(farP, farD);
+      if (tP > 0. && t >= tP) { C += T * ringC; T *= 1. - ringA * .35; tP = -1.; }   // the ray just passed through the arcs' plane
+      float far = nearest(p);
       if (far > 0.) { t += max(dt, far * .85); if (t > t1) break; continue; }
-      float ds = farP > 0. ? dt * .34 : dt;         // only rings here: take finer steps through their thin plane
-      t += ds; if (t > t1 + dt) break;
-      if (farD <= 0.) {                         // orbiting arcs: one ring per limb, broken into arcs that circle at its tempo
-        float hg = dot(p, uDiscN); vec3 pl = p - uDiscN * hg;
-        float r = length(pl), ang = atan(dot(pl, uDiscU), dot(pl, uDiscV)), dd = 0., hm = 0.;
-        for (int j = 0; j < 8; j++) {
-          float rw = uRing[j].y;
-          if (rw > 0.) { float dr = (r - uRing[j].x) / .026, e = exp(-dr * dr) * smoothstep(-.15, .25, sin(ang * uRing[j].z + uT * uRing[j].w + float(j) * 2.4) - (1. - rw * 1.2)) * rw; dd += e; hm += e * fract(float(j) * .37 + .2); }
-        }
-        if (dd > .003) { vec3 rc = mix(uAmb, uKey, clamp(hm / dd, 0., 1.)); dd *= exp(-hg * hg * 300.); float a = 1. - exp(-dd * ds * 20.); C += T * a * mix(rc, vec3(.9, .92, 1.), .45) * (.9 + uAud.w * 1.5 + uLife.w); T *= 1. - a * .35; }
-      }
-      if (farP > 0.) continue;
+      t += dt; if (t > t1 + dt) break;
       vec3 s = p * .45 + uSeed;
       vec3 w = (vec3(n3(s + vec3(0., tt, 0.)), n3(s + vec3(31.4, -tt, 7.7)), n3(s + vec3(5.2, 13.1, tt))) - .5) * turb;
       vec3 q = p + w; float ring = 0.;
       for (int k = 0; k < 8; k++) {            // shock fronts from touch, feeding, beats, and their echoes
         float a = uWaveAmp[k];
-        if (a > 0.) { vec3 e = q - uWave[k].xyz; float el = length(e) + 1e-3, dw = (el - uWave[k].w) * 2.2, g = exp(-dw * dw) * a; q += e / el * g * .3; ring += g; }
+        if (a > 0.) {
+          vec3 e = q - uWave[k].xyz, wn = uWaveN[k].xyz; float el = length(e) + 1e-3, kind = uWaveK[k].y;
+          float dm = kind > .5 && kind < 1.5 ? dot(e, wn) : el, dw = (dm - uWave[k].w) * uWaveK[k].x, g = exp(-dw * dw) * a;
+          if (kind > .5) g *= exp(-el * el * .1);
+          if (kind > 1.5) { float an = g * 1.5; q = uWave[k].xyz + e * cos(an) + cross(wn, e) * sin(an) + wn * dot(wn, e) * (1. - cos(an)); }   // twist the dust around an axis
+          else q += (kind > .5 ? wn : e / el) * g * .3;
+          ring += g;
+        }
       }
       if (uTouch.w > 0.) { vec3 e2 = q - uTouch.xyz; float tg = exp(-dot(e2, e2) * 2.6) * uTouch.w; q += normalize(e2 + 1e-4) * tg * .4; ring += tg * .7; }   // your finger in the dust
       vec3 tint; float halo; float sh = shapes(q, tint, halo);
@@ -190,6 +205,7 @@ void main() {
       }
     }
   }
+  if (tP > 0.) { C += T * ringC; T *= 1. - ringA * .35; }
   for (int k = 0; k < 8; k++) {                // the stars themselves
     float sb = uStar[k].w;
     if (sb > 0.) { vec3 so = uStar[k].xyz - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; C += vec3(1., .93, .86) * sb * (.0022 / (dot(dv, dv) + .0005)) * mix(1., T, .55) * step(0., tc); }
@@ -230,7 +246,7 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep']) NEB.U[n] = gl.getUniformLocation(pr, n);
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN']) NEB.U[n] = gl.getUniformLocation(pr, n);
   gl.uniform1i(NEB.U.uNoise, 0);
   NEB.gl = gl;
 }
@@ -302,13 +318,13 @@ function nebFrame(c, t, mouse) {
 
   // shock fronts
   fx.waves = fx.waves.filter(w => t - w.t0 < 5);
-  const wave = new Float32Array(32), wamp = new Float32Array(8), taps = [];
-  for (const w of fx.waves) for (const [dly, amp] of [[0, 1], [.55, .55], [1.15, .3], [1.85, .16]]) {           // each front echoes, like reverb taps
-    const age = t - w.t0 - dly; if (age < 0 || age > 2.6) continue;
-    const sl = N.slots[(w.pole || 0) % K], o = w.o || [sl.p[0] + sl.a[0] * sl.len * .5, sl.p[1] + sl.a[1] * sl.len * .5, sl.p[2] + sl.a[2] * sl.len * .5];
-    taps.push({ o, r: age * 2.1, a: (1 - age / 2.6) * (w.soft ? .5 : 1) * amp });
+  const wave = new Float32Array(32), wamp = new Float32Array(8), wk = new Float32Array(32), wnv = new Float32Array(32), taps = [];
+  for (const w of fx.waves) for (const [dly, amp] of (w.taps || [[0, 1], [.55, .55], [1.15, .3], [1.85, .16]])) {           // each front can come back, like reverb taps
+    const age = t - w.t0 - dly, life = w.life || 2.6; if (age < 0 || age > life) continue;
+    const sl = N.slots[(w.pole || 0) % K], o = w.o || [sl.p[0] + sl.a[0] * sl.len * .5, sl.p[1] + sl.a[1] * sl.len * .5, sl.p[2] + sl.a[2] * sl.len * .5], sp = w.speed || 2.1, mode = w.mode || 0;
+    taps.push({ o, r: w.implode ? Math.max(0, 2.6 - age * sp) : mode === 1 ? age * sp - 1.4 : mode === 2 ? age * sp * .6 : age * sp, a: (1 - age / life) * (w.soft ? .5 : 1) * amp * (w.amp || 1), k: w.width || 2.2, mode, n: w.n || [0, 1, 0] });
   }
-  taps.sort((a, b) => b.a - a.a).slice(0, 8).forEach((tp, k) => { wave.set([tp.o[0], tp.o[1], tp.o[2], tp.r], k * 4); wamp[k] = tp.a; });
+  taps.sort((a, b) => b.a - a.a).slice(0, 6).forEach((tp, k) => { wave.set([tp.o[0], tp.o[1], tp.o[2], tp.r], k * 4); wamp[k] = tp.a; wk.set([tp.k, tp.mode, 0, 0], k * 4); wnv.set([tp.n[0], tp.n[1], tp.n[2], 0], k * 4); });
 
   // resonance: each pillar emits at its limb's tempo; the tail keeps everything ringing after sound stops
   L.tail = Math.max(lv, (L.tail || 0) * Math.exp(-dt / 1.3));
@@ -331,7 +347,7 @@ function nebFrame(c, t, mouse) {
   gl.uniform1f(U.uT, t % 10000 * (d.training ? 1.5 : 1)); gl.uniform1f(U.uTan, tan); gl.uniform1f(U.uDist, dist); gl.uniform1f(U.uSeed, d.seed * 40);
   gl.uniformMatrix3fv(U.uCam, false, [M[0][0], M[1][0], M[2][0], M[0][1], M[1][1], M[2][1], M[0][2], M[1][2], M[2][2]]);
   gl.uniform4fv(U.uPole, pole); gl.uniform4fv(U.uAxis, axis); gl.uniform4fv(U.uCol, col); gl.uniform4fv(U.uVoid, voids);
-  gl.uniform4fv(U.uWave, wave); gl.uniform1fv(U.uWaveAmp, wamp); gl.uniform4fv(U.uRip, rip); gl.uniform4f(U.uReson, depth, L.tail, .35 + .4 * d.learned, 0); gl.uniform4fv(U.uStar, star);
+  gl.uniform4fv(U.uWave, wave); gl.uniform1fv(U.uWaveAmp, wamp); gl.uniform4fv(U.uWaveK, wk); gl.uniform4fv(U.uWaveN, wnv); gl.uniform4fv(U.uRip, rip); gl.uniform4f(U.uReson, depth, L.tail, .35 + .4 * d.learned, 0); gl.uniform4fv(U.uStar, star);
   gl.uniform4f(U.uAud, au ? au.bass : 0, au ? au.mid : 0, au ? au.high : 0, lv);
   gl.uniform4f(U.uLife, n ? (d.epochs ? .4 + .6 * Math.max(d.learned, d.growth * .8) : .3) : .1, d.growth, turb, kick + (d.training ? .15 : 0));
   // form: structure that only exists once it has trained
@@ -357,7 +373,7 @@ function nebFrame(c, t, mouse) {
   pg.i = inner < pg.i - .3 ? inner : pg.i + (inner - pg.i) * Math.min(1, dt * 3); pg.s += (sess - pg.s) * Math.min(1, dt * 3);
   gl.uniform4f(U.uProg, pg.s, pg.i, tr ? 1 : 0, tr ? .5 + .5 * Math.sin(t * (tr.stage === 'train' ? 5 : 9)) : 0);
   gl.uniform3fv(U.uDiscN, DN); gl.uniform3fv(U.uDiscU, DU); gl.uniform3fv(U.uDiscV, DV); gl.uniform4f(U.uDisc, 1.8, 2.1 + nrings * .25, .13, nrings ? 1 : 0); gl.uniform4fv(U.uRing, rings);
-  let ext = nrings ? 2.3 + nrings * .25 : 1.5; N.slots.forEach(sl => { if (sl.w > .01) ext = Math.max(ext, Math.hypot(sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 3.4, Math.hypot(...sl.p) + sl.rad * 3.4); });
+  let ext = 1.5; N.slots.forEach(sl => { if (sl.w > .01) ext = Math.max(ext, Math.hypot(sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 3.4, Math.hypot(...sl.p) + sl.rad * 3.4); });
   gl.uniform4f(U.uSweep, tr && tr.stage === 'train' ? -ext * .75 + pg.i * ext * 1.5 : Math.sin(t * 1.3) * ext * .6, sweepA, 0, 0);
   gl.uniform1f(U.uB, Math.min(6, ext + .8)); gl.uniform1f(U.uFrame, (NEB.fr = (NEB.fr || 0) + 1) % 1024);
   const D = NEB.drag; D.s += ((D.on ? 1 : 0) - D.s) * Math.min(1, dt * (D.on ? 9 : 2.2)); gl.uniform4f(U.uTouch, D.p[0], D.p[1], D.p[2], D.s < .01 ? 0 : D.s);
@@ -370,32 +386,40 @@ function nebFrame(c, t, mouse) {
     voids: vlist.map(v => { const p = proj(v.p); return { x: p[0], y: p[1], r: v.r / (p[2] * tan) * S / 2 * 1.1, p: v.p, depth: p[2] }; }) };
 }
 
-/* touch: a void, a pillar (and where along it), the haze around it, or empty space each answer differently */
+/* touch: what you touched sets the pitch and timbre; HOW it answers is one of several gestures, never the same twice running */
+const GESTURES = ['taps', 'gallop', 'rise', 'fall', 'shimmer', 'swarm', 'reverse', 'still'];
+function nebRespond(fx, hit, base) {
+  const t = performance.now() / 1000, a = ac(), rnd = Math.random, f0 = hit.freq * (1 + (rnd() - .5) * .01), p = hit.p;
+  let v; do { v = GESTURES[Math.floor(rnd() * GESTURES.length)]; } while (v === NEB.lastGesture || (hit.kind === 'space' && (v === 'still' || v === 'reverse')));
+  NEB.lastGesture = v;
+  const E = voiceOut();                               // the room it answers in changes too: short and tight, or long and smeared
+  E.dl.delayTime.setTargetAtTime({ taps: .31, gallop: .11, rise: .19, fall: .23, shimmer: .52, swarm: .07, reverse: .4, still: .6 }[v], a.currentTime, .04);
+  E.fb.gain.setTargetAtTime({ taps: .3, gallop: .2, rise: .25, fall: .25, shimmer: .5, swarm: .35, reverse: .15, still: .08 }[v], a.currentTime, .04);
+  const say = (dly, mult, gk, extra) => tone(f0 * mult, Object.assign({}, base, { when: dly, gain: (base.gain || .16) * gk }, extra || {}));
+  const step = i => ALIEN_SCALE[i % 7] * Math.pow(2, Math.floor(i / 7)), up = [0, 1, 0], rv = () => { const x = [rnd() - .5, rnd() - .5, rnd() - .5], l = Math.hypot(...x) || 1; return x.map(c => c / l); };
+  if (v === 'taps') { say(0, 1, 1); [.33, .66, 1].forEach((d, i) => say(d, 1, .5 / (i + 1), { noise: 0 })); fx.waves.push({ t0: t, o: p, taps: [[0, 1], [.33, .5], [.66, .3], [1, .18]] }); }
+  else if (v === 'gallop') { const ds = [0, .11, .22, .52, .63, .74]; ds.forEach((d, i) => say(d, 1, 1 / (1 + i * .5), { dur: (base.dur || 1) * .45 })); fx.waves.push({ t0: t, o: p, taps: ds.map((d, i) => [d, 1 / (1 + i * .5)]), speed: 3.6, width: 4 }); }
+  else if (v === 'rise' || v === 'fall') { const dir = v === 'rise' ? 1 : -1;
+    for (let i = 0; i < 5; i++) say(i * .17, dir > 0 ? step(i) : 1 / step(i), 1 / (1 + i * .35), { dur: (base.dur || 1) * .6 });
+    fx.waves.push({ t0: t, o: p, mode: 1, n: up.map(c => c * dir), taps: [[0, 1], [.17, .8], [.34, .6], [.51, .45], [.68, .3]], speed: 1.9, width: 3 }); }
+  else if (v === 'shimmer') { say(0, 1, .8, { attack: .08 }); say(.25, 2, .4, { attack: .3, dur: (base.dur || 1) * 1.6, noise: 0 }); say(.55, 3, .22, { attack: .5, dur: (base.dur || 1) * 2, noise: 0 }); say(.9, 4, .12, { attack: .6, dur: (base.dur || 1) * 2.2, noise: 0 });
+    fx.waves.push({ t0: t, o: p, taps: [[0, .8], [.4, .65], [.9, .5], [1.5, .35]], speed: 1.05, width: 1.1, life: 3.6 }); }
+  else if (v === 'swarm') { for (let i = 0; i < 9; i++) { const d = i ? rnd() * .7 : 0; say(d, step(Math.floor(rnd() * 9)) * (rnd() > .6 ? 2 : 1), .5 + rnd() * .5, { dur: .1 + rnd() * .22, noise: (base.noise || 0) * .5 });
+      fx.waves.push({ t0: t + d, o: p.map(c => c + (rnd() - .5) * 1.3), taps: [[0, 1]], speed: 3, width: 4.5, amp: .55, life: 1.2 }); } }
+  else if (v === 'reverse') { say(0, 1, .9, { attack: .5, dur: .62, noise: 0 }); say(.52, 1, 1.1, { dur: (base.dur || 1) * .5 }); say(.52, 2, .3, { dur: .3 });       // it draws breath, then strikes
+    fx.waves.push({ t0: t, o: p, implode: true, taps: [[0, 1]], speed: 4.6, width: 2.6, life: .6 }); fx.waves.push({ t0: t + .54, o: p, taps: [[0, 1.2]], speed: 3.2, width: 2 }); }
+  else { say(0, 1, 1, { dur: (base.dur || 1) * 2.2, attack: .05 }); say(0, 1.006, .5, { dur: (base.dur || 1) * 2.2, attack: .05, noise: 0 });                              // still: no echo at all, one long beating tone, and the dust turns
+    fx.waves.push({ t0: t, o: p, mode: 2, n: rv(), taps: [[0, 1]], speed: 1.5, width: 1.3, life: 3.4, amp: 1.2 }); }
+  if (fx.waves.length > 22) fx.waves.splice(0, fx.waves.length - 22);
+  return v;
+}
 function nebTouch(x, y) {
   const c = Gym.cur; if (!c) return; const fx = fxOf(c.slug), G = fx.ngeom, L = fx.life; if (!G || !L) return;
-  ac().resume(); const t = performance.now() / 1000, gr = G.growth, pure = clamp(.25 * gr + .75 * G.learned, 0, 1), rnd = Math.random;
-  const v = G.voids.find(o => Math.hypot(o.x - x, o.y - y) < o.r);
-  if (v) {                                           // a void: it flinches and answers from deep down
-    const base = 41 * ALIEN_SCALE[G.voids.indexOf(v) * 2 % 7] * (1 + rnd() * .02);
-    tone(base, { dur: 1.6 + gr * 3, attack: .12, gain: .22, partials: 1 + Math.round(gr * 5), detune: (1 - pure) * .05, bend: -.12 * (1 - pure), noise: (1 - pure) * .25, noiseAt: 1.5 });
-    tone(base * 2 * ALIEN_SCALE[4], { dur: 1 + gr * 2.5, attack: .3, gain: .07 * (.3 + pure), when: .08, detune: (1 - pure) * .03 });
-    L.startle = 1; fx.waves.push({ t0: t, o: v.p }); return;
-  }
-  let best = null;
-  for (const o of G.lobes) { const ex = o.b[0] - o.a[0], ey = o.b[1] - o.a[1], u = clamp(((x - o.a[0]) * ex + (y - o.a[1]) * ey) / (ex * ex + ey * ey || 1), 0, 1), dd = Math.hypot(x - o.a[0] - ex * u, y - o.a[1] - ey * u) / (o.r * (1 - .5 * u) || 1); if (!best || dd < best.dd) best = { o, u, dd }; }
-  if (best && best.dd < 1.15 && c.food.length) {       // a pillar: it sings the track that lives at that height
-    const o = best.o, mem = c.food.filter((f, i) => (c.limbs && c.limbs.length > 1 ? (f.limb || 0) % G.K : i % G.K) === o.j).sort((a, b) => (a.core || 0) - (b.core || 0));
-    const f = mem.length ? mem[Math.min(mem.length - 1, Math.floor(best.u * mem.length))] : c.food[0], fq = noteOf(f.bright ?? .3) * (1 + (rnd() - .5) * .01);
-    tone(fq, { dur: .45 + gr * 2.6, gain: .2, type: pure > .5 ? 'sine' : 'triangle', partials: 1 + Math.round(gr * 4), detune: (1 - pure) * .045, bend: -(1 - pure) * .07, noise: (1 - pure) * .4 + .03, noiseAt: 3 });
-    if (gr > .3) tone(fq * ALIEN_SCALE[4], { dur: .4 + gr * 2, gain: .06 * gr, when: .06 + rnd() * .05, detune: (1 - pure) * .03 });
-    o.slot.ring = 1; fx.waves.push({ t0: t, o: o.a3.map((a, k) => a + (o.b3[k] - a) * best.u), soft: true }); return;
-  }
-  if (best && best.dd < 3.2) {                         // the haze: a glassy chime, and a shock front from that spot
-    tone(320 + rnd() * 900, { dur: .9 + gr * 2.2, gain: .12, ratios: [1, 2.76, 5.4, 8.93].slice(0, 2 + Math.round(gr * 2)), detune: (1 - pure) * .03, noise: (1 - pure) * .18, noiseAt: 4 });
-    fx.waves.push({ t0: t, o: G.unproj(x, y, best.o.a[2]) }); return;
-  }
-  tone(700 + rnd() * 1400, { dur: .22 + gr * .3, gain: .07, bend: rnd() > .5 ? 1.2 : -.6 });   // empty space: a chirp, and it notes where
-  fx.waves.push({ t0: t, o: G.unproj(x, y, G.dist), soft: true }); L.sx = x; L.sy = y;
+  ac().resume(); const gr = G.growth, pure = clamp(.25 * gr + .75 * G.learned, 0, 1), hit = nebUnder(c, G, x, y);
+  if (hit.kind === 'void') { hit.freq /= 2; L.startle = 1; nebRespond(fx, hit, { dur: 1.6 + gr * 3, attack: .12, gain: .22, partials: 1 + Math.round(gr * 5), detune: (1 - pure) * .05, bend: -.12 * (1 - pure), noise: (1 - pure) * .25, noiseAt: 1.5 }); }
+  else if (hit.kind === 'pillar') { hit.o.slot.ring = 1; nebRespond(fx, hit, { dur: .45 + gr * 2.6, gain: .2, type: pure > .5 ? 'sine' : 'triangle', partials: 1 + Math.round(gr * 4), detune: (1 - pure) * .045, bend: -(1 - pure) * .07, noise: (1 - pure) * .4 + .03, noiseAt: 3 }); }
+  else if (hit.kind === 'haze') { hit.freq = 320 + Math.random() * 900; nebRespond(fx, hit, { dur: .9 + gr * 2.2, gain: .12, ratios: [1, 2.76, 5.4, 8.93].slice(0, 2 + Math.round(gr * 2)), detune: (1 - pure) * .03, noise: (1 - pure) * .18, noiseAt: 4 }); }
+  else { hit.freq = 700 + Math.random() * 1400; nebRespond(fx, hit, { dur: .22 + gr * .3, gain: .07, bend: Math.random() > .5 ? 1.2 : -.6 }); L.sx = x; L.sy = y; }
 }
 
 /* small still-ish portrait for the creature list */
@@ -436,7 +460,7 @@ function nebDrag(x, y, speed) {
   D.v.o1.frequency.setTargetAtTime(hit.freq * wob, now, .05); D.v.o2.frequency.setTargetAtTime(hit.freq * (hit.kind === 'void' ? .5 : ALIEN_SCALE[4]) * (1 + (1 - pure) * .012), now, .05);
   D.v.lp.frequency.setTargetAtTime(500 + speed * 1.6 + pure * 1800, now, .08); D.v.g.gain.setTargetAtTime(lvl, now, .06);
   if (hit.kind === 'pillar') hit.o.slot.ring = Math.max(hit.o.slot.ring, .6);
-  if (!D.lastWave || t - D.lastWave > (hit.kind === 'space' ? .5 : .22)) { D.lastWave = t; fx.waves.push({ t0: t, o: hit.p, soft: true }); if (fx.waves.length > 14) fx.waves.shift(); }
+  if (!D.lastWave || t - D.lastWave > (hit.kind === 'space' ? .5 : .22)) { D.lastWave = t; fx.waves.push({ t0: t, o: hit.p, soft: true, mode: Math.random() > .5 ? 2 : 0, n: [Math.random() - .5, Math.random() - .5, Math.random() - .5].map((c, i, v) => c / (Math.hypot(...v) || 1)), taps: [[0, 1], [.4, .4]], speed: 1.8 }); if (fx.waves.length > 18) fx.waves.shift(); }
 }
 function nebDragEnd() {
   const D = NEB.drag; D.on = false;

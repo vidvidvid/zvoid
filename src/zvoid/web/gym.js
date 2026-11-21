@@ -193,7 +193,7 @@ function gymFx(c) {
 let ECHO = null;
 function voiceOut() {
   if (!ECHO) { const a = ac(), dl = a.createDelay(1), fb = a.createGain(), lp = a.createBiquadFilter(), inp = a.createGain(); dl.delayTime.value = .31; fb.gain.value = .42; lp.type = 'lowpass'; lp.frequency.value = 2600;
-    inp.connect(bus()); inp.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(bus()); ECHO = inp; }
+    inp.connect(bus()); inp.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(bus()); ECHO = inp; ECHO.dl = dl; ECHO.fb = fb; }
   return ECHO;
 }
 const ALIEN_SCALE = [1, 1.0802, 1.1905, 1.3333, 1.4815, 1.6071, 1.8];        // steps of an unfamiliar tuning
