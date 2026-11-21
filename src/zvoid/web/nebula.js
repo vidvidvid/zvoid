@@ -40,6 +40,8 @@ uniform vec4 uGy;        // lattice: scale, drift speed, morph between two minim
 uniform vec3 uDiscN, uDiscU, uDiscV;
 uniform vec4 uDisc;      // inner radius, outer radius, half thickness, on
 uniform vec4 uRing[8];   // radius, weight, arcs around, angular speed
+uniform vec4 uProg;      // training: whole-session fraction, current-epoch fraction, on, head pulse
+uniform vec4 uSweep;     // training: height of the scanning sheet, its strength
 const int STEPS = 80;
 
 float n3(vec3 x) {
@@ -131,7 +133,8 @@ void main() {
       vec3 p = ro + rd * t;
       float farP = nearest(p), farD = discDist(p), far = min(farP, farD);
       if (far > 0.) { t += max(dt, far * .85); if (t > t1) break; continue; }
-      t += dt; if (t > t1 + dt) break;
+      float ds = farP > 0. ? dt * .34 : dt;         // only rings here: take finer steps through their thin plane
+      t += ds; if (t > t1 + dt) break;
       if (farD <= 0.) {                         // orbiting arcs: one ring per limb, broken into arcs that circle at its tempo
         float hg = dot(p, uDiscN); vec3 pl = p - uDiscN * hg;
         float r = length(pl), ang = atan(dot(pl, uDiscU), dot(pl, uDiscV)), dd = 0., hm = 0.;
@@ -139,7 +142,7 @@ void main() {
           float rw = uRing[j].y;
           if (rw > 0.) { float dr = (r - uRing[j].x) / .026, e = exp(-dr * dr) * smoothstep(-.15, .25, sin(ang * uRing[j].z + uT * uRing[j].w + float(j) * 2.4) - (1. - rw * 1.2)) * rw; dd += e; hm += e * fract(float(j) * .37 + .2); }
         }
-        if (dd > .003) { vec3 rc = mix(uAmb, uKey, clamp(hm / dd, 0., 1.)); dd *= exp(-hg * hg * 420.); float a = 1. - exp(-dd * dt * 20.); C += T * a * mix(rc, vec3(.9, .92, 1.), .45) * (.9 + uAud.w * 1.5 + uLife.w); T *= 1. - a * .35; }
+        if (dd > .003) { vec3 rc = mix(uAmb, uKey, clamp(hm / dd, 0., 1.)); dd *= exp(-hg * hg * 300.); float a = 1. - exp(-dd * ds * 20.); C += T * a * mix(rc, vec3(.9, .92, 1.), .45) * (.9 + uAud.w * 1.5 + uLife.w); T *= 1. - a * .35; }
       }
       if (farP > 0.) continue;
       vec3 s = p * .45 + uSeed;
@@ -155,6 +158,8 @@ void main() {
       float cv = carve(q);
       float rip = ripples(q) * uReson.x;
       float haze = n3(q * .7 + vec3(0., uT * .02, 3.)), wisp = w.x / turb + .5;
+      float swp = (q.y - uSweep.x) * 4.2, sweep = exp(-swp * swp) * uSweep.y;   // training: a sheet of light climbs through it once per epoch
+      ring += sweep;
       float gas = (halo * .55 + sh * .25) * haze * haze * (.45 + wisp) * cv * max(0., 1. + rip * 2.4);
       C += T * mix(uAmb, tint, .45 + .4 * clamp(sh, 0., 1.)) * gas * dt * (.62 + ring * 2.5 + uAud.w * .6);
       if (sh > .02) {
@@ -190,6 +195,13 @@ void main() {
     if (sb > 0.) { vec3 so = uStar[k].xyz - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; C += vec3(1., .93, .86) * sb * (.0022 / (dot(dv, dv) + .0005)) * mix(1., T, .55) * step(0., tc); }
   }
   C += bg * T;
+  if (uProg.z > 0.) {                           // training: two rings that always face you. Outer = the whole session, inner = this epoch.
+    float pr = length(uv), a01 = fract(atan(uv.x, uv.y) / 6.2831853), d1 = (pr - .79) / .0045, d2 = (pr - .76) / .003;
+    float h1 = min(abs(a01 - uProg.x), 1. - abs(a01 - uProg.x)) * 60., h2 = min(abs(a01 - uProg.y), 1. - abs(a01 - uProg.y)) * 60.;
+    float g1 = exp(-d1 * d1) * (.07 + step(a01, uProg.x) * .8) + exp(-h1 * h1 - d1 * d1 * .05) * (.5 + uProg.w * .5);
+    float g2 = exp(-d2 * d2) * (.05 + step(a01, uProg.y) * .6) + exp(-h2 * h2 - d2 * d2 * .04) * (.4 + uProg.w * .4);
+    C += mix(vec3(1.), uKey, .25) * g1 + mix(vec3(1.), uAmb, .45) * g2;
+  }
   C *= 1. + uLife.w * .35;
   C = 1. - exp(-C * 1.35);
   C = pow(C, vec3(.92));
@@ -218,7 +230,7 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing']) NEB.U[n] = gl.getUniformLocation(pr, n);
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep']) NEB.U[n] = gl.getUniformLocation(pr, n);
   gl.uniform1i(NEB.U.uNoise, 0);
   NEB.gl = gl;
 }
@@ -330,8 +342,23 @@ function nebFrame(c, t, mouse) {
   const dn0 = nvec(t * .03, sd + 300), dnv = [dn0[0] * .7, 1, dn0[2] * .7 + .35], dnl = Math.hypot(...dnv), DN = dnv.map(v => v / dnl);
   let DU = [DN[1], -DN[0], 0]; const dul = Math.hypot(...DU) || 1; DU = DU.map(v => v / dul); const DV = [DN[1] * DU[2] - DN[2] * DU[1], DN[2] * DU[0] - DN[0] * DU[2], DN[0] * DU[1] - DN[1] * DU[0]];
   gl.uniform1f(U.uForm, form); gl.uniform4f(U.uGy, 5.2 + d.bright * 4.5 + (au ? au.high * 1.5 : 0), .05 + lv * .25, .5 + .5 * noise(t * .03 + sd + 60), .26 + .1 * noise(t * .07 + sd));
+  // training progress, made visible
+  const tr = c.training && c.training.state === 'running' ? c.training : null, pg = fx.pg || (fx.pg = { i: 0, s: 0 });
+  let inner = 0, sess = 0, sweepA = 0;
+  if (tr) {
+    const nowS = (tr.now || 0) + (performance.now() - (Gym.polledAt || performance.now())) / 1000;
+    if (tr.stage === 'train') {
+      const expect = tr.epoch_time || ((c.pace || .07) * tr.audio_secs + tr.tracks * .1) || 60, spe = Math.max(1, tr.steps_per_epoch || 1);
+      const byStep = clamp((tr.step - tr.step0) / spe, 0, 1), byTime = clamp((nowS - tr.epoch_t0) / expect, 0, .97);
+      inner = Math.max(byStep * .98, Math.min(byTime, byStep + 1 / spe));          // time fills in between steps, but never runs more than one step ahead
+      sess = clamp((tr.epoch - tr.from_epoch + inner) / Math.max(1, tr.max_epochs - tr.from_epoch), 0, 1); sweepA = .85;
+    } else { inner = tr.stage === 'load' ? 1 : clamp((tr.digested || 0) / Math.max(1, tr.tracks), 0, 1); sweepA = .3; }
+  }
+  pg.i = inner < pg.i - .3 ? inner : pg.i + (inner - pg.i) * Math.min(1, dt * 3); pg.s += (sess - pg.s) * Math.min(1, dt * 3);
+  gl.uniform4f(U.uProg, pg.s, pg.i, tr ? 1 : 0, tr ? .5 + .5 * Math.sin(t * (tr.stage === 'train' ? 5 : 9)) : 0);
   gl.uniform3fv(U.uDiscN, DN); gl.uniform3fv(U.uDiscU, DU); gl.uniform3fv(U.uDiscV, DV); gl.uniform4f(U.uDisc, 1.8, 2.1 + nrings * .25, .13, nrings ? 1 : 0); gl.uniform4fv(U.uRing, rings);
   let ext = nrings ? 2.3 + nrings * .25 : 1.5; N.slots.forEach(sl => { if (sl.w > .01) ext = Math.max(ext, Math.hypot(sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 3.4, Math.hypot(...sl.p) + sl.rad * 3.4); });
+  gl.uniform4f(U.uSweep, tr && tr.stage === 'train' ? -ext * .75 + pg.i * ext * 1.5 : Math.sin(t * 1.3) * ext * .6, sweepA, 0, 0);
   gl.uniform1f(U.uB, Math.min(6, ext + .8)); gl.uniform1f(U.uFrame, (NEB.fr = (NEB.fr || 0) + 1) % 1024);
   const D = NEB.drag; D.s += ((D.on ? 1 : 0) - D.s) * Math.min(1, dt * (D.on ? 9 : 2.2)); gl.uniform4f(U.uTouch, D.p[0], D.p[1], D.p[2], D.s < .01 ? 0 : D.s);
   gl.uniform3fv(U.uLight, light); gl.uniform3fv(U.uKey, key); gl.uniform3fv(U.uAmb, amb);

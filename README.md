@@ -96,6 +96,11 @@ To delete a creature, press the × on its row or *delete creature* in the gym (c
 
 The renderer picks the highest resolution that holds full frame rate on your machine (shown small in the top right).
 
+**Watching it train.** A readout above the entity shows the phase (digest, wake, train), the epoch and step, the loss
+and its trend, and the time left. Two rings around it fill up: the outer one is the whole session, the inner one the
+current epoch. A sheet of light climbs through the dust once per epoch, every training step sends a pulse, and every
+finished epoch sends a shock front. As epochs land, the form described above grows in.
+
 **Limbs.** Tracks that sound alike are grouped automatically (k-means on tempo, bass, brightness, dynamics and noise) and
 grow together as one limb. Each limb gets a description and its own trigger word, which goes into the training
 captions, so a single creature can hold several sub-styles and you can call one by putting its word in a caption.

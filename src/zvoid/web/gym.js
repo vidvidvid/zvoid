@@ -180,8 +180,11 @@ function gymFx(c) {
   const fx = fxOf(c.slug), now = performance.now() / 1000;
   if (fx.names) { let k = 0; for (const f of c.food) if (!fx.names.has(f.name)) { fx.births[f.name] = now + k * .16; fx.waves.push({ t0: now + k * .16, pole: f.limb || k }); k++; } }
   fx.names = new Set(c.food.map(f => f.name));
-  if (fx.epochs != null && c.epochs > fx.epochs) fx.waves.push({ t0: now, pole: c.epochs, soft: true });
+  if (fx.epochs != null && c.epochs > fx.epochs) { fx.waves.push({ t0: now, pole: c.epochs }); if (fx.life) fx.life.beat = now; }      // an epoch lands: a full shock front
   fx.epochs = c.epochs;
+  const st = c.training && c.training.state === 'running' ? c.training.step : null;
+  if (st != null && fx.step != null && st > fx.step) { fx.waves.push({ t0: now, pole: st, soft: true }); if (fx.life) fx.life.beat = now; }   // every training step: a pulse you can see
+  fx.step = st;
 }
 
 /* ---------- its voice ----------
@@ -251,7 +254,7 @@ async function gymLoad(slug) {
 }
 async function gymPoll() {
   if (!Gym.open || !Gym.cur) return;
-  try { const c = await api('/api/gym/' + Gym.cur.slug); if (Gym.cur && c.slug === Gym.cur.slug) { Gym.cur = c; const i = Gym.list.findIndex(x => x.slug === c.slug); if (i >= 0) Gym.list[i] = c; gymRender(); } } catch {}
+  try { const c = await api('/api/gym/' + Gym.cur.slug); if (Gym.cur && c.slug === Gym.cur.slug) { Gym.cur = c; Gym.polledAt = performance.now(); const i = Gym.list.findIndex(x => x.slug === c.slug); if (i >= 0) Gym.list[i] = c; gymRender(); } } catch {}
 }
 function gymFrame() {
   if (!Gym.open) return;
@@ -287,6 +290,22 @@ function gymRender() {
   const bar = $('#gym-bar i'); if (bar) bar.style.width = running && tr.max_epochs ? clamp((tr.epoch - tr.from_epoch) / Math.max(1, tr.max_epochs - tr.from_epoch) * 100, 2, 100) + '%' : '0';
   if (running && tr.stage === 'train' && c.pace && tr.audio_secs) st.textContent += ` · about ${dur((tr.max_epochs - tr.epoch) * (c.pace * tr.audio_secs + tr.tracks * .1))} left`;
   const sp = $('#gym-spark'); if (sp) spark(sp, c.history.map(h => h[1]));
+  const box = $('#gym-train');
+  if (box) {
+    const on = !!(tr && tr.state === 'running'); box.hidden = !on;
+    if (on) {
+      const ph = tr.stage === 'train' ? 2 : tr.stage === 'load' ? 1 : 0, total = Math.max(1, tr.max_epochs - tr.from_epoch), done = tr.epoch - tr.from_epoch, el = Math.max(0, (tr.now || 0) - tr.started);
+      const per = tr.epoch_time || (c.pace ? c.pace * tr.audio_secs + tr.tracks * .1 : 0), sessH = c.history.filter(x => x[0] > tr.from_epoch), drop = sessH.length >= 3 ? (sessH[0][1] - sessH[sessH.length - 1][1]) / sessH[0][1] * 100 : null;   // a trend only once there are a few epochs to compare
+      const big = ph === 2 ? `epoch ${Math.min(tr.epoch + 1, tr.max_epochs)} / ${tr.max_epochs}` : ph === 1 ? 'waking the model' : 'digesting';
+      const sub = ph === 2 ? [`step ${Math.max(0, tr.step - tr.step0)} / ${tr.steps_per_epoch}`, tr.loss != null ? `loss ${tr.loss.toFixed(3)}` + (drop != null && Math.abs(drop) >= .5 ? ` (${drop > 0 ? '↓' : '↑'} ${Math.abs(drop).toFixed(0)}% since this session began)` : '') : null, per ? `about ${dur((total - done) * per)} left` : 'timing the first epoch…'].filter(Boolean).join('  ·  ')
+        : ph === 1 ? 'loading ACE-Step onto the GPU' : (tr.digested || 0) < tr.tracks ? `${tr.digested || 0} / ${tr.tracks} tracks turned into training data` : `all ${tr.tracks} tracks read · encoding them for the model`;
+      box.replaceChildren(
+        h('div', { class: 'tr-phases' }, ['digest', 'wake', 'train'].map((p, i) => h('span', { class: i < ph ? 'done' : i === ph ? 'now' : '' }, p))),
+        h('div', { class: 'tr-big' }, big), h('div', { class: 'tr-sub' }, sub),
+        h('div', { class: 'tr-bar' }, h('i', { style: `width:${clamp(ph === 2 ? done / total * 100 : 0, 0, 100)}%` })),
+        h('div', { class: 'tr-foot' }, ph === 2 ? `${Math.round(done / total * 100)}% of this session · ${dur(el)} in` : `${dur(el)} in`));
+    }
+  }
 }
 function spark(cv, vals) {
   const d = devicePixelRatio || 1, w = cv.clientWidth, hh = cv.clientHeight; cv.width = w * d; cv.height = hh * d;
@@ -316,7 +335,7 @@ function gymBuild() {
       h('span', { class: 'row-del', data: { label: '×' }, title: 'Delete this creature', onclick: e => { e.stopPropagation(); gymDelete(e.currentTarget, x); } }, '×')))),
     h('div', { class: 'gym-new' }, nameIn, hatchB));
 
-  const stage = h('div', { id: 'gym-stage' }, nebCanvas(), h('div', { id: 'gym-fps' }),
+  const stage = h('div', { id: 'gym-stage' }, nebCanvas(), h('div', { id: 'gym-fps' }), h('div', { id: 'gym-train', hidden: true }),
     c ? h('div', { id: 'gym-caption' }, h('h1', {}, c.name), h('div', { id: 'gym-stats' })) : h('div', { id: 'gym-caption' }, h('h1', {}, 'no creatures yet'), h('div', {}, 'name one on the left and press hatch')));
   stage.addEventListener('mousemove', e => { const r = stage.getBoundingClientRect(); Gym.mouse = { x: e.clientX - r.left, y: e.clientY - r.top }; });
   stage.addEventListener('mouseleave', () => { Gym.mouse = null; });

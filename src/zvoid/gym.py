@@ -24,7 +24,8 @@ from .paths import CREATURES_DIR, ENGINES_DIR, ENVS_DIR, ROOT
 
 _lock = threading.Lock()
 _train: dict = {"slug": None, "proc": None, "state": "idle", "msg": "", "stage": "", "epoch": 0, "max_epochs": 0,
-                "loss": None, "step": 0, "error": None, "started": 0, "audio_secs": 0, "tracks": 0, "from_epoch": 0}
+                "loss": None, "step": 0, "error": None, "started": 0, "audio_secs": 0, "tracks": 0, "from_epoch": 0,
+                "epoch_t0": 0, "epoch_time": 0, "step0": 0, "steps_per_epoch": 1, "stage_t0": 0, "first_loss": None}
 
 
 def slugify(name: str) -> str:
@@ -63,6 +64,11 @@ def _view(c: dict) -> dict:
     c = dict(c, trained=adapter_path(slug) is not None,
              minutes=round(sum(f.get("secs", 0) for f in c.get("food", [])) / 60, 2))
     c["training"] = dict({k: v for k, v in _train.items() if k != "proc"}) if _train["slug"] == slug else None
+    if c["training"] and c["training"]["state"] == "running":
+        tr = c["training"]
+        tr["now"] = time.time()                           # lets the window animate smoothly between polls
+        if tr["stage"] in ("digest", "start"):
+            tr["digested"] = len(list((_dir(slug) / "tensors").glob("*.pt")))
     return c
 
 
@@ -365,7 +371,9 @@ def train(slug: str, opt: dict, before=None) -> dict:
         proc = subprocess.Popen([str(py), "-u", str(ENGINES_DIR / "ace_step" / "gym.py"), str(_dir(slug)), json.dumps(run)],
                                 stdout=subprocess.PIPE, stderr=log, text=True, bufsize=1, cwd=str(ROOT))
         _train.update(slug=slug, proc=proc, state="running", msg="waking up…", stage="start", epoch=base, max_epochs=base + more,
-                      loss=None, step=0, error=None, started=time.time(), audio_secs=audio_secs, tracks=len(chosen), from_epoch=base)
+                      loss=None, step=0, error=None, started=time.time(), audio_secs=audio_secs, tracks=len(chosen), from_epoch=base,
+                      epoch_t0=0, epoch_time=0, step0=0, stage_t0=time.time(), first_loss=None,
+                      steps_per_epoch=max(1, -(-len(chosen) // (int(run.get("batch_size", 1)) * int(run.get("grad_accum", 4))))))
     threading.Thread(target=_watch, args=(slug, proc), daemon=True).start()
     return get(slug)
 
@@ -379,11 +387,15 @@ def _watch(slug: str, proc):
             continue
         t = m.get("type")
         if t == "stage":
-            _train.update(stage=m["stage"], msg=m["msg"])
+            _train.update(stage=m["stage"], msg=m["msg"], stage_t0=time.time())
+            if m["stage"] == "train":
+                _train.update(epoch_t0=time.time(), step0=0)
         elif t == "update":
             kind = m.get("kind")
             if kind == "step":
-                _train.update(step=m["step"], loss=m["loss"], epoch=m["epoch"] or _train["epoch"], msg=f"epoch {m['epoch']}/{m['max_epochs']} · loss {m['loss']:.4f}")
+                if _train["first_loss"] is None:
+                    _train["first_loss"] = m["loss"]
+                _train.update(step=m["step"], loss=m["loss"], msg=f"epoch {m['epoch']}/{m['max_epochs']} · loss {m['loss']:.4f}")
             elif kind == "epoch":
                 c = _load(slug)
                 c["epochs"] = max(c["epochs"], int(m["epoch"]))
@@ -393,7 +405,8 @@ def _watch(slug: str, proc):
                     pace = float(m["epoch_time"]) / _train["audio_secs"]
                     c["pace"] = round(pace if not c.get("pace") else c["pace"] * .7 + pace * .3, 5)
                 _save(c)
-                _train.update(epoch=int(m["epoch"]), loss=m["loss"])
+                _train.update(epoch=int(m["epoch"]), loss=m["loss"], epoch_t0=time.time(), step0=_train["step"],
+                              epoch_time=float(m.get("epoch_time") or 0) or _train["epoch_time"])
             elif kind in ("info", "warn", "checkpoint") and _train["stage"] != "train":
                 _train.update(msg=m["msg"].replace("[INFO] ", "").replace("[OK] ", "")[:120])
         elif t == "error":

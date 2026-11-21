@@ -323,3 +323,14 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 #gym::before { display: none; }
 
 #gym-fps { position: absolute; top: 12px; right: 14px; font: 9.5px var(--mono); color: #4d4a66; letter-spacing: .08em; pointer-events: none; }
+
+#gym-train { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; display: grid; gap: 6px; justify-items: center; min-width: 380px; }
+.tr-phases { display: flex; gap: 18px; font: 9.5px var(--mono); letter-spacing: .28em; text-transform: uppercase; color: var(--dim); }
+.tr-phases span::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 7px; vertical-align: 1px; }
+.tr-phases .done { color: var(--muted); } .tr-phases .now { color: var(--cyan); text-shadow: 0 0 14px var(--cyan); animation: blinkt 1.4s ease-in-out infinite; }
+.tr-big { font: 300 28px var(--sans); letter-spacing: .3em; text-transform: uppercase; color: #fff; text-shadow: 0 0 30px #a43cff; }
+.tr-sub { font: 11.5px var(--mono); color: var(--text); letter-spacing: .06em; }
+.tr-bar { width: 340px; height: 2px; background: #ffffff1a; border-radius: 2px; overflow: hidden; } .tr-bar i { display: block; height: 100%; background: var(--acid); box-shadow: 0 0 12px var(--violet); transition: width 1s; }
+.tr-foot { font: 9.5px var(--mono); color: var(--muted); letter-spacing: .08em; }
+
+#gym-train { white-space: nowrap; }
