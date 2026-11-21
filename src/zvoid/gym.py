@@ -9,6 +9,7 @@ creatures/<slug>/
 
 from __future__ import annotations
 
+import unicodedata
 import json
 import re
 import shutil
@@ -423,7 +424,8 @@ def _ssh_base(r: dict) -> list[str]:
 
 def _ps(r: dict, script: str, timeout: float = 60) -> str:
     """Run one line of PowerShell on the PC and return what it printed."""
-    out = subprocess.run(_ssh_base(r) + ["powershell -NoProfile -Command \"" + script.replace('"', "'") + "\""], capture_output=True, text=True, timeout=timeout)
+    script = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; " + script     # file names with č, š, ž or curly quotes must arrive readable
+    out = subprocess.run(_ssh_base(r) + ["powershell -NoProfile -Command \"" + script.replace('"', "'") + "\""], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     if out.returncode != 0:
         raise RuntimeError((out.stderr or out.stdout or "the PC did not answer").strip()[-300:])
     return out.stdout
@@ -467,8 +469,8 @@ def _remote_prepare(slug: str, run: dict, r: dict, fresh: bool):
     for line in _ps(r, f"Get-ChildItem {cdir}\\food | ForEach-Object {{ $_.Name + '|' + $_.Length }}").splitlines():
         if "|" in line:
             n, _, sz = line.strip().rpartition("|")
-            have[n] = int(sz or 0)
-    need = [n for n in run["only"] if (d / "food" / n).exists() and have.get(n) != (d / "food" / n).stat().st_size]
+            have[unicodedata.normalize("NFC", n)] = int(sz) if sz.strip().isdigit() else 0
+    need = [n for n in run["only"] if (d / "food" / n).exists() and have.get(unicodedata.normalize("NFC", n)) != (d / "food" / n).stat().st_size]
     if need:
         _train.update(msg=f"sending {len(need)} track{'s' if len(need) != 1 else ''} to {r['name']}…")
         _tar_to(r, d / "food", need, f"{cdir}\\food")
