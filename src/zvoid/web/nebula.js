@@ -24,6 +24,8 @@ uniform sampler2D uNoise;
 uniform vec4 uPole[6];   // xyz base, w radius
 uniform vec4 uAxis[6];   // xyz direction, w length
 uniform vec4 uCol[6];    // rgb tint, w weight (0 = off)
+uniform vec4 uTrait[6];  // how each limb's food sounds: noisy, dynamic, bright, bassy (each 0..1)
+uniform vec4 uTrait2[6]; // its tempo (0 slow .. 1 fast), how fast it builds its frame
 uniform vec4 uVoid[3];   // xyz, w radius
 uniform vec4 uWave[8];   // xyz origin, w radius
 uniform float uWaveAmp[8];
@@ -55,6 +57,7 @@ uniform vec4 uFract;     // branching: depth (grows with training), life-cycle r
 float gTip; vec3 gTint; bool gLite;
 const int STEPS = 80;
 vec3 gPa, gBa; float gR0, gBest;   // the pillar nearest the last sampled point, in its own frame
+vec4 gTr, gTr2;           // the sound of the limb the last sampled point belongs to
 float gSeam;             // how deep in a groove of the body the last sampled point was
 
 float n3(vec3 x) {
@@ -75,11 +78,11 @@ float branchField(vec3 pa, vec3 ba, float r0) {
   float L = length(ba); vec3 ax = ba / L; float z = dot(pa, ax); vec3 rv = pa - ax * z;
   vec3 u = normalize(cross(ax, vec3(.31, .95, .07))), v = cross(ax, u), q = vec3(dot(rv, u), dot(rv, v), z);
   float len = L, rad = r0, dsum = 0.; gTip = 0.;
-  if (length(q.xy) > L * .8 + r0) return 0.;                                   // too far out for any branch to reach
+  if (length(q.xy) > L * 1.05 + r0) return 0.;                                   // too far out for any branch to reach
   for (int lv = 0; lv < 2; lv++) {
     float fl = float(lv), on = clamp(uFract.x - fl, 0., 1.);
     if (on <= 0.) break;
-    float nb = 3. + fl, cz = len / nb, id0 = floor(q.z / cz), bestD = 1e3, bestL = 0., bestR = rad * .5; vec3 bestP = q;
+    float nb = 3. + fl + floor(gTr.y * 2.6), cz = len / nb, id0 = floor(q.z / cz), bestD = 1e3, bestL = 0., bestR = rad * .5; vec3 bestP = q;
     for (int c = 0; c < 2; c++) {
       if (c == 1 && lv == 1) break;
       float id = id0 - float(c);
@@ -89,7 +92,7 @@ float branchField(vec3 pa, vec3 ba, float r0) {
       vec3 p = q - vec3(0., 0., (id + .5) * cz);
       p.xy = vec2(cs.x * p.x + cs.y * p.y, -cs.y * p.x + cs.x * p.y);
       p.xz = vec2(.5817 * p.x - .8134 * p.z, .8134 * p.x + .5817 * p.z);      // tilted outward: the branch now runs along +z
-      float bl = len * .62 * grow, br = rad * (.55 - .1 * fl), hz = clamp(p.z, 0., bl), dc = length(vec3(p.xy, p.z - hz)) - br * (1. - .55 * hz / max(bl, 1e-3));
+      float bl = len * (.4 + .5 * gTr.y) * grow, br = rad * (.55 - .1 * fl), hz = clamp(p.z, 0., bl), dc = length(vec3(p.xy, p.z - hz)) - br * (1. - .55 * hz / max(bl, 1e-3));
       float di = smoothstep(.9, -.6, dc / br) * min(1., grow * 4.), crumble = smoothstep(.7, 1., ph);
       if (crumble > 0. && di > 0.) di *= smoothstep(crumble * 1.25 - .25, crumble * 1.25, n3(pa * 2.6 + id * 7.));   // it does not shrink away: it crumbles
       dsum += di;
@@ -108,8 +111,11 @@ float shapes(vec3 q, out vec3 tint, out float halo) {
     if (w > 0.) {
       vec3 ba = uAxis[i].xyz * uAxis[i].w, pa = q - uPole[i].xyz;
       float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.), r0 = uPole[i].w;
-      float sd = length(pa - ba * h) - r0 * (1. - .5 * h);
-      if (w > .5 && sd / r0 < gBest) { gBest = sd / r0; gPa = pa; gBa = ba; gR0 = r0; gTint = uCol[i].rgb; }
+      vec4 tr = uTrait[i];
+      float prof = (1. - (.28 + .58 * tr.z) * h) * (1. + tr.w * .5 * (1. - h) * (1. - h));       // bright food: long and tapering to a point. Bassy food: a heavy, swollen base
+      float sd = length(pa - ba * h) - r0 * prof;
+      if (tr.x > .02) { float kq = 6.5 / r0, sp = sin(pa.x * kq) * sin(pa.y * kq * 1.13 + 1.) * sin(pa.z * kq * .91 + 2.); sd -= r0 * tr.x * (.5 * pow(max(sp, 0.), 3.) - .1 * max(-sp, 0.)); }   // noisy food: a ragged, spiny surface
+      if (w > .5 && sd / r0 < gBest) { gBest = sd / r0; gPa = pa; gBa = ba; gR0 = r0; gTint = uCol[i].rgb; if (!gLite) { gTr = tr; gTr2 = uTrait2[i]; } }
       float di = smoothstep(.9, -.6, sd / r0) * w, hl = smoothstep(2.6, -.4, sd / r0) * w;
       d += di; halo += hl * hl; tint += uCol[i].rgb * (di + hl * .25); gH += h * (di + hl * .25);
     }
@@ -161,13 +167,14 @@ float bodyL(vec3 pa, vec3 ba, float r0) {
   float hh = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.);
   float L = length(ba); vec3 ax = ba / L; float z = dot(pa, ax); vec3 rv = pa - ax * z; float rho = length(rv);
   vec3 u = normalize(cross(ax, vec3(.31, .95, .07))), v = cross(ax, u); float phi = atan(dot(rv, v), dot(rv, u));
-  float taper = 1. - .45 * hh, sB = built(uBuild.x, hh), rB = built(uBuild.y, hh), cB = built(uBuild.z, hh), pB = built(uBuild.w, hh);
-  gFront = max(max(edge(uBuild.x, hh), edge(uBuild.y, hh)), max(edge(uBuild.z, hh), edge(uBuild.w, hh))) * uProg.z;
-  float seg = r0 * .36, sv = abs(sin(z * 3.14159 / seg));                                   // spine: stacked vertebrae
+  vec4 B = clamp(uBuild * (.65 + .7 * gTr2.y), 0., 1.);                                       // each limb builds at its own pace: the more it was fed, the faster
+  float taper = 1. - .45 * hh, sB = built(B.x, hh), rB = built(B.y, hh), cB = built(B.z, hh), pB = built(B.w, hh);
+  gFront = max(max(edge(B.x, hh), edge(B.y, hh)), max(edge(B.z, hh), edge(B.w, hh))) * uProg.z;
+  float seg = r0 * mix(.52, .2, gTr2.x), sv = abs(sin(z * 3.14159 / seg));                                   // spine: stacked vertebrae
   float d = rho - r0 * .24 * taper * (.6 + .4 * sqrt(sv)) * sB + (sB > .001 ? 0. : 1.);
   gSeam = smoothstep(.3, 0., sv) * sB;
-  float gap = r0 * .52, zc = (fract(z / gap + .5) - .5) * gap, rr = r0 * (.98 - .34 * hh) * (1. + .08 * sin(z * 2.3 / r0));   // ribs: a cage around the cloud, arcs that close as they finish
-  float open = (1. - rB) * 1.5, th = r0 * .042 * smoothstep(-.9 + open, .5 + open, cos(phi)) * min(1., rB * 3.);
+  float gap = r0 * mix(.74, .34, gTr2.x), zc = (fract(z / gap + .5) - .5) * gap, rr = r0 * (.98 - .34 * hh) * (1. + .08 * sin(z * 2.3 / r0));   // ribs: a cage around the cloud, arcs that close as they finish
+  float open = (1. - rB) * 1.5, th = r0 * (.028 + .034 * gTr.w) * smoothstep(-.9 + open, .5 + open, cos(phi)) * min(1., rB * 3.);
   d = smin(d, length(vec2(rho - rr, zc)) - th + (th > 1e-4 ? 0. : 1.), r0 * .07);
   float tw = phi - z * 2.2 / r0, a2 = mod(tw + 1.0472, 2.0944) - 1.0472, rc = r0 * .55 * taper, tc = r0 * .04 * cB;   // cables: three helices
   d = smin(d, length(vec2(rho - rc, a2 * rc)) - tc + (tc > 1e-4 ? 0. : 1.), r0 * .05);
@@ -420,7 +427,7 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine', 'uEvP', 'uEvI']) NEB.U[n] = gl.getUniformLocation(pr, n);
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uTrait', 'uTrait2', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine', 'uEvP', 'uEvI']) NEB.U[n] = gl.getUniformLocation(pr, n);
   gl.uniform1i(NEB.U.uNoise, 0);
   NEB.gl = gl; NEB.nz = r;
 }
@@ -498,28 +505,31 @@ function nebFrame(c, t, mouse) {
 
   // the pillars: one per limb, eased toward where they should be so feeding and training make it grow and morph
   const limbs = c.limbs && c.limbs.length > 1 ? c.limbs : null, K = n ? Math.min(6, Math.max(2, limbs ? limbs.length : 0) + (n > 12 ? 1 : 0)) : 1;
-  const N = fx.neb || (fx.neb = { slots: [...Array(6)].map(() => ({ p: [0, 0, 0], a: [0, 1, 0], len: .3, rad: .3, col: [.5, .3, .8], w: 0, ring: 0 })), fresh: true });
+  const N = fx.neb || (fx.neb = { slots: [...Array(6)].map(() => ({ p: [0, 0, 0], a: [0, 1, 0], len: .3, rad: .3, col: [.5, .3, .8], w: 0, ring: 0, tr: [.2, .3, .3, .3, .4, .5] })), fresh: true });
   const pointer = mouse ? unproj(L.sx, L.sy, dist) : null;
   N.slots.forEach((s, j) => {
     const on = j < K, limb = limbs && limbs[j], share = limb ? limb.count / n : 1 / K;
-    const yy = K > 1 ? 1 - 2 * (j + .5) / K : 0, rr = Math.sqrt(1 - yy * yy), ph = j * 2.39996 + d.seed * 6.28, base = [Math.cos(ph) * rr, yy * .75, Math.sin(ph) * rr];
-    const wn = nvec(t * .045, j * 13 + sd), an = nvec(t * .038, j * 29 + sd + 50), spread = n ? .75 + .45 * d.growth : 0;
+    const yy = K > 1 ? 1 - 2 * (j + .5) / K : 0, rr = Math.sqrt(1 - yy * yy), ph = j * 2.39996 + d.bright * 9 + d.low * 5 + d.bpm * .021 + d.seed * .6, base = [Math.cos(ph) * rr, yy * .75, Math.sin(ph) * rr];
+    const sm_ = limb ? limb.mean : d, S_ = { noise: clamp((sm_.noise ?? .2) * 1.25, 0, 1), dyn: clamp(((sm_.dyn ?? .3) - .15) * 1.8, 0, 1), bright: clamp(((sm_.bright ?? .3) - .12) * 2.2, 0, 1), low: clamp(((sm_.low ?? .3) - .35) * 1.9, 0, 1), bpm: clamp(((sm_.bpm ?? 100) - 65) / 110, 0, 1), loud: clamp(sm_.loud ?? .5, 0, 1) };   // this limb's sound, stretched so real music spans the range
+    const wn = nvec(t * .045, j * 13 + sd), an = nvec(t * .038, j * 29 + sd + 50), spread = n ? (.75 + .45 * d.growth) * (.78 + .55 * S_.dyn) : 0;
     const tp = [base[0] * spread + wn[0] * .45, base[1] * spread + wn[1] * .45 - .5, base[2] * spread + wn[2] * .45];
     let ta = [base[0] * .9 + an[0] * 1.1, base[1] * .9 + an[1] * 1.1 + .55, base[2] * .9 + an[2] * 1.1];
+    if (n) ta[1] += (S_.bpm - .45) * 1.2;                                                          // fast food reaches up and out, slow food hangs
     if (j === 0) { tp[0] = wn[0] * .1; ta[0] = an[0] * .2; ta[1] += .9; }                       // the first limb is the spine, on the midline
     else { tp[0] = Math.abs(tp[0]) + .28; ta[0] = Math.abs(ta[0]) + .2; }                          // the others come in mirrored pairs
     if (pointer && L.curious > .05) for (let k = 0; k < 3; k++) ta[k] += (pointer[k] - tp[k]) * .12 * L.curious;      // it leans toward you when curious
     const al = Math.hypot(ta[0], ta[1], ta[2]) || 1; ta = ta.map(v => v / al);
-    const tl = n ? (1.1 + 2.0 * d.growth + .5 * clamp(d.minutes / 30, 0, 1)) * (.55 + .9 * Math.sqrt(share)) * (1 + .06 * (L.breath - .5)) : .5;
-    const trd = (n ? .4 + .5 * Math.sqrt(share) : .45) * (1 + (au ? au.bass * .38 : 0) + kick * .1) * (1 - .18 * L.startle) * (1 + s.ring * .22 * Math.sin(t * 19));
+    const tl = n ? (1.1 + 2.0 * d.growth + .5 * clamp(d.minutes / 30, 0, 1)) * (.55 + .9 * Math.sqrt(share)) * (1 + .06 * (L.breath - .5)) * (.72 + .75 * S_.bright) * (1.2 - .42 * S_.low) * (.86 + .28 * S_.loud) : .5;
+    const trd = (n ? (.4 + .5 * Math.sqrt(share)) * (.7 + .85 * S_.low) * (1.12 - .4 * S_.bright) * (.86 + .28 * S_.loud) : .45) * (1 + (au ? au.bass * .38 : 0) + kick * .1) * (1 - .18 * L.startle) * (1 + s.ring * .22 * Math.sin(t * 19));
     const tc = hsl2rgb(hueOf(limb ? limb.mean.bright : d.bright) + (limb ? 0 : j * 24) + noise(t * .02 + j + sd) * 14, .72, .56), tw = on ? (limb || !limbs ? 1 : .6) : 0, e = N.fresh ? 1 : ease;
     for (let k = 0; k < 3; k++) { s.p[k] += (tp[k] - s.p[k]) * e; s.a[k] += (ta[k] - s.a[k]) * e; s.col[k] += (tc[k] - s.col[k]) * e; }
+    [S_.noise, S_.dyn, S_.bright, S_.low, S_.bpm, clamp(share * K * .5, 0, 1)].forEach((v, k) => { s.tr[k] += ((n ? v : s.tr[k]) - s.tr[k]) * e; });
     s.len += (tl - s.len) * e * .6; s.rad += (trd - s.rad) * Math.min(1, e * 4); s.w += (tw - s.w) * e; s.ring *= Math.exp(-dt * 2.2);
   });
   N.fresh = false;
   { let er = 0; N.slots.forEach(sl => { if (sl.w > .3) er = Math.max(er, Math.hypot(Math.abs(sl.p[0]) + Math.abs(sl.a[0]) * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 1.3 + sl.len * .28); }); fx.extR = fx.extR == null ? er : fx.extR + (er - fx.extR) * Math.min(1, dt * .8); }
-  const pole = new Float32Array(24), axis = new Float32Array(24), col = new Float32Array(24);
-  N.slots.forEach((s, j) => { pole.set([s.p[0], s.p[1], s.p[2], s.rad], j * 4); axis.set([s.a[0], s.a[1], s.a[2], s.len], j * 4); col.set([s.col[0], s.col[1], s.col[2], s.w < .01 ? 0 : s.w], j * 4); });
+  const pole = new Float32Array(24), axis = new Float32Array(24), col = new Float32Array(24), trA = new Float32Array(24), trB = new Float32Array(24);
+  N.slots.forEach((s, j) => { pole.set([s.p[0], s.p[1], s.p[2], s.rad], j * 4); axis.set([s.a[0], s.a[1], s.a[2], s.len], j * 4); col.set([s.col[0], s.col[1], s.col[2], s.w < .01 ? 0 : s.w], j * 4); trA.set([s.tr[0], s.tr[1], s.tr[2], s.tr[3]], j * 4); trB.set([s.tr[4], s.tr[5], 0, 0], j * 4); });
 
   // voids: wandering cavities
   const nv = n ? 1 + (K > 2 ? 1 : 0) + (K > 4 ? 1 : 0) : 0, voids = new Float32Array(12), vlist = [];
@@ -528,10 +538,11 @@ function nebFrame(c, t, mouse) {
 
   // shock fronts
   fx.waves = fx.waves.filter(w => t - w.t0 < 5);
+  const pickLimb = v => { if (!limbs) return v % K; let x = ((v * .618034) % 1) * n, i = 0; for (; i < limbs.length - 1 && x >= limbs[i].count; i++) x -= limbs[i].count; return Math.min(i, K - 1); };   // beats and training steps land on limbs in proportion to what each was fed: every step is one track
   const wave = new Float32Array(32), wamp = new Float32Array(8), wk = new Float32Array(32), wnv = new Float32Array(32), taps = [];
   for (const w of fx.waves) for (const [dly, amp] of (w.taps || [[0, 1], [.55, .55], [1.15, .3], [1.85, .16]])) {           // each front can come back, like reverb taps
     const age = t - w.t0 - dly, life = w.life || 2.6; if (age < 0 || age > life) continue;
-    const sl = N.slots[(w.pole || 0) % K], o = w.o || [sl.p[0] + sl.a[0] * sl.len * .5, sl.p[1] + sl.a[1] * sl.len * .5, sl.p[2] + sl.a[2] * sl.len * .5], sp = w.speed || 2.1, mode = w.mode || 0;
+    const sl = N.slots[pickLimb(w.pole || 0)], o = w.o || [sl.p[0] + sl.a[0] * sl.len * .5, sl.p[1] + sl.a[1] * sl.len * .5, sl.p[2] + sl.a[2] * sl.len * .5], sp = w.speed || 2.1, mode = w.mode || 0;
     taps.push({ o, r: w.implode ? Math.max(0, 2.6 - age * sp) : mode === 1 ? age * sp - 1.4 : mode === 2 ? age * sp * .6 : age * sp, a: (1 - age / life) * (w.soft ? .5 : 1) * amp * (w.amp || 1), k: w.width || 2.2, mode, n: w.n || [0, 1, 0], g: w.pole != null ? 0 : 1 });   // g: a touch or a strike, which also dissolves and flushes; beats and training pulses only ripple
   }
   taps.sort((a, b) => b.a - a.a).slice(0, 6).forEach((tp, k) => { wave.set([tp.o[0], tp.o[1], tp.o[2], tp.r], k * 4); wamp[k] = tp.a; wk.set([tp.k, tp.mode, tp.g, 0], k * 4); wnv.set([tp.n[0], tp.n[1], tp.n[2], 0], k * 4); });
@@ -556,7 +567,7 @@ function nebFrame(c, t, mouse) {
   gl.uniform2f(U.uRes, W, H); gl.uniform2f(U.uCenter, cx * sc + jx, (ch - cy) * sc + jy);
   gl.uniform1f(U.uT, fx.clock); gl.uniform1f(U.uTan, tan); gl.uniform1f(U.uDist, dist); gl.uniform1f(U.uSeed, d.seed * 40);
   gl.uniformMatrix3fv(U.uCam, false, [M[0][0], M[1][0], M[2][0], M[0][1], M[1][1], M[2][1], M[0][2], M[1][2], M[2][2]]);
-  gl.uniform4fv(U.uPole, pole); gl.uniform4fv(U.uAxis, axis); gl.uniform4fv(U.uCol, col); gl.uniform4fv(U.uVoid, voids);
+  gl.uniform4fv(U.uTrait, trA); gl.uniform4fv(U.uTrait2, trB); gl.uniform4fv(U.uPole, pole); gl.uniform4fv(U.uAxis, axis); gl.uniform4fv(U.uCol, col); gl.uniform4fv(U.uVoid, voids);
   gl.uniform4fv(U.uWave, wave); gl.uniform1fv(U.uWaveAmp, wamp); gl.uniform4fv(U.uWaveK, wk); gl.uniform4fv(U.uWaveN, wnv); gl.uniform4fv(U.uRip, rip); gl.uniform4f(U.uReson, depth, L.tail, .35 + .4 * d.learned, 0); gl.uniform4fv(U.uStar, star);
   gl.uniform4f(U.uAud, au ? au.bass : 0, au ? au.mid : 0, au ? au.high : 0, lv);
   gl.uniform4f(U.uLife, sm('sharp', n ? (d.epochs ? .4 + .6 * Math.max(d.learned, d.growth * .8) : .3) : .1, .6), d.growth, turb, kick + trn * .15);

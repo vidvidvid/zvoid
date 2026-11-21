@@ -125,6 +125,20 @@ soft clumps of its own dust and are drawn in to where the spine is being built. 
 to tip once per epoch, and two broken arcs grow in its orbit: the outer one is the whole session, the inner one the
 current epoch. Every training step sends a pulse and every finished epoch a shock front.
 
+**The sound shapes the body.** Each limb takes its form from how its own tracks sound, so differently fed creatures grow into different bodies:
+
+| In the sound | In the body |
+|---|---|
+| Bass | Thick, short limbs with a heavy swollen base, and thicker ribs |
+| Brightness | Long thin limbs that taper to a point |
+| Noise | A ragged, spiny surface |
+| Dynamics | More branches that reach further, and a wider sprawl |
+| Tempo | Fast: limbs reach up and out, with many fine ribs and vertebrae. Slow: they hang, with few large ones |
+| Loudness | Overall size |
+
+Where the limbs sit comes from the sound of all its food together. During training each limb builds its frame at its own pace
+(the more it was fed, the faster), and every training step lands on a limb in proportion to its share of the tracks.
+
 **Limbs.** Tracks that sound alike are grouped automatically (k-means on tempo, bass, brightness, dynamics and noise) and
 grow together as one limb. Each limb gets a description and its own trigger word, which goes into the training
 captions, so a single creature can hold several sub-styles and you can call one by putting its word in a caption.
