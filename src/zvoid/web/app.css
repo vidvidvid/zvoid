@@ -247,6 +247,7 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 #gym > * { position: relative; }
 #gym-left, #gym-right { display: flex; flex-direction: column; gap: 10px; padding: 8px 16px 16px; overflow: auto; border-right: 1px solid var(--line); background: #07070dcc; }
 #gym-right { border-right: 0; border-left: 1px solid var(--line); padding-top: 16px; }
+#gym-left > *, #gym-right > * { flex-shrink: 0; }
 #gym button { background: #0b0b16cc; border: 1px solid var(--line); border-radius: 9px; padding: 6px 12px; cursor: pointer; font: 11px var(--mono); letter-spacing: .1em; color: var(--text); }
 #gym button:hover:not(:disabled) { border-color: var(--violet); }
 #gym button:disabled { opacity: .35; cursor: default; }
