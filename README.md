@@ -104,7 +104,10 @@ To delete a creature, press the × on its row or *delete creature* in the gym (c
   **Drag** across it to push through the dust and bow it: a continuous voice whose pitch follows what you pass over.
   Untrained, the voice is noisy, detuned and short. Training makes it purer, richer and longer.
 
-The renderer picks the highest resolution that holds full frame rate on your machine (shown small in the top right).
+The picture is built up over many frames: each frame looks through a slightly different spot inside every pixel, and the
+frames are blended, so edges are smooth and there is no grain. It is shown at your display's full resolution. The renderer
+picks the highest internal resolution that holds full frame rate on your machine (shown small in the top right).
+The dust has a grain that runs along each limb, like fibre, and faint veins that pulse outward from the base.
 
 **Watching it train.** A readout above the entity shows the phase (digest, wake, train), the epoch and step, the loss
 and its trend, and the time left. The entity shows the rest itself. While it digests, the tracks drift around it as

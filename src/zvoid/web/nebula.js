@@ -35,7 +35,7 @@ uniform vec4 uStar[8];   // xyz, w brightness
 uniform vec4 uAud;       // bass, mid, high, level
 uniform vec4 uLife;      // learned, growth, turbulence, kick
 uniform vec3 uLight, uKey, uAmb;
-uniform float uB, uFrame;
+uniform float uB, uFrame, uFine;
 uniform vec4 uTouch;     // xyz where the pointer is dragging, w strength
 uniform float uForm;     // 0 = cloud, 1 = fully formed (grows with training)
 uniform vec4 uGy;        // lattice: scale, drift speed, morph between two minimal surfaces, sheet thickness
@@ -51,7 +51,7 @@ uniform vec4 uBuild;     // how far each part of the frame is built along every 
 float gFront;            // how close the last sampled point was to where the frame is being built right now
 uniform vec4 uFract;     // branching: depth (grows with training), life-cycle rate
 float gTip; vec3 gTint; bool gLite;
-const int STEPS = 96;
+const int STEPS = 80;
 vec3 gPa, gBa; float gR0, gBest;   // the pillar nearest the last sampled point, in its own frame
 float gSeam;             // how deep in a groove of the body the last sampled point was
 
@@ -281,7 +281,13 @@ void main() {
         vec3 fq = q * 1.6 + vec3(0., -uT * .03, uT * .015) + uSeed;
         float f = fbm(fq);
         float soft = mix(.5, .1, uLife.x);
-        float dust = smoothstep(-soft, soft, sh + (f - .47) * 1.6 - .8 + rip * .34) * cv * mix(.45, 1., uLife.x);
+        float edg = sh + (f - .47) * 1.6 - .8 + rip * .34;
+        if (abs(edg) < soft + .45) {            // fine grain where the dust thins out: two more octaves of fibre
+          vec3 fa = gBa / (length(gBa) + 1e-4), ff = fq - fa * dot(fq, fa) * .8;   // the grain runs along the limb, like fibre, instead of every way at once like smoke
+          float fine = (n3(ff * 6.1 + 3.) - .5) + (n3(ff * 12.7 - 5.) - .5) * .5;
+          edg += fine * uFine * (1. - abs(edg) / (soft + .45));
+        }
+        float dust = smoothstep(-soft, soft, edg) * cv * mix(.45, 1., uLife.x);
         float lat = 0.;
         if (uForm > .01) {                      // the dust crystallises from its densest cores outward into a lattice of thin sheets
           vec3 g = q * uGy.x + vec3(0., uT * uGy.y, 0.);
@@ -298,6 +304,9 @@ void main() {
           vec3 lit = alb * (uKey * shd * 1.45 + uAmb * .07) + tint * (1. - dust) * .26;   // thin edges glow in their own colour
           for (int k = 0; k < 8; k++) { float sb = uStar[k].w; if (sb > 0.) { vec3 ds = uStar[k].xyz - p; lit += alb * vec3(1., .9, .8) * sb * .5 / (dot(ds, ds) * 6. + .15); } }
           lit *= 1. + uAud.z * 1.6 * n3(q * 7. + uT * 2.) * (1. - dust) + ring * 1.5 + max(0., rip) * 1.1;
+          float va = n3(q * 2.7 + uSeed + vec3(0., uT * .012, 0.)), vb = n3(q * 2.7 + 19.7 - uSeed);               // veins: lines where two folded sheets cross
+          float vein = smoothstep(.075, 0., abs(va - .5)) * smoothstep(.075, 0., abs(vb - .5));
+          lit += (tint * .9 + vec3(.3, .14, .12)) * vein * (.3 + 1.5 * pow(.5 + .5 * sin(hAlong * 9. - uT * 1.6 + va * 5.), 4.)) * (1. + uAud.x * 2.);   // a pulse runs out along them from the base
           lit += (tint * .65 + vec3(.38)) * lat * (.5 + max(0., rip) * 2.8 + ring * 2. + uAud.w * .8);   // the sheets carry the sound: they light up as waves pass
           float a = 1. - exp(-dust * (1. - max(uForm * .5, uBuild.x * .72)) * mix(1., smoothstep(0., .16, bd), .9) * ds * 9.);   // and clears around the frame, so you can see it                 // the dust thins to a shroud as the body forms
           C += T * a * lit; T *= 1. - a;
@@ -331,17 +340,49 @@ void main() {
   gl_FragColor = vec4(C, 1.);
 }`;
 
+/* Blend this frame into the running image. Every frame shoots its rays at a slightly different spot inside each pixel
+   and at a different depth offset, so the blend is a many-sample image: smooth edges, no grain, no stepping.
+   History is clamped to what this frame's neighbourhood allows, so fast motion does not smear. */
+const NEB_RESOLVE = `precision highp float;
+uniform sampler2D uCur, uHist; uniform vec2 uPx; uniform float uMix;
+void main() {
+  vec2 uv = gl_FragCoord.xy * uPx;
+  vec3 c = texture2D(uCur, uv).rgb, mn = c, mx = c, av = c;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    if (i == 0 && j == 0) continue;
+    vec3 s = texture2D(uCur, uv + vec2(float(i), float(j)) * uPx).rgb; mn = min(mn, s); mx = max(mx, s); av += s;
+  }
+  av /= 9.;
+  vec3 h = clamp(texture2D(uHist, uv).rgb, mn - .015, mx + .015);
+  float mv = clamp(length(av - h) * 6., 0., 1.);             // where the picture really changed, follow it faster
+  gl_FragColor = vec4(mix(h, c, clamp(uMix + mv * .25, 0., 1.)), 1.);
+}`;
+/* Draw the blended image on the screen at the display's full resolution, with a little sharpening. */
+const NEB_PRESENT = `precision highp float;
+uniform sampler2D uTex, uNoise; uniform vec2 uPx, uTx; uniform float uSharp;
+void main() {
+  vec2 uv = gl_FragCoord.xy * uPx;
+  vec3 c = texture2D(uTex, uv).rgb;
+  vec3 n = texture2D(uTex, uv + vec2(uTx.x, 0.)).rgb + texture2D(uTex, uv - vec2(uTx.x, 0.)).rgb + texture2D(uTex, uv + vec2(0., uTx.y)).rgb + texture2D(uTex, uv - vec2(0., uTx.y)).rgb;
+  c = max(vec3(0.), c + (c * 4. - n) * uSharp);
+  c += (texture2D(uNoise, gl_FragCoord.xy / 256. + .37).g - .5) / 255.;
+  gl_FragColor = vec4(c, 1.);
+}`;
+
 function nebInit(cv) {
-  const gl = cv.getContext('webgl', { antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: false });
+  const opts = { antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: false };
+  let gl = cv.getContext('webgl2', opts); const gl2 = !!gl; if (!gl) gl = cv.getContext('webgl', opts);
   if (!gl) throw new Error('no webgl');
+  NEB.hdr = gl2 && !!gl.getExtension('EXT_color_buffer_float');   // 16-bit targets, so frames can be blended without banding
   const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
-  const pr = gl.createProgram();
-  gl.attachShader(pr, sh(gl.VERTEX_SHADER, 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0., 1.); }'));
-  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, NEB_FRAG)); gl.linkProgram(pr);
-  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+  const vs = sh(gl.VERTEX_SHADER, 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0., 1.); }');
+  const mk = (src, names) => { const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, src)); gl.bindAttribLocation(p, 0, 'a'); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); const u = {}; for (const n of names) u[n] = gl.getUniformLocation(p, n); return { p, u }; };
+  NEB.res = mk(NEB_RESOLVE, ['uCur', 'uHist', 'uPx', 'uMix']); NEB.out = mk(NEB_PRESENT, ['uTex', 'uNoise', 'uPx', 'uTx', 'uSharp']);
+  const pr = mk(NEB_FRAG, []).p; NEB.pr = pr;
   gl.useProgram(pr);
   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  const loc = gl.getAttribLocation(pr, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   // noise texture: G is R shifted by (37,17), which lets one fetch give two layers of 3D noise
   const N = 256, px = new Uint8Array(N * N * 4), r = new Uint8Array(N * N);
   let x = 1234567; const rnd = () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) & 255; };
@@ -350,9 +391,23 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract']) NEB.U[n] = gl.getUniformLocation(pr, n);
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine']) NEB.U[n] = gl.getUniformLocation(pr, n);
   gl.uniform1i(NEB.U.uNoise, 0);
   NEB.gl = gl;
+}
+/* Three off-screen targets at the render resolution: this frame, and two that take turns holding the running blend. */
+function nebTargets(W, H) {
+  if (NEB.tw === W && NEB.th === H) return;
+  const gl = NEB.gl; NEB.tw = W; NEB.th = H;
+  NEB.tg = NEB.tg || [0, 1, 2].map(() => ({ tex: gl.createTexture(), fb: gl.createFramebuffer() }));
+  NEB.tg.forEach((g, i) => {
+    gl.activeTexture(gl.TEXTURE1 + i); gl.bindTexture(gl.TEXTURE_2D, g.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, NEB.hdr ? gl.RGBA16F : gl.RGBA, W, H, 0, gl.RGBA, NEB.hdr ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, g.fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, g.tex, 0);
+  });
+  gl.activeTexture(gl.TEXTURE0); gl.bindFramebuffer(gl.FRAMEBUFFER, null); NEB.fresh = true;
 }
 function nebCanvas() {                            // one canvas and one GL context for the life of the app
   if (!NEB.canvas) { NEB.canvas = document.createElement('canvas'); NEB.canvas.id = 'gym-canvas'; try { nebInit(NEB.canvas); NEB.ok = true; } catch (e) { NEB.ok = false; console.warn('nebula renderer unavailable, using the 2D one:', e.message); NEB.canvas = document.createElement('canvas'); NEB.canvas.id = 'gym-canvas'; } }
@@ -375,10 +430,15 @@ function nebFrame(c, t, mouse) {
   // resolution: as sharp as this machine can hold at full frame rate
   if (NEB.last) { NEB.acc += Math.min(.1, t - NEB.last); if (++NEB.frames >= 40) { const ms = NEB.acc / NEB.frames * 1000; NEB.ms = ms; if (ms > 19) { NEB.cap = NEB.q; NEB.capT = t; NEB.q = Math.max(.35, NEB.q * .86); } else if (ms < 17.4) { if (NEB.cap && t - NEB.capT > 25) NEB.cap = 0; NEB.q = Math.min(1, NEB.cap ? NEB.cap * .9 : 1, NEB.q * 1.07); } NEB.acc = 0; NEB.frames = 0; } }
   NEB.last = t;
-  if (NEB.frames === 0 && NEB.hud !== false) { const hud = document.getElementById('gym-fps'); if (hud && NEB.ms) hud.textContent = `${Math.round(1000 / NEB.ms)} fps · ${cv.width}×${cv.height}`; }
+  if (NEB.frames === 0 && NEB.hud !== false) { const hud = document.getElementById('gym-fps'); if (hud && NEB.ms) hud.textContent = `${Math.round(1000 / NEB.ms)} fps · ${NEB.tw || 0}×${NEB.th || 0}`; }
   const dpr = devicePixelRatio || 1, cw = cv.clientWidth, ch = cv.clientHeight, sc = dpr * NEB.q, W = Math.max(2, Math.round(cw * sc)), H = Math.max(2, Math.round(ch * sc));
-  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  const CW = Math.max(2, Math.round(cw * dpr)), CH = Math.max(2, Math.round(ch * dpr));   // the canvas itself is always at the display's full resolution
+  if (cv.width !== CW || cv.height !== CH) { cv.width = CW; cv.height = CH; }
+  nebTargets(W, H);
+  gl.useProgram(NEB.pr); gl.bindFramebuffer(gl.FRAMEBUFFER, NEB.tg[0].fb);
   gl.viewport(0, 0, W, H);
+  const fr = (NEB.fr || 0) + 1, hal = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
+  const jx = hal(fr % 16 + 1, 2) - .5, jy = hal(fr % 16 + 1, 3) - .5;   // a different spot inside the pixel every frame
 
   const au = audioLevels(), lv = au ? au.level : 0, S = Math.min(cw, ch), cx0 = cw / 2, cy0 = ch / 2 * .94;
   const L = live(fx, d, t, mouse, cx0, cy0, S, au), kick = Math.exp(-(t - L.beat) * 7), dt = L.dt || .016, ease = Math.min(1, dt * 1.7);
@@ -454,7 +514,7 @@ function nebFrame(c, t, mouse) {
   const light = [lw[0] * 3.2 + (pointer ? pointer[0] * .5 * L.curious : 0), 3 + lw[1] * 1.2 + (pointer ? pointer[1] * .5 * L.curious : 0), lw[2] * 3.2 + 1.5];
   const key = hsl2rgb(hue + 30, .35, .82), amb = hsl2rgb(hue + 50 + d.seed * 140, .85, .5);
   const turb = sm('turb', (n ? (1 - d.learned) * (d.epochs ? .45 : .7) : .5) + (d.digesting ? .4 : 0)) + lv * .9 + L.startle * .8 + trn * .15;
-  gl.uniform2f(U.uRes, W, H); gl.uniform2f(U.uCenter, cx * sc, (ch - cy) * sc);
+  gl.uniform2f(U.uRes, W, H); gl.uniform2f(U.uCenter, cx * sc + jx, (ch - cy) * sc + jy);
   gl.uniform1f(U.uT, fx.clock); gl.uniform1f(U.uTan, tan); gl.uniform1f(U.uDist, dist); gl.uniform1f(U.uSeed, d.seed * 40);
   gl.uniformMatrix3fv(U.uCam, false, [M[0][0], M[1][0], M[2][0], M[0][1], M[1][1], M[2][1], M[0][2], M[1][2], M[2][2]]);
   gl.uniform4fv(U.uPole, pole); gl.uniform4fv(U.uAxis, axis); gl.uniform4fv(U.uCol, col); gl.uniform4fv(U.uVoid, voids);
@@ -514,7 +574,14 @@ function nebFrame(c, t, mouse) {
   gl.uniform4f(U.uSweep, pg.i, trn * (tr && tr.stage !== 'train' ? .6 : 1), 0, 0);
   gl.uniform1f(U.uB, Math.min(6, ext + .8)); gl.uniform1f(U.uFrame, (NEB.fr = (NEB.fr || 0) + 1) % 1024);
   const D = NEB.drag; D.s += ((D.on ? 1 : 0) - D.s) * Math.min(1, dt * (D.on ? 9 : 2.2)); gl.uniform4f(U.uTouch, D.p[0], D.p[1], D.p[2], D.s < .01 ? 0 : D.s);
-  gl.uniform3fv(U.uLight, light); gl.uniform3fv(U.uKey, key); gl.uniform3fv(U.uAmb, amb);
+  gl.uniform1f(U.uFine, NEB.fine == null ? .42 : NEB.fine); gl.uniform3fv(U.uLight, light); gl.uniform3fv(U.uKey, key); gl.uniform3fv(U.uAmb, amb);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  const fl = NEB.flip = 1 - (NEB.flip || 0), R = NEB.res, O = NEB.out;                 // blend into the running image
+  gl.useProgram(R.p); gl.bindFramebuffer(gl.FRAMEBUFFER, NEB.tg[1 + fl].fb);
+  gl.uniform1i(R.u.uCur, 1); gl.uniform1i(R.u.uHist, 3 - fl); gl.uniform2f(R.u.uPx, 1 / W, 1 / H); gl.uniform1f(R.u.uMix, NEB.fresh ? 1 : .1); NEB.fresh = false;
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.useProgram(O.p); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, CW, CH);   // and show it at full resolution
+  gl.uniform1i(O.u.uTex, 2 + fl); gl.uniform1i(O.u.uNoise, 0); gl.uniform2f(O.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(O.u.uTx, 1 / W, 1 / H); gl.uniform1f(O.u.uSharp, .16);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   // where things are on screen, for touch
