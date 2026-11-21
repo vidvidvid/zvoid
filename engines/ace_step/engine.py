@@ -6,6 +6,7 @@ from pathlib import Path
 # Keep ACE-Step's weights inside zvoid/models/ace_step instead of wherever the process starts
 _MODELS = Path(__file__).resolve().parents[2] / "models" / "ace_step"
 _MODELS.mkdir(parents=True, exist_ok=True)
+_CREATURES = Path(__file__).resolve().parents[2] / "creatures"
 os.environ.setdefault("ACESTEP_PROJECT_ROOT", str(_MODELS))
 os.environ.setdefault("ACESTEP_CHECKPOINTS_DIR", str(_MODELS / "checkpoints"))
 os.environ.setdefault("ACESTEP_LM_BACKEND", "mlx")
@@ -70,6 +71,44 @@ def _handlers(model, lm_model, need_lm, device, ctx):
     return _state["dit"], _state["llm"]
 
 
+def _tagged(caption, tag):
+    return caption if not tag or tag.lower() in caption.lower() else f"{tag}, {caption}"
+
+
+def _creature(dit, p, ctx):
+    """Load (or drop) the creature's adapter. Returns its trigger tag, if it has one."""
+    slug = (p.get("creature") or "").strip()
+    cdir = _CREATURES / slug
+    final = cdir / "lora" / "final"
+    want = None
+    if slug:
+        if not (final / "adapter_config.json").exists():
+            raise ValueError(f"Creature “{slug}” hasn't been trained yet. Train it in the gym first.")
+        want = (str(final), (final / "adapter_model.safetensors").stat().st_mtime, id(dit))
+    if _state.get("lora") != want:
+        if _state.get("lora") and _state["lora"][2] == id(dit):
+            dit.unload_lora()
+        if want:
+            ctx.progress(f"Summoning creature “{slug}”…")
+            msg = dit.load_lora(want[0])
+            if "❌" in str(msg):
+                raise RuntimeError(str(msg))
+        _state["lora"] = want
+    # adapters only apply on the PyTorch path, so skip the MLX fast path while a creature is active
+    if not hasattr(dit, "_zv_mlx"):
+        dit._zv_mlx = bool(getattr(dit, "use_mlx_dit", False))
+    dit.use_mlx_dit = dit._zv_mlx and not want
+    if not want:
+        return ""
+    dit.set_use_lora(True)
+    dit.set_lora_scale(float(p.get("creature_strength", 1)))
+    try:
+        import json as _json
+        return _json.loads((cdir / "creature.json").read_text()).get("tag", "")
+    except Exception:
+        return ""
+
+
 def run(p, ctx):
     from acestep.constants import TASK_INSTRUCTIONS
     from acestep.inference import GenerationConfig, GenerationParams, generate_music
@@ -85,6 +124,8 @@ def run(p, ctx):
     thinking = bool(p.get("thinking", True)) and task in ("text2music", "lego", "complete")
     device = ctx.torch_device()
     dit, llm = _handlers(model, p.get("lm_model") or "acestep-5Hz-lm-1.7B", thinking, device, ctx)
+
+    caption_tag = _creature(dit, p, ctx)
 
     track = p.get("track") or "guitar"
     extra = dict(p.get("extra") or {})
@@ -106,7 +147,7 @@ def run(p, ctx):
         ctx.progress("Non-turbo model: using 32 steps (set Steps to override).")
     kw = dict(
         task_type=task, instruction=instruction,
-        caption=p.get("caption") or "", lyrics=p.get("lyrics") or "[Instrumental]",
+        caption=_tagged(p.get("caption") or "", caption_tag), lyrics=p.get("lyrics") or "[Instrumental]",
         instrumental=(p.get("lyrics") or "[Instrumental]").strip().lower() == "[instrumental]",
         duration=float(p.get("duration") or -1), bpm=int(p["bpm"]) if p.get("bpm") else None,
         keyscale=p.get("keyscale") or "", seed=int(p.get("seed", -1)),

@@ -111,7 +111,8 @@ function player(nodeId, path, col) {
   if (players.has(key)) return players.get(key).el;
   const cv = h('canvas'), pp = h('button', { class: 'pp', title: 'Play / stop' }, '▶');
   const loopB = h('button', { title: 'Loop' }, '∞'), rev = h('button', { title: 'Show in Finder' }, '↗');
-  const el = h('div', { class: 'player' }, pp, cv, h('div', { class: 'tools' }, loopB, rev));
+  const feedB = h('button', { title: 'Feed this to a creature in the gym', onclick: e => feedChooser(path, e) }, '◍');
+  const el = h('div', { class: 'player' }, pp, cv, h('div', { class: 'tools' }, loopB, feedB, rev));
   const P = { el, buf: null, src: null, t0: 0, off: 0, loop: false, peaks: null, raf: 0 };
   players.set(key, P);
   const pos = () => P.src ? ((ac().currentTime - P.t0 + P.off) % P.buf.duration) : P.off;
@@ -280,6 +281,11 @@ function control(n, p) {
     txt.oninput = () => set(txt.value.trim());
     input = h('div', {}, sel, txt);
   } else if (p.type === 'choice') { input = h('select', {}, p.choices.map(c => h('option', { value: c }, c))); input.value = v; input.onchange = () => { set(input.value); }; }
+  else if (p.type === 'creature') {
+    const opts = (p.choices || ['']).slice(); if (v && !opts.includes(v)) opts.push(v);
+    const sel = h('select', {}, opts.map(c => h('option', { value: c }, c || 'none'))); sel.value = v || ''; sel.onchange = () => set(sel.value);
+    input = h('div', { class: 'seed' }, sel, h('button', { title: 'Open the gym', onclick: e => { e.preventDefault(); openGym(sel.value || undefined); } }, 'gym'));
+  }
   else if (p.type === 'bool') { input = h('input', { type: 'checkbox', class: 'toggle' }); input.checked = !!v; input.onchange = () => set(input.checked); inline = true; }
   else { input = h('input', { type: 'text', spellcheck: 'false' }); input.value = v ?? ''; input.oninput = () => set(input.value); }
   return h('label', { class: 'ctl' + (inline ? ' inline' : ''), title: p.help || '' }, h('span', { class: 'lbl' }, label), input);
@@ -403,6 +409,7 @@ addEventListener('drop', e => {
   e.preventDefault();
   const files = [...(e.dataTransfer.files || [])].filter(f => /audio|\.(wav|mp3|flac|aiff?|ogg|m4a)$/i.test(f.type + f.name));
   if (!files.length) return;
+  if (typeof Gym !== 'undefined' && Gym.open) return gymFeedFiles(files);
   const el = e.target.closest && e.target.closest('.node'), target = el && S.nodes[el.dataset.node], w = toWorld(e.clientX, e.clientY);
   files.forEach((f, i) => {
     if (target && target.type === 'sample' && i === 0) return loadSample(target, f);
@@ -629,6 +636,7 @@ addEventListener('keydown', e => {
   const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); return runAll(); }
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); return toggleChat(); }
+  if (typeof Gym !== 'undefined' && Gym.open) { if (e.key === 'Escape' && !typing) closeGym(); return; }
   if (typing) return;
   if ((e.key === 'Backspace' || e.key === 'Delete') && sel) { e.preventDefault(); sel.node ? removeNode(sel.node) : removeCable(sel.cable); select(null); }
   if (e.key === 'f') fit();

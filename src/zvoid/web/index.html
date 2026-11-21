@@ -23,6 +23,7 @@
   </div>
   <div class="grow"></div>
   <button id="btn-chat" title="Talk to Claude: it can build, tweak and run the patch for you (⌘K)">✦ claude</button>
+  <button id="btn-gym" title="Raise creatures on your own music (adapters for ACE-Step)">◍ gym</button>
   <button id="btn-library">library</button>
   <button id="btn-engines">engines</button>
   <button id="run-all" class="hot" title="Run every module, upstream first (⌘↵)">run patch ▸</button>
@@ -51,9 +52,12 @@
   <form id="chat-form"><textarea id="chat-in" rows="2" placeholder="e.g. make a dark 128 bpm techno loop, then split it and turn the bass into midi" spellcheck="false"></textarea><button class="hot">send</button></form>
 </section>
 
+<section id="gym" hidden></section>
+
 <div id="palette" hidden></div>
 <div id="toasts"></div>
 <input id="file-pick" type="file" accept="audio/*,.wav,.mp3,.flac,.aiff,.aif,.ogg,.m4a" hidden>
 <script src="/web/app.js"></script>
+<script src="/web/gym.js"></script>
 </body>
 </html>

@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from . import chat, library
+from . import chat, gym, library
 from .engines import discover, env_size
 from .paths import NAME, OUTPUTS_DIR, PATCHES_DIR, UPLOADS_DIR, WEB_DIR
 
@@ -110,7 +110,9 @@ def create_app():
 
     @app.get("/api/engines")
     def list_engines(sizes: bool = False):
+        creatures = gym.trained_slugs()
         return [dict(e.spec, id=e.id, installed=e.installed, running=e.running,
+                     params=[dict(q, choices=[""] + creatures) if q.get("type") == "creature" else q for q in e.spec.get("params", [])],
                      env_size=env_size(e) if sizes else None,
                      installing=installs.get(e.id, {}).get("running", False)) for e in engines.values()]
 
@@ -230,6 +232,60 @@ def create_app():
                             "kind": "audio" if Path(f).suffix.lower() in library.AUDIO_EXT else "file"}
                            for f in library.run_files(r["_dir"])]} for r in runs]
 
+    # ---- gym (creatures = adapters trained on your audio) -----------------
+    def gym_call(fn, *a, **k):
+        try:
+            return fn(*a, **k)
+        except FileNotFoundError as ex:
+            raise HTTPException(404, str(ex))
+        except (ValueError, RuntimeError) as ex:
+            raise HTTPException(400, str(ex))
+
+    @app.get("/api/gym")
+    def gym_list():
+        return gym.list_creatures()
+
+    @app.post("/api/gym")
+    def gym_hatch(body: dict):
+        return gym_call(gym.hatch, str(body.get("name", "")))
+
+    @app.get("/api/gym/{slug}")
+    def gym_get(slug: str):
+        return gym_call(gym.get, slug)
+
+    @app.put("/api/gym/{slug}")
+    def gym_update(slug: str, body: dict):
+        return gym_call(gym.update, slug, body)
+
+    @app.delete("/api/gym/{slug}")
+    def gym_release(slug: str):
+        gym_call(gym.release, slug)
+        return {"ok": True}
+
+    @app.post("/api/gym/{slug}/feed")
+    async def gym_feed(slug: str, request: Request, name: str = "track.wav", path: str = ""):
+        if path:                                        # feed something already in the library
+            return gym_call(gym.feed, slug, _inside_outputs(path), Path(path).name)
+        tmp = UPLOADS_DIR / f"feed_{uuid.uuid4().hex[:8]}{Path(name).suffix[:8]}"
+        tmp.write_bytes(await request.body())
+        try:
+            return gym_call(gym.feed, slug, tmp, name)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    @app.delete("/api/gym/{slug}/food/{name}")
+    def gym_unfeed(slug: str, name: str):
+        return gym_call(gym.unfeed, slug, name)
+
+    @app.post("/api/gym/{slug}/train")
+    def gym_train(slug: str, body: dict):
+        return gym_call(gym.train, slug, body, before=lambda: "ace_step" in engines and engines["ace_step"].stop())
+
+    @app.post("/api/gym/{slug}/stop")
+    def gym_stop(slug: str):
+        gym.stop(slug)
+        return {"ok": True}
+
     # ---- patches (saved wiring) -----------------------------------------
     def patch_file(name: str) -> Path:
         if not re.fullmatch(r"[\w\- ]{1,40}", name):
@@ -298,5 +354,6 @@ def launch(port: int | None = None, open_browser: bool = False, window: bool = T
         webview.start()
         server.should_exit = True
     finally:
+        gym.shutdown()
         for e in engines.values():
             e.stop()

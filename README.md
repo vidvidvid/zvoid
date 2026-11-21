@@ -60,6 +60,25 @@ Stable Audio Open is gated: accept the license on its
 | Scroll / pinch, `F` | Pan / zoom, fit everything |
 | Drop audio files on the canvas or on a module | Bring in your own music |
 
+## The gym: raise a creature on your own music
+
+Press **◍ gym**. A creature is a LoRA adapter for ACE-Step, trained on audio you feed it.
+
+1. **Hatch** one by giving it a name.
+2. **Feed** it: drop your tracks on the gym screen, or press `◍` on any result on the canvas.
+   10–30 tracks in one style is a good start. Describe its sound in tags, since good captions matter a lot.
+3. **Train** it. Training runs on the Apple GPU with ACE-Step's own trainer, saves a checkpoint every
+   10 epochs, and can be stopped and continued any time.
+4. **Use** it: pick it as *creature* in any ace-step module and set *creature strength*.
+
+The creature on screen is drawn from what it ate and how far it has trained. Each track becomes a tentacle
+(colour from the track's brightness, sway from its tempo and dynamics, thickness from its bass). Bass makes the
+body lobed, treble makes it spiky, more minutes of audio make it bigger. Training grows the tentacles, adds
+organs with every doubling of epochs, and it opens its eyes once it has learned something.
+
+Creatures live in `creatures/<name>/` (food, checkpoints, the final adapter and `creature.json`).
+That folder is not committed, so your music and adapters stay on your machine.
+
 ## About the Claude chat
 
 The chat shells out to the `claude` CLI on your machine, using your own login. It sends your message,
@@ -83,6 +102,7 @@ Zvoid works offline once the models are downloaded. Set `ZVOID_CLAUDE_MODEL` to 
 |---|---|
 | `outputs/` | Everything you generate, one folder per run with a `meta.json` |
 | `patches/` | Saved wiring |
+| `creatures/` | Gym creatures: the audio you fed them and their trained adapters |
 | `engines/<id>/` | One folder per engine: `engine.json` (ports and knobs) and `engine.py` (the code) |
 | `.envs/<id>/` | Each engine's own Python environment |
 | `src/zvoid/` | The app: a small local server (`server.py`) and the canvas (`web/`) |

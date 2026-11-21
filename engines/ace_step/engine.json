@@ -41,6 +41,21 @@
       "help": "text2music = from scratch. cover = restyle input audio. repaint = redo a time range. lego / complete / extract need the base model."
     },
     {
+      "name": "creature",
+      "type": "creature",
+      "default": "",
+      "help": "A creature you raised in the gym on your own music. It bends everything this module makes toward that sound."
+    },
+    {
+      "name": "creature_strength",
+      "type": "slider",
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "default": 1,
+      "help": "How strongly the creature colours the result. 0 = off, 1 = as trained, above 1 = exaggerated."
+    },
+    {
       "name": "caption",
       "type": "textarea",
       "label": "Caption (style tags)",

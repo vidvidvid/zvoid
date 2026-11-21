@@ -74,6 +74,10 @@ def _catalogue(engines) -> str:
             for k in ("default", "choices", "min", "max", "help"):
                 if p.get(k) not in (None, ""):
                     d[k] = p[k]
+            if p.get("type") == "creature":
+                from . import gym
+                d["choices"] = [""] + gym.trained_slugs()
+                d["help"] = "A creature (adapter trained on the user's own music in the gym). Empty = none."
             if p.get("custom"):
                 d["any_value_allowed"] = True
             params.append(d)

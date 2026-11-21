@@ -8,3 +8,5 @@ models/
 .webview/
 .claude/
 patches/
+creatures/
+sidestep.log
