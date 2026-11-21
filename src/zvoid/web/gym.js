@@ -385,7 +385,7 @@ function gymBuild() {
     const ep = h('input', { type: 'number', min: 1, max: 5000, step: 10, value: 100 }), rank = h('select', {}, [8, 16, 32, 64, 128].map(v => h('option', { value: v }, 'rank ' + v))); rank.value = (c.settings && c.settings.rank) || 64;
     const lr = h('select', {}, [['5e-5', 'gentle'], ['1e-4', 'normal'], ['2e-4', 'fast'], ['5e-4', 'reckless']].map(([v, l]) => h('option', { value: v }, `${l} (${v})`))); lr.value = '1e-4';
     const maxd = h('input', { type: 'number', min: 10, max: 600, step: 10, value: 240 });
-    const maxT = h('input', { type: 'number', min: 0, max: 5000, step: 5, value: c.food.length > 60 ? 40 : 0 });
+    const maxT = h('input', { type: 'number', min: 0, max: 5000, step: 5, value: 0 });
     const far = Gym.remote && Gym.remote.configured ? Gym.remote : null;
     if (Gym.remote === undefined) { Gym.remote = null; api('/api/gym_remote').then(r => { Gym.remote = r; Gym.key = ''; gymPoll(); }).catch(() => {}); }
     const where = h('select', {}, [h('option', { value: 'mac' }, 'this Mac'), far ? h('option', { value: 'pc', disabled: !far.reachable }, far.name + (far.reachable ? '' : ' (not reachable)')) : null]);
