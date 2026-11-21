@@ -363,3 +363,12 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 .creature-row b, .creature-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .creature-row .row-del { flex: none; }
 .creature-row .row-del.armed { font-size: 9.5px; letter-spacing: .04em; padding: 3px 6px; }
+
+/* output rows never grow wider than their module: a waveform canvas or a long file name used to push the row past the edge */
+.outs, .row.out { min-width: 0; }
+.row.out { grid-template-columns: minmax(0, 1fr); }
+.player { grid-template-columns: 26px minmax(0, 1fr) auto; min-width: 0; }
+.player canvas { min-width: 0; }
+.midi-chip { min-width: 0; max-width: 100%; box-sizing: border-box; overflow: hidden; }
+.midi-chip button { flex: none; }
+.midi-chip .fn { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

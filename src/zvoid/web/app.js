@@ -361,7 +361,7 @@ function renderNode(n) {
     const port = h('span', { class: 'port out' + (midi ? ' midi' : ''), data: { node: n.id, port: name }, onmousedown: ev => startCable(ev, n.id, 'out', name, midi ? 'midi' : 'audio') });
     let view;
     if (f && f.kind === 'audio') { keep.push(f.path); view = player(n.id, f.path, c); }
-    else if (f) view = h('div', { class: 'midi-chip' }, f.name || 'file', h('button', { class: 'mini', onclick: () => api('/api/reveal', { json: { path: f.path } }) }, 'show in finder'));
+    else if (f) view = h('div', { class: 'midi-chip' }, h('span', { class: 'fn', title: f.name || '' }, f.name || 'file'), h('button', { class: 'mini', onclick: () => api('/api/reveal', { json: { path: f.path } }) }, 'show in finder'));
     else view = h('div', { class: 'empty' }, isS ? 'empty' : 'no signal yet');
     outs.append(h('div', { class: 'row out' }, port, isS ? null : h('span', { class: 'lbl' }, name, f && n.result && n.result.seed != null ? h('em', {}, 'seed ' + n.result.seed) : null), view));
   }
