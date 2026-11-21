@@ -525,7 +525,7 @@ function gymRecTick(now) {
   const r = Gym.rec; if (!r || r.busy || NEB.shot || now < r.next) return;
   const c = (Gym.cur && Gym.cur.slug === r.slug ? Gym.cur : Gym.list.find(x => x.slug === r.slug)); if (!c) return gymRecStop();
   const tr = c.training && c.training.state === 'running' ? c.training : null;
-  if (tr) { r.seen = true; if (tr.stage === 'train' && c.pace && tr.audio_secs && !r.fixed) { r.fixed = true; r.every = clamp((tr.max_epochs - tr.epoch) * (c.pace * tr.audio_secs + tr.tracks * .1) / 1600, 1, 30); } }   // spread about 1600 frames over what is left
+  if (tr) { r.seen = true; const pace = tr.remote ? c.pace_pc || .004 : c.pace; if (tr.stage === 'train' && pace && tr.audio_secs && !r.fixed) { r.fixed = true; r.every = clamp((tr.max_epochs - tr.epoch) * (tr.epoch_time || pace * tr.audio_secs + tr.tracks * (tr.remote ? .02 : .1)) / 1600, 1, 30); } }   // spread about 1600 frames over what is left
   else if (r.seen) { if (r.tail < 0) { r.tail = 60; r.every = .04; } else if (--r.tail <= 0) return gymRecStop(); }   // training has ended: hold on the result for two seconds, then finish
   r.next = now + (r.every || (tr ? 3 : .5)); r.busy = true; r.vt += 1 / 30;
   const rc = Object.assign({}, c, { slug: r.slug + '#rec' }); gymFx(rc, r.vt);
