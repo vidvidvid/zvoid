@@ -340,3 +340,6 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 .tr-foot { font-size: 11px; color: #c9c6e2; letter-spacing: .1em; }
 .tr-phases { color: #6f6c8c; } .tr-phases .done { color: #a9a6c4; }
 .tr-sub { text-shadow: 0 0 10px #000; }
+
+#gym-shot { position: absolute; top: 9px; left: 14px; z-index: 3; font: 9.5px var(--mono); letter-spacing: .12em; padding: 4px 9px; opacity: .55; }
+#gym-shot:hover { opacity: 1; }

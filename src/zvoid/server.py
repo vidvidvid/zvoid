@@ -305,6 +305,18 @@ def create_app():
     def gym_grain_file(slug: str, name: str):
         return FileResponse(gym_call(gym.grain, slug, name), media_type="audio/wav")
 
+    @app.post("/api/gym/{slug}/capture")
+    async def gym_capture(slug: str, request: Request):
+        data = await request.body()
+        if not data.startswith(b"\x89PNG") or len(data) > 150_000_000:
+            raise HTTPException(400, "not a PNG")
+        d = OUTPUTS_DIR / "captures"
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / f"{gym.slugify(slug)}-{time.strftime('%Y%m%d-%H%M%S')}.png"
+        f.write_bytes(data)
+        subprocess.run(["open", "-R", str(f)])
+        return {"path": str(f), "name": f.name}
+
     @app.delete("/api/gym/{slug}/food/{name}")
     def gym_unfeed(slug: str, name: str):
         return gym_call(gym.unfeed, slug, name)

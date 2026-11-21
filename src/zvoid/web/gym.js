@@ -367,7 +367,7 @@ function gymBuild() {
       h('span', { class: 'row-del', data: { label: '×' }, title: 'Delete this creature', onclick: e => { e.stopPropagation(); gymDelete(e.currentTarget, x); } }, '×')))),
     h('div', { class: 'gym-new' }, nameIn, hatchB));
 
-  const stage = h('div', { id: 'gym-stage' }, nebCanvas(), h('div', { id: 'gym-fps' }), h('div', { id: 'gym-train', hidden: true }),
+  const stage = h('div', { id: 'gym-stage' }, nebCanvas(), h('div', { id: 'gym-fps' }), h('button', { id: 'gym-shot', title: 'Save a still of it, far sharper than the screen (up to 3840 px), to outputs/captures', onclick: () => nebCapture() }, '◉ capture'), h('div', { id: 'gym-train', hidden: true }),
     c ? h('div', { id: 'gym-caption' }, h('h1', {}, c.name), h('div', { id: 'gym-stats' })) : h('div', { id: 'gym-caption' }, h('h1', {}, 'no creatures yet'), h('div', {}, 'name one on the left and press hatch')));
   stage.addEventListener('mousemove', e => { const r = stage.getBoundingClientRect(); Gym.mouse = { x: e.clientX - r.left, y: e.clientY - r.top }; });
   stage.addEventListener('mouseleave', () => { Gym.mouse = null; });
