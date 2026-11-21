@@ -431,9 +431,9 @@ function gymBuild() {
         running ? h('button', { class: 'stop', onclick: () => api(`/api/gym/${c.slug}/stop`, { method: 'POST' }).then(gymPoll) }, '■ stop')
           : h('button', { class: 'hot', disabled: !c.food.length, onclick: () => go(false) }, c.epochs ? 'train more ▸' : 'train ▸'),
         !running && c.epochs ? h('button', { title: 'Forget everything it learned and train again from zero', onclick: () => { if (confirm(`Erase what “${c.name}” has learned and start over? Its food stays.`)) go(true); } }, 'start over') : null,
-        !running && c.trained && Gym.list.some(x => x.slug !== c.slug && x.trained) ? h('button', { title: 'Breed it with another trained creature. The child sounds like the average of both, inherits links to all their food, and can be trained further.', onclick: e => gymBreed(c, e) }, 'breed…') : null,
-        !running ? h('button', { class: 'danger', data: { label: 'delete creature' }, title: 'Deletes what it learned and its list of tracks. Your original audio files are not touched.', onclick: e => gymDelete(e.currentTarget, c) }, 'delete creature') : null),
-      h('p', { class: 'gym-note' }, 'Training uses the Apple GPU and pauses the ace-step module. Stopping keeps the last checkpoint (saved every 5 epochs).'));
+        !running && c.trained && Gym.list.some(x => x.slug !== c.slug && x.trained) ? h('button', { title: 'Breed it with another trained creature. The child sounds like the average of both, inherits links to all their food, and can be trained further.', onclick: e => gymBreed(c, e) }, 'breed…') : null),
+      h('p', { class: 'gym-note' }, 'On this Mac, training uses the Apple GPU and pauses the ace-step module. Stopping keeps the last saved checkpoint.'),
+      ...(!running ? [h('div', { class: 'acts gym-end' }, h('button', { class: 'danger', data: { label: 'delete creature' }, title: 'Deletes what it learned and its list of tracks. Your original audio files are not touched.', onclick: e => gymDelete(e.currentTarget, c) }, 'delete creature'))] : []));
   }
   const keepPicker = $('#gym-picker'); if (keepPicker) stage.append(keepPicker);
   el.replaceChildren(left, stage, right, h('input', { id: 'gym-pick', type: 'file', multiple: true, accept: 'audio/*,video/*,.wav,.mp3,.flac,.aiff,.aif,.ogg,.m4a,.mp4,.mov,.mkv,.webm', hidden: true, onchange: e => gymFeedFiles([...e.target.files]) }));
