@@ -419,6 +419,11 @@ def train(slug: str, opt: dict, before=None) -> dict:
         lora = _dir(slug) / "lora"
         if not fresh and not any((lora / "checkpoints").glob("epoch_*")) and c["epochs"]:
             c["history"], c["epochs"] = [], 0          # an earlier session died before its first checkpoint: nothing to resume
+        if not fresh:
+            saved = [int(p.name.split("_")[1]) for p in (lora / "checkpoints").glob("epoch_*") if p.name.split("_")[1].isdigit()]
+            if saved and c["epochs"] > max(saved):     # it was stopped between two checkpoints: training resumes from the last one saved,
+                c["epochs"] = max(saved)               # so the epochs after it do not count
+                c["history"] = [h for h in c["history"] if h[0] <= max(saved)]
         base = 0 if fresh else c["epochs"]
         if fresh:
             shutil.rmtree(_dir(slug) / "lora", ignore_errors=True)
