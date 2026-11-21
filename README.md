@@ -90,6 +90,9 @@ To delete a creature, press the × on its row or *delete creature* in the gym (c
   dark and glossy, its seams glow and carry the sound, and the whole entity is mirrored across a midline (one central
   spine, the other limbs in pairs). The dust thins to a veil as soon as the spine exists, and crystallises into a lattice
   of thin sheets. The voids become faceted cavities, and arcs begin to orbit it, one ring per limb.
+- **It grows like a fractal.** Every limb sprouts branches, and branches sprout smaller ones. Each has its own life
+  cycle: it builds outward with a glowing tip, holds, then crumbles into dust and regrows elsewhere, so something is
+  always being made and unmade. Branching gets deeper with training.
 - **It reverberates.** Every pillar emits waves at its limb's tempo. They cross and interfere, so the dust shows moving
   standing patterns. Beats, touches and feeding send shock fronts that echo three times, and it rings on after sound stops.
 - **It behaves.** It drifts, breathes unevenly, and leans toward your pointer when it is curious.
@@ -105,7 +108,7 @@ The renderer picks the highest resolution that holds full frame rate on your mac
 
 **Watching it train.** A readout above the entity shows the phase (digest, wake, train), the epoch and step, the loss
 and its trend, and the time left. The entity shows the rest itself. While it digests, the tracks drift around it as
-small turning arcs, fragments of frame, and are drawn in to where the spine is being built. While it trains, light rises through the pillars from base
+soft clumps of its own dust and are drawn in to where the spine is being built. While it trains, light rises through the pillars from base
 to tip once per epoch, and two broken arcs grow in its orbit: the outer one is the whole session, the inner one the
 current epoch. Every training step sends a pulse and every finished epoch a shock front.
 

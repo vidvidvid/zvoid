@@ -49,6 +49,8 @@ float gH;                // how far along its pillar the last sampled point was
 uniform float uSym;      // 1 = the body is mirrored across its midline
 uniform vec4 uBuild;     // how far each part of the frame is built along every limb (0 base .. 1 tip): spine, ribs, cables, armour
 float gFront;            // how close the last sampled point was to where the frame is being built right now
+uniform vec4 uFract;     // branching: depth (grows with training), life-cycle rate
+float gTip; vec3 gTint; bool gLite;
 const int STEPS = 96;
 vec3 gPa, gBa; float gR0, gBest;   // the pillar nearest the last sampled point, in its own frame
 float gSeam;             // how deep in a groove of the body the last sampled point was
@@ -65,6 +67,38 @@ float fbm(vec3 p) {                         // four octaves; the third doubles a
 }
 float fbm2(vec3 p) { return .62 * n3(p) + .31 * n3(p * 2.03 + vec3(1.7, 9.2, 3.1)); }
 
+/* fractal growth: every limb sprouts branches, and branches sprout smaller ones. Each has its own life cycle: it builds
+   outward with a glowing tip, holds, then crumbles into dust and regrows. So something is always being made and unmade. */
+float branchField(vec3 pa, vec3 ba, float r0) {
+  float L = length(ba); vec3 ax = ba / L; float z = dot(pa, ax); vec3 rv = pa - ax * z;
+  vec3 u = normalize(cross(ax, vec3(.31, .95, .07))), v = cross(ax, u), q = vec3(dot(rv, u), dot(rv, v), z);
+  float len = L, rad = r0, dsum = 0.; gTip = 0.;
+  if (length(q.xy) > L * .8 + r0) return 0.;                                   // too far out for any branch to reach
+  for (int lv = 0; lv < 2; lv++) {
+    float fl = float(lv), on = clamp(uFract.x - fl, 0., 1.);
+    if (on <= 0.) break;
+    float nb = 3. + fl, cz = len / nb, id0 = floor(q.z / cz), bestD = 1e3, bestL = 0., bestR = rad * .5; vec3 bestP = q;
+    for (int c = 0; c < 2; c++) {
+      if (c == 1 && lv == 1) break;
+      float id = id0 - float(c);
+      if (id < 0. || id > nb - 1.) continue;
+      float hsh = fract((id + 1.) * .6180339 + fl * .371 + uSeed * .137); vec2 cs = normalize(vec2(fract(hsh * 7.31 + id * .41) - .5, fract(hsh * 3.17 + id * .73) - .5) + 1e-3);
+      float ph = fract(uT * uFract.y * (.6 + .8 * hsh) + hsh * 7.), grow = smoothstep(0., .4, ph) * (1. - smoothstep(.82, 1., ph)) * on;
+      vec3 p = q - vec3(0., 0., (id + .5) * cz);
+      p.xy = vec2(cs.x * p.x + cs.y * p.y, -cs.y * p.x + cs.x * p.y);
+      p.xz = vec2(.5817 * p.x - .8134 * p.z, .8134 * p.x + .5817 * p.z);      // tilted outward: the branch now runs along +z
+      float bl = len * .62 * grow, br = rad * (.55 - .1 * fl), hz = clamp(p.z, 0., bl), dc = length(vec3(p.xy, p.z - hz)) - br * (1. - .55 * hz / max(bl, 1e-3));
+      float di = smoothstep(.9, -.6, dc / br) * min(1., grow * 4.), crumble = smoothstep(.7, 1., ph);
+      if (crumble > 0. && di > 0.) di *= smoothstep(crumble * 1.25 - .25, crumble * 1.25, n3(pa * 2.6 + id * 7.));   // it does not shrink away: it crumbles
+      dsum += di;
+      if (ph < .4) { vec3 e = p - vec3(0., 0., bl); gTip += exp(-dot(e, e) / (br * br) * 2.5) * on; }               // it glows where it is growing
+      if (dc < bestD) { bestD = dc; bestP = p; bestL = bl; bestR = br; }
+    }
+    if (bestD > rad * 3. || bestL < 1e-3) break;
+    q = bestP; len = bestL; rad = bestR;
+  }
+  return dsum;
+}
 float shapes(vec3 q, out vec3 tint, out float halo) {
   float d = 0.; tint = vec3(0.); halo = 0.; gH = 0.; gBest = 1e3;
   for (int i = 0; i < 6; i++) {
@@ -73,11 +107,13 @@ float shapes(vec3 q, out vec3 tint, out float halo) {
       vec3 ba = uAxis[i].xyz * uAxis[i].w, pa = q - uPole[i].xyz;
       float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.), r0 = uPole[i].w;
       float sd = length(pa - ba * h) - r0 * (1. - .5 * h);
-      if (w > .5 && sd / r0 < gBest) { gBest = sd / r0; gPa = pa; gBa = ba; gR0 = r0; }
+      if (w > .5 && sd / r0 < gBest) { gBest = sd / r0; gPa = pa; gBa = ba; gR0 = r0; gTint = uCol[i].rgb; }
       float di = smoothstep(.9, -.6, sd / r0) * w, hl = smoothstep(2.6, -.4, sd / r0) * w;
       d += di; halo += hl * hl; tint += uCol[i].rgb * (di + hl * .25); gH += h * (di + hl * .25);
     }
   }
+  gTip = 0.;
+  if (!gLite && uFract.x > 0. && gBest < 3.2) { float bf = branchField(gPa, gBa, gR0); d += bf; tint += gTint * bf; halo += bf * bf * .25; }
   gH /= max(d + halo * .25, 1e-3);
   tint /= max(d + halo * .25, 1e-3);
   return min(d, 1.5);
@@ -85,7 +121,7 @@ float shapes(vec3 q, out vec3 tint, out float halo) {
 float nearest(vec3 p) {                      // distance to the outer edge of anything visible; lets rays leap over empty space
   float m = 1e3; p.x = mix(p.x, abs(p.x), uSym);
   for (int i = 0; i < 6; i++) {
-    if (uCol[i].w > 0.) { vec3 ba = uAxis[i].xyz * uAxis[i].w, pa = p - uPole[i].xyz; float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.); m = min(m, length(pa - ba * h) - uPole[i].w * 2.7 - .75); }
+    if (uCol[i].w > 0.) { vec3 ba = uAxis[i].xyz * uAxis[i].w, pa = p - uPole[i].xyz; float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.); m = min(m, length(pa - ba * h) - uPole[i].w * 2.7 - .75 - uAxis[i].w * .3 * min(uFract.x, 1.)); }   // room for its branches
   }
   return m;
 }
@@ -142,7 +178,7 @@ float bodyL(vec3 pa, vec3 ba, float r0) {
 }
 float dustLo(vec3 q) {                       // cheap density, for shadows
   q.x = mix(q.x, abs(q.x), uSym);
-  vec3 tt; float hl; float sh = shapes(q, tt, hl);
+  gLite = true; vec3 tt; float hl; float sh = shapes(q, tt, hl); gLite = false;
   if (sh < .02) return 0.;
   return smoothstep(-.3, .3, sh + (fbm2(q * 1.6 + vec3(0., -uT * .03, uT * .015) + uSeed) - .47) * 1.6 - .8) * carve(q);
 }
@@ -190,7 +226,7 @@ void main() {
     h = sqrt(h);
     float t0 = max(-b - h, 0.), t1 = -b + h, dt = (t1 - t0) / float(STEPS);
     float t = t0 + dt * fract(texture2D(uNoise, gl_FragCoord.xy / 256.).b + uFrame * .618034);
-    float turb = 1.1 + uLife.z * 1.4, tt = uT * .035;
+    float turb = 1.1 + uLife.z * 1.4, tt = uT * .035, lastSh = 0.;
     for (int i = 0; i < STEPS; i++) {
       vec3 p = ro + rd * t;
       if (tP > 0. && t >= tP) { C += T * ringC; T *= 1. - ringA * .35; tP = -1.; }   // the ray just passed through the arcs' plane
@@ -214,7 +250,7 @@ void main() {
       if (uTouch.w > 0.) { vec3 e2 = q - uTouch.xyz; float tg = exp(-dot(e2, e2) * 2.6) * uTouch.w; q += normalize(e2 + 1e-4) * tg * .4; ring += tg * .7; }   // your finger in the dust
       float sx = uSym > .5 && q.x < 0. ? -1. : 1.; q.x = mix(q.x, abs(q.x), uSym);                 // mirror symmetry: one side is the reflection of the other
       vec3 lF = normalize(uLight - p); lF.x *= sx; vec3 rdF = vec3(rd.x * sx, rd.yz);
-      vec3 tint; float halo; float sh = shapes(q, tint, halo); float hAlong = gH;
+      gLite = false; vec3 tint; float halo; float sh = shapes(q, tint, halo); float hAlong = gH; ring += gTip * 1.3;
       if (halo + sh < .012) continue;
       float cv = carve(q);
       float rip = ripples(q) * uReson.x;
@@ -222,13 +258,13 @@ void main() {
       float sapD = (hAlong - uSweep.x) / .04, sap = uSweep.y * (smoothstep(uSweep.x + .05, uSweep.x - .03, hAlong) * .3 + exp(-sapD * sapD) * 1.5);   // training: light rises through each pillar, base to tip, once per epoch
       ring += sap;
       float ds = dt, shv = -1., bd = 1e3;                  // shv: shadow toward the light, worked out once and shared by body and dust
-      if (uBuild.x > .001 && sh > .08) {         // the frame inside the dust
+      if (uBuild.x > .001 && sh > .08 && gBest < 1.35) {   // the frame, only worked out close to a limb's own axis
         vec3 bpa = gPa, bba = gBa; float br0 = gR0; bd = bodyL(bpa, bba, br0); float seam = gSeam, front = gFront;
         if (bd < dt * .7) { ds = clamp(bd * .75, dt * .24, dt); t += ds - dt; }       // slow down near its surface so it stays crisp
         if (bd < .022) {
           float ab = smoothstep(.022, -.008, bd) * cv;
           if (ab > .01) {
-            float e = .035, nl = clamp((bodyL(bpa + lF * e, bba, br0) - bd) / e, 0., 1.), nv = clamp((bodyL(bpa - rdF * e, bba, br0) - bd) / e, 0., 1.); shv = dustLo(q + lF * .32); float shB = exp(-shv * 5.);
+            float e = .035, nl = clamp((bodyL(bpa + lF * e, bba, br0) - bd) / e, 0., 1.), nv = clamp((bodyL(bpa - rdF * e, bba, br0) - bd) / e, 0., 1.); shv = dustLo(q + lF * .32); lastSh = shv; float shB = exp(-shv * 5.);
             vec3 alb = mix(vec3(.15, .14, .17), tint, .2);                      // dark, glossy, like wet bone
             vec3 lb = alb * (uKey * nl * (.35 + shB * .65) * 2.2 + uAmb * .16) + pow(1. - nv, 2.5) * (uAmb * .7 + uKey * .45) * (.45 + shB * .55) + tint * .05
                     + tint * seam * (.4 + max(0., rip) * 2.6 + ring * 2.2 + uAud.w * .9)           // its seams glow, and carry the sound
@@ -238,6 +274,7 @@ void main() {
           }
         }
       }
+      if (uBuild.x > .2 && bd > .22) { float k = 1. + 1.1 * uBuild.x; t += ds * (k - 1.); ds *= k; }   // the veil is thin and soft: stride through it, away from the frame
       float gas = (halo * .55 + sh * .25) * haze * haze * (.45 + wisp) * cv * max(0., 1. + rip * 2.4);
       C += T * mix(uAmb, tint, .45 + .4 * clamp(sh, 0., 1.)) * gas * ds * (.62 + ring * 2.5 + uAud.w * .6);
       if (sh > .02) {
@@ -255,7 +292,8 @@ void main() {
         }
         if (dust > .01) {
           vec3 l = normalize(uLight - p);
-          if (shv < 0.) shv = dustLo(q + lF * .32); float shd = exp(-shv * 8.5);
+          if (shv < 0.) { if (mod(float(i), 2.) < 1.) { shv = dustLo(q + lF * .32); lastSh = shv; } else shv = lastSh; }   // shadows change slowly along a ray: work one out every other step
+          float shd = exp(-shv * 8.5);
           vec3 alb = mix(tint, vec3(.62, .46, .36), .4);                       // dusty, a little warm
           vec3 lit = alb * (uKey * shd * 1.45 + uAmb * .07) + tint * (1. - dust) * .26;   // thin edges glow in their own colour
           for (int k = 0; k < 8; k++) { float sb = uStar[k].w; if (sb > 0.) { vec3 ds = uStar[k].xyz - p; lit += alb * vec3(1., .9, .8) * sb * .5 / (dot(ds, ds) * 6. + .15); } }
@@ -275,12 +313,11 @@ void main() {
   }
   for (int k = 0; k < 12; k++) {               // digesting: the tracks it has yet to eat drift around it as motes
     float fb = uFood[k].w;
-    if (fb > 0.) {                               // each is a fragment of frame on its way in: a small turning arc
-      vec3 so = uFood[k].xyz - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; float d2 = dot(dv, dv);
-      if (tc > 0. && d2 < .02) {
-        float fk = float(k), rr = sqrt(d2), an = atan(dot(dv, uCam[1]), dot(dv, uCam[0])) + uT * (.7 + fk * .17) * (mod(fk, 2.) < 1. ? 1. : -1.) + fk;
-        float mem = (rr - .05 - .012 * mod(fk, 3.)) / .006;
-        C += mix(uAmb, vec3(1., .9, .75), .6) * fb * (exp(-mem * mem) * smoothstep(-.25, .35, cos(an)) * 1.2 + exp(-d2 * 3000.) * .5 + exp(-d2 * 240.) * .06) * mix(1., T, .5);
+    if (fb > 0.) {                               // each is a soft clump of its own dust drifting in, with a faint tail behind it
+      vec3 fc = mix(uAmb, uKey, fract(float(k) * .37 + .15)), tail = normalize(uFood[k].xyz + 1e-3) * .17;
+      for (int j = 0; j < 4; j++) {
+        float fj = float(j); vec3 so = uFood[k].xyz + tail * fj - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; float d2 = dot(dv, dv), w = 1. + fj * .9;
+        if (tc > 0.) C += mix(fc, vec3(1.), .25) * fb * (exp(-d2 * 55. / w) * .55 + (fj < .5 ? exp(-d2 * 700.) * .5 : 0.)) / (1. + fj * 1.1) * mix(1., T, .6);
       }
     }
   }
@@ -313,7 +350,7 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild']) NEB.U[n] = gl.getUniformLocation(pr, n);
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract']) NEB.U[n] = gl.getUniformLocation(pr, n);
   gl.uniform1i(NEB.U.uNoise, 0);
   NEB.gl = gl;
 }
@@ -354,7 +391,7 @@ function nebFrame(c, t, mouse) {
   // camera
   const cy_ = Math.cos(L.yaw), sy_ = Math.sin(L.yaw), cp = Math.cos(L.pitch * .7), sp = Math.sin(L.pitch * .7), cr = Math.cos(L.roll * .6), sr = Math.sin(L.roll * .6);
   const M = [[cy_ * cr + sy_ * sp * sr, -cy_ * sr + sy_ * sp * cr, sy_ * cp], [cp * sr, cp * cr, -sp], [-sy_ * cr + cy_ * sp * sr, sy_ * sr + cy_ * sp * cr, cy_ * cp]];   // Ry * Rx * Rz
-  const dist = 9, grow = n ? .98 + .1 * clamp(d.minutes / 30, 0, 1) + .14 * d.growth : .55, tan = .56 / grow * (1 + .04 * (L.breath - .5));
+  const dist = 9, grow = n ? .98 + .1 * clamp(d.minutes / 30, 0, 1) + .14 * d.growth : .55, tan = Math.max(.56 / grow, (fx.extR || 0) / dist * 1.08) * (1 + .04 * (L.breath - .5));   // never so close that the body leaves the frame
   const rot = v => [M[0][0] * v[0] + M[0][1] * v[1] + M[0][2] * v[2], M[1][0] * v[0] + M[1][1] * v[1] + M[1][2] * v[2], M[2][0] * v[0] + M[2][1] * v[1] + M[2][2] * v[2]];
   const toCam = p => [M[0][0] * p[0] + M[1][0] * p[1] + M[2][0] * p[2], M[0][1] * p[0] + M[1][1] * p[1] + M[2][1] * p[2], M[0][2] * p[0] + M[1][2] * p[1] + M[2][2] * p[2]];
   const proj = p => { const q = toCam(p), depth = dist - q[2]; return [cx + q[0] / (depth * tan) * S / 2, cy - q[1] / (depth * tan) * S / 2, depth]; };
@@ -381,6 +418,7 @@ function nebFrame(c, t, mouse) {
     s.len += (tl - s.len) * e * .6; s.rad += (trd - s.rad) * Math.min(1, e * 4); s.w += (tw - s.w) * e; s.ring *= Math.exp(-dt * 2.2);
   });
   N.fresh = false;
+  { let er = 0; N.slots.forEach(sl => { if (sl.w > .3) er = Math.max(er, Math.hypot(Math.abs(sl.p[0]) + Math.abs(sl.a[0]) * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 1.3 + sl.len * .28); }); fx.extR = fx.extR == null ? er : fx.extR + (er - fx.extR) * Math.min(1, dt * .8); }
   const pole = new Float32Array(24), axis = new Float32Array(24), col = new Float32Array(24);
   N.slots.forEach((s, j) => { pole.set([s.p[0], s.p[1], s.p[2], s.rad], j * 4); axis.set([s.a[0], s.a[1], s.a[2], s.len], j * 4); col.set([s.col[0], s.col[1], s.col[2], s.w < .01 ? 0 : s.w], j * 4); });
 
@@ -450,6 +488,7 @@ function nebFrame(c, t, mouse) {
   const E = d.epochs + (tr && tr.stage === 'train' ? pg.i : 0), bt = n ? [clamp(Math.max(E / 5, (pg.dig || 0) * .22 * trn), 0, 1), clamp((E - 2) / 20, 0, 1), clamp((E - 14) / 70, 0, 1), clamp((E - 50) / 250, 0, 1)] : [0, 0, 0, 0];
   const B = fx.bld || (fx.bld = bt.slice()); for (let k = 0; k < 4; k++) B[k] += (bt[k] - B[k]) * Math.min(1, dt * .9);
   gl.uniform4f(U.uBuild, B[0], B[1], B[2], B[3]);
+  gl.uniform4f(U.uFract, n ? clamp(sm('depth', .95 + 1.05 * Math.min(1, d.growth * 1.6), .5), 0, 2) : 0, .03, 0, 0);
   fx.part = B[0] < .995 ? 'spine' : B[1] < .995 ? 'ribs' : B[2] < .995 ? 'cables' : B[3] < .995 ? 'armour' : null; fx.partPct = Math.round((B[0] < .995 ? B[0] : B[1] < .995 ? B[1] : B[2] < .995 ? B[2] : B[3]) * 100);
   if (trn > .01) {                                 // while it trains, its orbit turns to face you enough to be read
     const wF = .55 * trn, cf = rot([0, 0, 1]), mixN = [DN[0] * (1 - wF) + cf[0] * wF, DN[1] * (1 - wF) + cf[1] * wF, DN[2] * (1 - wF) + cf[2] * wF], ml = Math.hypot(...mixN) || 1; for (let k = 0; k < 3; k++) DN[k] = mixN[k] / ml;
