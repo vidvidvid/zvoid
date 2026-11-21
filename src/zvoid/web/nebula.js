@@ -236,19 +236,20 @@ void main() {
       t += dt; if (t > t1 + dt) break;
       vec3 s = p * .45 + uSeed;
       vec3 w = (vec3(n3(s + vec3(0., tt, 0.)), n3(s + vec3(31.4, -tt, 7.7)), n3(s + vec3(5.2, 13.1, tt))) - .5) * turb;
-      vec3 q = p + w; float ring = 0.;
+      vec3 q = p + w; float ring = 0., melt = 0., grow = 0., bloom = 0.;   // a front does not just push the dust: it dissolves it as it passes, and the dust grows back thicker behind it
       for (int k = 0; k < 8; k++) {            // shock fronts from touch, feeding, beats, and their echoes
         float a = uWaveAmp[k];
         if (a > 0.) {
           vec3 e = q - uWave[k].xyz, wn = uWaveN[k].xyz; float el = length(e) + 1e-3, kind = uWaveK[k].y;
           float dm = kind > .5 && kind < 1.5 ? dot(e, wn) : el, dw = (dm - uWave[k].w) * uWaveK[k].x, g = exp(-dw * dw) * a;
           if (kind > .5) g *= exp(-el * el * .1);
-          if (kind > 1.5) { float an = g * 1.5; q = uWave[k].xyz + e * cos(an) + cross(wn, e) * sin(an) + wn * dot(wn, e) * (1. - cos(an)); }   // twist the dust around an axis
-          else q += (kind > .5 ? wn : e / el) * g * .3;
-          ring += g;
+          if (kind > 1.5) { float an = g * .7; q = uWave[k].xyz + e * cos(an) + cross(wn, e) * sin(an) + wn * dot(wn, e) * (1. - cos(an)); }   // twist the dust around an axis
+          else q += (kind > .5 ? wn : e / el) * g * .1;
+          ring += g; melt += g; grow += exp(-(dw + 1.6) * (dw + 1.6)) * a * (kind > .5 ? exp(-el * el * .1) : 1.);
+          if (kind < .5) bloom += a * exp(-el * el * 4.5);   // where it was touched stays lit for a while, like a flush under skin
         }
       }
-      if (uTouch.w > 0.) { vec3 e2 = q - uTouch.xyz; float tg = exp(-dot(e2, e2) * 2.6) * uTouch.w; q += normalize(e2 + 1e-4) * tg * .4; ring += tg * .7; }   // your finger in the dust
+      if (uTouch.w > 0.) { vec3 e2 = q - uTouch.xyz; float tg = exp(-dot(e2, e2) * 2.6) * uTouch.w; q += normalize(e2 + 1e-4) * tg * .18; ring += tg * .7; melt += tg * .8; bloom += tg * .5; }   // your finger in the dust
       float sx = uSym > .5 && q.x < 0. ? -1. : 1.; q.x = mix(q.x, abs(q.x), uSym);                 // mirror symmetry: one side is the reflection of the other
       vec3 lF = normalize(uLight - p); lF.x *= sx; vec3 rdF = vec3(rd.x * sx, rd.yz);
       gLite = false; vec3 tint; float halo; float sh = shapes(q, tint, halo); float hAlong = gH; ring += gTip * 1.3;
@@ -277,12 +278,12 @@ void main() {
       }
       if (uBuild.x > .2 && bd > .22) { float k = 1. + 1.1 * uBuild.x; t += ds * (k - 1.); ds *= k; }   // the veil is thin and soft: stride through it, away from the frame
       float gas = (halo * .55 + sh * .25) * haze * haze * (.45 + wisp) * cv * max(0., 1. + rip * 2.4);
-      C += T * mix(uAmb, tint, .45 + .4 * clamp(sh, 0., 1.)) * gas * ds * (.62 + ring * 2.5 + uAud.w * .6);
+      C += T * mix(uAmb, tint, .45 + .4 * clamp(sh, 0., 1.)) * gas * ds * (.62 + ring * 2.5 + bloom * 2.2 + melt * 1.5 + uAud.w * .6);
       if (sh > .02) {
         vec3 fq = q * 1.6 + vec3(0., -uT * .03, uT * .015) + uSeed;
         float f = fbm(fq);
         float soft = mix(.5, .1, uLife.x);
-        float edg = sh + (f - .47) * 1.6 - .8 + rip * .34;
+        float edg = sh + (f - .47) * 1.6 - .8 + rip * .34 - melt * .6 + grow * .3;
         if (abs(edg) < soft + .45) {            // fine grain where the dust thins out: two more octaves of fibre
           vec3 fa = gBa / (length(gBa) + 1e-4), ff = fq - fa * dot(fq, fa) * .8;   // the grain runs along the limb, like fibre, instead of every way at once like smoke
           float fine = (n3(ff * 6.1 + 3.) - .5) + (n3(ff * 10.1 - 5.) - .5) * .4;
@@ -305,9 +306,10 @@ void main() {
           vec3 lit = alb * (uKey * shd * 1.45 + uAmb * .07) + tint * (1. - dust) * .26;   // thin edges glow in their own colour
           for (int k = 0; k < 8; k++) { float sb = uStar[k].w; if (sb > 0.) { vec3 ds = uStar[k].xyz - p; lit += alb * vec3(1., .9, .8) * sb * .5 / (dot(ds, ds) * 6. + .15); } }
           lit *= 1. + uAud.z * 1.6 * n3(q * 7. + uT * 2.) * (1. - dust) + ring * 1.5 + max(0., rip) * 1.1;
+          lit += (tint * .7 + vec3(.5, .3, .26)) * bloom * .9;
           float va = n3(q * 2.7 + uSeed + vec3(0., uT * .012, 0.)), vb = n3(q * 2.7 + 19.7 - uSeed);               // veins: lines where two folded sheets cross
           float vein = smoothstep(.075, 0., abs(va - .5)) * smoothstep(.075, 0., abs(vb - .5));
-          lit += (tint * .9 + vec3(.3, .14, .12)) * vein * (.3 + 1.5 * pow(.5 + .5 * sin(hAlong * 9. - uT * 1.6 + va * 5.), 4.)) * (1. + uAud.x * 2.);   // a pulse runs out along them from the base
+          lit += (tint * .9 + vec3(.3, .14, .12)) * vein * (.3 + 1.5 * pow(.5 + .5 * sin(hAlong * 9. - uT * 1.6 + va * 5.), 4.)) * (1. + uAud.x * 2. + ring * 6. + bloom * 5.);   // a pulse runs out along them from the base; a touch fires them like nerves
           lit += (tint * .65 + vec3(.38)) * lat * (.5 + max(0., rip) * 2.8 + ring * 2. + uAud.w * .8);   // the sheets carry the sound: they light up as waves pass
           float a = 1. - exp(-dust * (1. - max(uForm * .5, uBuild.x * .72)) * mix(1., smoothstep(0., .16, bd), .9) * ds * 9.);   // and clears around the frame, so you can see it                 // the dust thins to a shroud as the body forms
           C += T * a * lit; T *= 1. - a;
@@ -356,7 +358,7 @@ void main() {
   av /= 9.;
   vec3 h = clamp(texture2D(uHist, uv).rgb, mn - .015, mx + .015);
   float mv = smoothstep(.06, .25, length(av - h));            // where the picture really changed, follow it faster
-  gl_FragColor = vec4(mix(h, mix(c, av, .35), clamp(uMix + mv * .3, 0., 1.)), 1.);   // half of each new frame is its own neighbourhood average: grain never gets in
+  gl_FragColor = vec4(mix(h, mix(c, av, .35 + .6 * mv), clamp(uMix + mv * .22, 0., 1.)), 1.);   // half of each new frame is its own neighbourhood average: grain never gets in, and where things move it blurs instead of going grainy
 }`;
 /* Draw the blended image on the screen at the display's full resolution, with a little sharpening. */
 const NEB_PRESENT = `precision highp float;
