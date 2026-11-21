@@ -546,15 +546,43 @@ function openDrawer(kind, arg) {
   }
 }
 /* ---------- library: everything that was made, in one place ---------- */
-const LIB = { tab: 'all', q: '', source: '', creature: '', stars: false, items: [], audio: null, playing: null };
+const LIB = { tab: 'all', q: '', source: '', creature: '', stars: false, items: [], audio: null, playing: null, peaks: new Map(), hover: null };
 const libDay = w => { const d = new Date((w || '').replace(' ', 'T')), t = new Date(), y = new Date(Date.now() - 864e5), same = (a, b) => a.toDateString() === b.toDateString();
   return isNaN(d) ? 'earlier' : same(d, t) ? 'today' : same(d, y) ? 'yesterday' : d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }); };
 const libSize = n => n > 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n > 1e6 ? (n / 1e6).toFixed(n > 1e7 ? 0 : 1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
-function libPlay(it) {
+function libPlay(it, at) {                           // at: where to start, 0..1 through the clip (a click on its waveform)
   if (!LIB.audio) { LIB.audio = new Audio(); LIB.audio.onended = () => { LIB.playing = null; libraryDraw(); }; try { ac().createMediaElementSource(LIB.audio).connect(bus()); } catch {} }
-  if (LIB.playing === it.path) { LIB.audio.pause(); LIB.playing = null; } else { ac().resume(); LIB.audio.src = fileUrl(it.path); LIB.audio.play().catch(e => toast('could not play that: ' + e.message, true)); LIB.playing = it.path; }
+  const A = LIB.audio, seek = () => { if (at != null && isFinite(A.duration)) A.currentTime = clamp(at, 0, .999) * A.duration; };
+  if (LIB.playing === it.path && at == null) { A.pause(); LIB.playing = null; }
+  else if (LIB.playing === it.path) seek();
+  else { ac().resume(); A.src = fileUrl(it.path); if (at != null) A.addEventListener('loadedmetadata', seek, { once: true }); A.play().catch(e => toast('could not play that: ' + e.message, true)); LIB.playing = it.path; }
   libraryDraw();
 }
+/* The waveform of a clip: click anywhere on it to play from there. What has played is lit; a line follows your pointer. */
+function libWaveDraw(cv) {
+  const pk = LIB.peaks.get(cv.dataset.path), dpr = devicePixelRatio || 1, w = cv.clientWidth, hgt = cv.clientHeight; if (!w) return;
+  if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(hgt * dpr); }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, hgt);
+  const mid = hgt / 2, on = LIB.playing === cv.dataset.path, A = LIB.audio, prog = on && A && A.duration ? A.currentTime / A.duration : -1;
+  if (!pk || !pk.hi) { g.fillStyle = '#26243a'; g.fillRect(0, mid - .5, w, 1); return; }
+  const n = pk.hi.length, bw = 2, gap = 1, cols = Math.floor(w / (bw + gap)), top = Math.max(.05, ...pk.hi.map(Math.abs), ...pk.lo.map(Math.abs));
+  for (let c = 0; c < cols; c++) { const i0 = Math.floor(c / cols * n), i1 = Math.max(i0 + 1, Math.floor((c + 1) / cols * n)); let lo = 0, hi = 0; for (let i = i0; i < i1; i++) { lo = Math.min(lo, pk.lo[i]); hi = Math.max(hi, pk.hi[i]); }
+    const y0 = mid - hi / top * (mid - 1), y1 = mid - lo / top * (mid - 1);
+    g.fillStyle = (c + .5) / cols <= prog ? '#3ee6d6' : on ? '#6f6a9c' : '#4a4670'; g.fillRect(c * (bw + gap), y0, bw, Math.max(1, y1 - y0)); }
+  if (prog >= 0) { g.fillStyle = '#fff'; g.fillRect(prog * w - .5, 0, 1, hgt); }
+  if (LIB.hover && LIB.hover.cv === cv) { g.fillStyle = '#ffffff66'; g.fillRect(LIB.hover.x - .5, 0, 1, hgt); }
+}
+function libWave(it) {
+  const cv = h('canvas', { class: 'lib-wave', data: { path: it.path }, title: 'Click to play from here' });
+  cv.addEventListener('click', e => { const r = cv.getBoundingClientRect(); libPlay(it, (e.clientX - r.left) / r.width); });
+  cv.addEventListener('mousemove', e => { LIB.hover = { cv, x: e.clientX - cv.getBoundingClientRect().left }; libWaveDraw(cv); });
+  cv.addEventListener('mouseleave', () => { LIB.hover = null; libWaveDraw(cv); });
+  if (!LIB.peaks.has(it.path)) { LIB.peaks.set(it.path, null); api('/api/peaks?path=' + encodeURIComponent(it.path)).then(pk => { LIB.peaks.set(it.path, pk); document.querySelectorAll('.lib-wave').forEach(c => { if (c.dataset.path === it.path) libWaveDraw(c); }); }).catch(() => {}); }
+  requestAnimationFrame(() => libWaveDraw(cv));
+  return cv;
+}
+setInterval(() => { if (LIB.playing) document.querySelectorAll('.lib-wave').forEach(c => { if (c.dataset.path === LIB.playing) libWaveDraw(c); }); }, 50);   // the playhead moves
+window.addEventListener('resize', () => document.querySelectorAll('.lib-wave').forEach(libWaveDraw));
 function libPreview(it) {                           // a still or a video, large
   const close = () => ov.remove(), ov = h('div', { class: 'lib-over', onclick: e => { if (e.target === ov) close(); } },
     it.kind === 'video' ? h('video', { src: fileUrl(it.path), controls: true, autoplay: true, loop: true }) : h('img', { src: fileUrl(it.path) }),
@@ -590,7 +618,7 @@ function libraryDraw() {
         h('div', { class: 'lib-what', title: it.name }, it.title), h('div', { class: 'lib-meta' }, meta(it)), tools(it)))),
       ...rows.map(it => h('div', { class: 'lib-row' + (LIB.playing === it.path ? ' playing' : '') },
         it.kind === 'audio' ? h('button', { class: 'lib-pp', title: 'Play / stop', onclick: () => libPlay(it) }, LIB.playing === it.path ? '■' : '▶') : h('span', { class: 'lib-pp midi' }, '♪'),
-        h('div', { class: 'lib-text' }, h('div', { class: 'lib-what', title: it.title + '\n' + it.name }, it.title), h('div', { class: 'lib-meta' }, meta(it))), tools(it)))];
+        h('div', { class: 'lib-text' }, h('div', { class: 'lib-what', title: it.title + '\n' + it.name }, it.title), h('div', { class: 'lib-meta' }, meta(it))), it.kind === 'audio' ? libWave(it) : h('span'), tools(it)))];
   }).filter(Boolean));
 }
 async function libraryOpen(body) {

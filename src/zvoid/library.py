@@ -116,7 +116,7 @@ def list_items(limit: int = 800) -> list[dict]:
             norm = lambda x: re.sub(r"[^a-z0-9]", "", x.lower())
             shown = len([x for x in files if _kind(x) != "other"])
             is_ace = (run.get("engine") or "") == "ace_step"
-            if not is_ace and label.startswith("ace-") and run.get("engine") in ("demucs", "basic_pitch"):
+            if not is_ace and re.match(r"ace[-_]", label) and run.get("engine") in ("demucs", "basic_pitch"):
                 title = "stems of an ace-step clip" if run.get("engine") == "demucs" else "notes of an ace-step clip"   # the label is only the input's file name: say what this is
             if run.get("engine") == "demucs":
                 part = f.stem.rsplit("_", 1)[-1]            # drums, bass, other, vocals
@@ -160,6 +160,32 @@ def trash(path: Path) -> None:
     if (parent / "meta.json").exists() and not any(p.name != "meta.json" for p in parent.iterdir()):
         (parent / "meta.json").unlink()
         parent.rmdir()
+
+
+def peaks(path: Path, n: int = 600) -> dict:
+    """The outline of a sound for drawing its waveform: n pairs of lowest and highest level, made once and kept in outputs/.thumbs."""
+    import hashlib
+    import subprocess
+    from array import array
+    d = OUTPUTS_DIR / ".thumbs"
+    d.mkdir(exist_ok=True)
+    out = d / (hashlib.sha1(f"{path}|{path.stat().st_mtime}|peaks{n}".encode()).hexdigest()[:20] + ".json")
+    if out.exists():
+        return json.loads(out.read_text())
+    r = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"], capture_output=True)
+    a = array("h")
+    a.frombytes(r.stdout[: len(r.stdout) // 2 * 2])
+    if not len(a):
+        raise FileNotFoundError("no sound in that file")
+    step = max(1, len(a) // n)
+    lo, hi = [], []
+    for i in range(0, len(a) - step + 1, step):
+        seg = a[i:i + step]
+        lo.append(round(min(seg) / 32768, 3))
+        hi.append(round(max(seg) / 32768, 3))
+    res = {"secs": round(len(a) / 8000, 2), "lo": lo[:n], "hi": hi[:n]}
+    out.write_text(json.dumps(res))
+    return res
 
 
 def thumb(path: Path, width: int = 360) -> Path:

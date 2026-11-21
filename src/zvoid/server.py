@@ -265,6 +265,13 @@ def create_app():
         except FileNotFoundError as ex:
             raise HTTPException(404, str(ex))
 
+    @app.get("/api/peaks")
+    def peaks(path: str):
+        try:
+            return library.peaks(_inside_outputs(path))
+        except FileNotFoundError as ex:
+            raise HTTPException(404, str(ex))
+
     @app.post("/api/reveal")
     async def reveal(request: Request):
         path = (await request.json()).get("path")
