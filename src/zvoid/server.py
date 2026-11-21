@@ -215,6 +215,12 @@ def create_app():
         threading.Thread(target=work, daemon=True).start()
         return {"id": job["id"], "seed": job["seed"]}
 
+    @app.get("/api/busy")
+    def busy():
+        """What is in progress right now. Checked before restarting the app, so a restart never cuts off a run."""
+        return {"jobs": [{"engine": j["engine"], "msg": j["msg"]} for j in jobs.values() if j["state"] in ("queued", "running")],
+                "training": gym._train.get("state") in ("running", "stopping")}
+
     @app.get("/api/jobs/{jid}")
     def job_status(jid: str):
         if jid not in jobs:
