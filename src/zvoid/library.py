@@ -115,10 +115,17 @@ def list_items(limit: int = 800) -> list[dict]:
             take = re.match(r"ace_[a-z0-9]+_(\d+)_seed", f.stem)
             norm = lambda x: re.sub(r"[^a-z0-9]", "", x.lower())
             shown = len([x for x in files if _kind(x) != "other"])
-            if take and shown > 1:
+            is_ace = (run.get("engine") or "") == "ace_step"
+            if not is_ace and label.startswith("ace-") and run.get("engine") in ("demucs", "basic_pitch"):
+                title = "stems of an ace-step clip" if run.get("engine") == "demucs" else "notes of an ace-step clip"   # the label is only the input's file name: say what this is
+            if run.get("engine") == "demucs":
+                part = f.stem.rsplit("_", 1)[-1]            # drums, bass, other, vocals
+            elif run.get("engine") == "basic_pitch":
+                part = "MIDI" if f.suffix.lower() in (".mid", ".midi") else "MIDI preview"
+            if take and shown > 1 and is_ace:
                 title = f"{title} · take {take.group(1)}"
             elif shown > 1 and part and norm(part) not in norm(title):
-                title = f"{title} · {part}"
+                title = f"{title} · {part}"                 # stems and other multi-file results are told apart by their part: drums, bass, vocals…
             items.append({"path": str(f), "name": f.name, "kind": k, "title": title[:120], "when": (run.get("created") or "")[:19].replace("T", " "),
                           "source": run.get("engine_name") or run.get("engine") or "", "engine": run.get("engine") or "",
                           "creature": params.get("creature") or "", "seed": params.get("seed"), "model": params.get("model") or "",
