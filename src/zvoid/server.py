@@ -261,7 +261,14 @@ def create_app():
         f = _inside_outputs((await request.json()).get("path"))
         if not f.is_file():
             raise HTTPException(404, "that file is gone")
-        library.trash(f)
+        return {"ok": True, "undo": library.trash(f)}
+
+    @app.post("/api/made/restore")
+    async def made_restore(request: Request):
+        try:
+            library.restore((await request.json()).get("undo") or {})
+        except (FileNotFoundError, KeyError) as ex:
+            raise HTTPException(400, str(ex))
         return {"ok": True}
 
     @app.get("/api/thumb")

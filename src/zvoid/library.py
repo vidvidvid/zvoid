@@ -146,20 +146,40 @@ def list_items(limit: int = 800) -> list[dict]:
     return items[:limit]
 
 
-def trash(path: Path) -> None:
-    """Move one made file to the macOS Trash (so it can be put back). An emptied run folder goes with it."""
+def trash(path: Path) -> dict:
+    """Move one made file to the macOS Trash. An emptied run folder goes with it. Returns what is needed to put it back."""
     bin_ = Path.home() / ".Trash"
     dst = bin_ / path.name
     n = 1
     while dst.exists():
         n += 1
         dst = bin_ / f"{path.stem} {n}{path.suffix}"
+    was_star = str(path) in _stars()
     path.rename(dst)
     star(str(path), False)
-    parent = path.parent
+    parent, meta = path.parent, None
     if (parent / "meta.json").exists() and not any(p.name != "meta.json" for p in parent.iterdir()):
+        meta = (parent / "meta.json").read_text()
         (parent / "meta.json").unlink()
         parent.rmdir()
+    return {"path": str(path), "trash": str(dst), "meta": meta, "star": was_star}
+
+
+def restore(rec: dict) -> None:
+    """Put a file that was just moved to the Trash back where it was (undo)."""
+    src, dst = Path(rec["trash"]), Path(rec["path"])
+    if src.parent != Path.home() / ".Trash" or OUTPUTS_DIR.resolve() not in dst.resolve().parents:
+        raise FileNotFoundError("that cannot be put back")
+    if not src.exists():
+        raise FileNotFoundError("it is no longer in the Trash")
+    if dst.exists():
+        raise FileNotFoundError("something with that name is already there")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    src.rename(dst)
+    if rec.get("meta") and not (dst.parent / "meta.json").exists():
+        (dst.parent / "meta.json").write_text(rec["meta"])
+    if rec.get("star"):
+        star(str(dst), True)
 
 
 def peaks(path: Path, n: int = 600) -> dict:

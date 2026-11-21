@@ -318,7 +318,7 @@ function select(s) {
 function renderNode(n) {
   const isS = n.type === 'sample', spec = ENG[n.type];
   const c = color(n.type), r = R[n.id] || {};
-  const e = h('div', { class: 'node' + (sel && sel.node === n.id ? ' sel' : '') + (r.state === 'running' ? ' running' : ''), data: { node: n.id }, style: `left:${n.x}px;top:${n.y}px;--c:${c}` });
+  const e = h('div', { class: 'node' + (sel && sel.node === n.id ? ' sel' : '') + (r.state === 'running' ? ' running' : r.state === 'waiting' ? ' waiting' : r.state === 'done' ? ' done' : r.state === 'error' ? ' failed' : ''), data: { node: n.id }, style: `left:${n.x}px;top:${n.y}px;--c:${c}` });
   const title = isS ? 'sample' : spec ? (spec.tab || spec.name) : n.type + ' (missing)';
   const go = !isS && spec && h('button', { class: 'go', title: 'Run this module (shift-click: re-run everything upstream too)' }, r.state === 'running' ? '■' : '▸');
   if (go) go.onclick = ev => { ev.stopPropagation(); (R[n.id] || {}).state === 'running' ? stopNode(n.id) : runNode(n.id, new Map(), ev.shiftKey).catch(() => {}); };
@@ -379,7 +379,10 @@ function renderNode(n) {
   drawCables();
 }
 function setStatus(id, patch) {                   // light update while a job runs (keeps focus in fields)
-  const r = R[id] = Object.assign(R[id] || {}, patch), e = nodeEls.get(id); if (!e) return;
+  const prev = (R[id] || {}).state, r = R[id] = Object.assign(R[id] || {}, patch), e = nodeEls.get(id);
+  if (r.state !== prev) { if (r.state === 'running') r.t0 = performance.now(); if (prev === 'running' && r.t0) r.took = (performance.now() - r.t0) / 1000; }
+  runPanelTrack(id); if (!e) return;
+  e.classList.toggle('waiting', r.state === 'waiting'); e.classList.toggle('done', r.state === 'done'); e.classList.toggle('failed', r.state === 'error');
   e.classList.toggle('running', r.state === 'running');
   const bar = e.querySelector('.progress'); bar.classList.toggle('indet', r.frac == null); bar.firstChild.style.width = r.frac != null ? Math.round(r.frac * 100) + '%' : '';
   const go = e.querySelector('.go'); if (go) go.textContent = r.state === 'running' ? '■' : '▸';
@@ -480,6 +483,58 @@ function runNode(id, memo = new Map(), fresh = false) {
   })();
   memo.set(id, job);
   return job;
+}
+/* ---------- the run panel: what the circuit is doing, step by step, and what came out ----------
+   Every module that takes part in a run gets a line, in the order the sound flows: waiting, running (with its message, a bar,
+   and which machine is doing it), done (with how long it took and its waveform, which you can click to listen), or failed
+   (with the reason). When the run ends, the clips at the end of each chain are gathered at the top as the results. */
+const RUNP = { ids: [], t0: 0, open: false, timer: 0, done: false };
+function runPanelTrack(id) {
+  const st = (R[id] || {}).state; if (!S.nodes[id] || S.nodes[id].type === 'sample') return;
+  const active = RUNP.ids.some(i => ['waiting', 'running'].includes((R[i] || {}).state));
+  if ((st === 'waiting' || st === 'running') && !RUNP.ids.includes(id)) { if (!active || RUNP.done) { RUNP.ids = []; RUNP.t0 = performance.now(); RUNP.done = false; } RUNP.ids.push(id); RUNP.open = true; }
+  if (!RUNP.ids.includes(id)) return;
+  if (!RUNP.timer) RUNP.timer = setInterval(runPanelDraw, 400);
+  runPanelDraw();
+}
+function runPanelOrder() {                        // upstream first, so the list reads the way the sound flows
+  const ids = RUNP.ids.filter(i => S.nodes[i]), depth = {}, d = i => depth[i] != null ? depth[i] : (depth[i] = 0, depth[i] = 1 + Math.max(-1, ...S.cables.filter(c => c.to.node === i && S.nodes[c.from.node]).map(c => d(c.from.node))));
+  return ids.sort((a, b) => d(a) - d(b) || S.nodes[a].y - S.nodes[b].y);
+}
+function runPanelDraw() {
+  let el = $('#runp'); if (!el) { el = h('div', { id: 'runp' }); document.body.append(el); }
+  const ids = runPanelOrder(); el.hidden = !RUNP.open || !ids.length; if (el.hidden) return;
+  const stOf = i => (R[i] || {}).state || 'idle', n = k => ids.filter(i => stOf(i) === k).length, busy = n('running') + n('waiting'), fmt = s => s >= 60 ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : `${s < 10 ? s.toFixed(1) : Math.round(s)}s`;
+  if (!busy && !RUNP.done) { RUNP.done = true; RUNP.total = (performance.now() - RUNP.t0) / 1000; }
+  if (!busy && RUNP.timer) { clearInterval(RUNP.timer); RUNP.timer = 0; }
+  const name = i => { const nd = S.nodes[i], sp = ENG[nd.type] || {}, what = (nd.params && (nd.params.caption || nd.params.prompt)) || '', task = nd.params && nd.params.task && nd.params.task !== 'text2music' ? nd.params.task + ' · ' : ''; return [(sp.tab || sp.name || nd.type).toLowerCase(), task + what]; };
+  const firstAudio = i => ((S.nodes[i].result || {}).outputs || []).find(o => o.kind === 'audio');
+  const sinks = ids.filter(i => stOf(i) === 'done' && !S.cables.some(c => c.from.node === i) && firstAudio(i));
+  const row = i => { const r = R[i] || {}, st = stOf(i), [eng, what] = name(i), sp = ENG[S.nodes[i].type] || {}, a = st === 'done' ? firstAudio(i) : null, outs = ((S.nodes[i].result || {}).outputs || []).length;
+    return h('div', { class: 'runp-row ' + st, onclick: e => { if (e.target.closest('canvas,button')) return; select({ node: i }); const ne = nodeEls.get(i); if (ne) { const b = ne.getBoundingClientRect(); S.view.x += innerWidth / 2 - (b.left + b.width / 2); S.view.y += innerHeight / 2 - (b.top + b.height / 2); applyView(); } } },
+      h('i', { class: 'runp-dot' }, st === 'done' ? '✓' : st === 'error' ? '✕' : st === 'running' ? '' : '·'),
+      h('div', { class: 'runp-main' },
+        h('div', { class: 'runp-name' }, h('b', {}, eng), sp.where === 'pc' ? h('em', { title: 'Made on the PC' }, 'PC') : null, h('span', {}, what)),
+        st === 'running' ? h('div', { class: 'runp-bar' + (r.frac == null ? ' indet' : '') }, h('i', { style: r.frac != null ? `width:${Math.round(r.frac * 100)}%` : '' })) : null,
+        h('div', { class: 'runp-msg' }, st === 'running' ? (r.msg || 'working…') + (r.t0 ? ` · ${fmt((performance.now() - r.t0) / 1000)}` : '') : st === 'waiting' ? 'waiting for the step before it' : st === 'done' ? `done${r.took ? ' in ' + fmt(r.took) : ''}${outs > 1 ? ` · ${outs} files` : ''}` : st === 'error' ? (r.msg || 'failed') : 'stopped'),
+        a ? libWave({ path: a.path }) : null));
+  };
+  const head = busy ? `running · ${n('done')} of ${ids.length} done · ${fmt((performance.now() - RUNP.t0) / 1000)}` : n('error') ? `finished with ${n('error')} failed · ${fmt(RUNP.total || 0)}` : `complete · ${ids.length} step${ids.length > 1 ? 's' : ''} · ${fmt(RUNP.total || 0)}`;
+  const keyOf = JSON.stringify(ids.map(i => [i, stOf(i), !!firstAudio(i)])) + (RUNP.done ? 'd' : '');
+  if (el._key === keyOf) {                        // nothing changed shape: only refresh the moving parts, so waveforms and clicks are not disturbed
+    el.querySelector('.runp-head span').textContent = head;
+    ids.forEach((i, k) => { const r = R[i] || {}, rowEl = el.querySelectorAll('.runp-list .runp-row')[k]; if (!rowEl || stOf(i) !== 'running') return; const bar = rowEl.querySelector('.runp-bar'), m = rowEl.querySelector('.runp-msg');
+      if (bar) { bar.classList.toggle('indet', r.frac == null); bar.firstChild.style.width = r.frac != null ? Math.round(r.frac * 100) + '%' : ''; } if (m) m.textContent = (r.msg || 'working…') + (r.t0 ? ` · ${fmt((performance.now() - r.t0) / 1000)}` : ''); });
+    return;
+  }
+  el._key = keyOf; el.className = busy ? 'busy' : n('error') ? 'bad' : 'ok';
+  el.replaceChildren(
+    h('div', { class: 'runp-head' }, h('span', {}, head), h('span', {},
+      busy ? h('button', { title: 'Stop every running step', onclick: () => ids.forEach(i => stopNode(i)) }, '■ stop') : null,
+      h('button', { title: 'Hide', onclick: () => { RUNP.open = false; runPanelDraw(); } }, '×'))),
+    RUNP.done && sinks.length ? h('div', { class: 'runp-results' }, h('h5', {}, sinks.length > 1 ? 'results' : 'result'), ...sinks.map(i => { const a = firstAudio(i), [eng, what] = name(i);
+      return h('div', { class: 'runp-res' }, h('button', { class: 'runp-play', title: 'Play / stop', onclick: () => libPlay({ path: a.path }) }, '▶'), h('div', {}, h('div', { class: 'runp-name' }, h('b', {}, eng), h('span', {}, what)), libWave({ path: a.path }))); })) : null,
+    h('div', { class: 'runp-list' }, ...ids.map(row)));
 }
 function stopNode(id) { const r = R[id]; if (r && r.jobId) api(`/api/jobs/${r.jobId}/cancel`, { method: 'POST' }); }
 async function runAll() {
@@ -589,9 +644,19 @@ function libPreview(it) {                           // a still or a video, large
     h('div', { class: 'lib-over-bar' }, h('span', {}, it.title), h('button', { onclick: () => api('/api/reveal', { json: { path: it.path } }) }, 'show in finder'), h('button', { onclick: close }, 'close')));
   document.body.append(ov);
 }
-async function libTrash(it, btn) {
-  if (!btn.dataset.armed) { btn.dataset.armed = '1'; btn.textContent = 'sure?'; btn.classList.add('armed'); setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = '×'; btn.classList.remove('armed'); } }, 3000); return; }
-  try { await api('/api/made/trash', { json: { path: it.path } }); LIB.items = LIB.items.filter(x => x.path !== it.path); if (LIB.playing === it.path) { LIB.audio.pause(); LIB.playing = null; } libraryDraw(); toast('moved to the Trash'); } catch (e) { toast('could not delete: ' + e.message, true); }
+async function libTrash(it) {                        // one click: it goes to the Trash at once. Cmd+Z brings it back.
+  try { const r = await api('/api/made/trash', { json: { path: it.path } }); (LIB.undo || (LIB.undo = [])).push(r.undo); if (LIB.undo.length > 50) LIB.undo.shift();
+    LIB.items = LIB.items.filter(x => x.path !== it.path); if (LIB.playing === it.path) { LIB.audio.pause(); LIB.playing = null; } libraryDraw(); toast('moved to the Trash · ⌘Z to undo'); } catch (e) { toast('could not delete: ' + e.message, true); }
+}
+async function libUndo() {
+  const u = LIB.undo && LIB.undo.pop(); if (!u) return false;
+  try { await api('/api/made/restore', { json: { undo: u } }); toast('put back'); if ($('#lib-list')) { LIB.items = await api('/api/made'); libraryDraw(); } } catch (e) { toast('could not put it back: ' + e.message, true); }
+  return true;
+}
+function libPause() {                                // space: pause and resume whatever the library is playing
+  const A = LIB.audio; if (!A || !LIB.playing) return false;
+  if (A.paused) A.play().catch(() => {}); else A.pause();
+  return true;
 }
 async function libStar(it) { it.star = !it.star; libraryDraw(); try { await api('/api/made/star', { json: { path: it.path, on: it.star } }); } catch { it.star = !it.star; libraryDraw(); } }
 function libraryDraw() {
@@ -609,7 +674,7 @@ function libraryDraw() {
     h('button', { class: 'lib-star' + (it.star ? ' on' : ''), title: it.star ? 'Remove the star' : 'Star this as a keeper', onclick: () => libStar(it) }, it.star ? '★' : '☆'),
     it.kind === 'audio' && h('button', { title: 'Add to the canvas as a sample', onclick: () => { addNode('sample', undefined, undefined, { file: { path: it.path, name: it.name } }); toast('added to the canvas'); } }, '+ canvas'),
     h('button', { title: 'Show in Finder', onclick: () => api('/api/reveal', { json: { path: it.path } }) }, '↗'),
-    h('button', { class: 'lib-del', title: 'Move to the Trash (click twice)', onclick: e => libTrash(it, e.currentTarget) }, '×'));
+    h('button', { class: 'lib-del', title: 'Move to the Trash (⌘Z brings it back)', onclick: () => libTrash(it) }, '×'));
   list.replaceChildren(...days.flatMap(dy => {
     const rows = dy.items.filter(it => it.kind === 'audio' || it.kind === 'midi'), tiles = dy.items.filter(it => it.kind === 'still' || it.kind === 'video');
     return [h('h5', { class: 'lib-day' }, `${dy.name} · ${dy.items.length}`),
@@ -736,6 +801,8 @@ addEventListener('keydown', e => {
   const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); return runAll(); }
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); return toggleChat(); }
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'z' && !typing && LIB.undo && LIB.undo.length) { e.preventDefault(); return libUndo(); }   // bring back what was just deleted from the library
+  if (e.key === ' ' && !typing && LIB.playing) { e.preventDefault(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); return libPause(); }   // space pauses and resumes a playing clip
   if (typeof Gym !== 'undefined' && Gym.open) { if (e.key === 'Escape' && !typing) closeGym(); return; }
   if (typing) return;
   if ((e.key === 'Backspace' || e.key === 'Delete') && sel) { e.preventDefault(); sel.node ? removeNode(sel.node) : removeCable(sel.cable); select(null); }
