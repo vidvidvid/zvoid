@@ -490,7 +490,7 @@ async function runAll() {
   const res = await Promise.allSettled(ids.map(id => runNode(id, memo, true)));
   b.classList.remove('busy');
   const bad = res.filter(r => r.status === 'rejected').length;
-  toast(bad ? `${bad} module${bad > 1 ? 's' : ''} failed` : 'patch complete', !!bad);
+  toast(bad ? `${bad} module${bad > 1 ? 's' : ''} failed` : 'circuit complete', !!bad);
 }
 $('#run-all').onclick = runAll;
 
@@ -559,7 +559,7 @@ async function refreshEngines() { try { for (const e of await api('/api/engines'
 /* ---------- patches ---------- */
 async function refreshPatches() {
   const names = await api('/api/patches'), s = $('#patch-load');
-  s.replaceChildren(h('option', { value: '' }, 'load…'), ...names.map(n => h('option', { value: n }, n)), h('option', { value: '__demo' }, 'demo patch'));
+  s.replaceChildren(h('option', { value: '' }, 'load…'), ...names.map(n => h('option', { value: n }, n)), h('option', { value: '__demo' }, 'demo circuit'));
 }
 function loadPatch(p) {
   for (const id of Object.keys(S.nodes)) dropPlayers(id);
@@ -568,7 +568,7 @@ function loadPatch(p) {
   applyView(); Object.values(S.nodes).forEach(renderNode); select(null); save();
 }
 $('#patch-save').onclick = async () => {
-  const name = $('#patch-name').value.trim(); if (!/^[\w\- ]{1,40}$/.test(name)) return toast('give the patch a simple name first', true);
+  const name = $('#patch-name').value.trim(); if (!/^[\w\- ]{1,40}$/.test(name)) return toast('give the circuit a simple name first', true);
   await api('/api/patches/' + encodeURIComponent(name), { method: 'PUT', json: S }); toast('saved “' + name + '”'); refreshPatches();
 };
 $('#patch-load').onchange = async e => {
@@ -592,7 +592,7 @@ function demoPatch() {
 let chatSession = null, chatBusy = false;
 const chatLog = $('#chat-log');
 function chatMsg(cls, text) { const m = h('div', { class: cls }, text); chatLog.append(m); chatLog.scrollTop = chatLog.scrollHeight; return m; }
-function toggleChat(on) { const c = $('#chat'); c.hidden = on === undefined ? !c.hidden : !on; if (!c.hidden) { if (!chatLog.children.length) chatMsg('msg-c', 'Tell me what you want to hear, or what to change. I can add modules, wire them, set any knob and run the patch.'); $('#chat-in').focus(); } }
+function toggleChat(on) { const c = $('#chat'); c.hidden = on === undefined ? !c.hidden : !on; if (!c.hidden) { if (!chatLog.children.length) chatMsg('msg-c', 'Tell me what you want to hear, or what to change. I can add modules, wire them, set any knob and run the circuit.'); $('#chat-in').focus(); } }
 $('#btn-chat').onclick = () => toggleChat(); $('#chat-close').onclick = () => toggleChat(false);
 $('#chat-new').onclick = () => { chatSession = null; chatLog.replaceChildren(); toggleChat(true); };
 function patchSummary() {                         // what Claude sees: settings and wiring, never audio
@@ -618,7 +618,7 @@ function applyActions(actions) {
       else if (a.op === 'disconnect') { const t = N(a.to), c = t && S.cables.find(c => c.to.node === t.id && (!a.to_port || c.to.port === a.to_port)); if (c) removeCable(c.id); done.push(['unwire', 1]); }
       else if (a.op === 'remove') { const n = N(a.node); if (n) removeNode(n.id); done.push(['− module', 1]); }
       else if (a.op === 'run') { const n = N(a.node); if (!n) throw new Error('no module ' + a.node); toRun.push(n.id); done.push(['run ' + n.type, 1]); }
-      else if (a.op === 'run_all') { runEverything = true; done.push(['run patch', 1]); }
+      else if (a.op === 'run_all') { runEverything = true; done.push(['run circuit', 1]); }
       else if (a.op === 'clear') { loadPatch({ nodes: {}, cables: [] }); done.push(['clear', 1]); }
     } catch (err) { done.push([String(err.message || err), 0]); }
   }

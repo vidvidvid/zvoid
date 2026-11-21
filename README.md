@@ -1,6 +1,6 @@
 # ZVOID
 
-A modular patch canvas for open-source AI music models. Everything runs locally on your Mac.
+A modular canvas for open-source AI music models: wire modules into a circuit. Everything runs locally on your Mac.
 
 Drop modules on the void, drag cables between them, and audio flows down the wires:
 generate a track, split it into stems, continue the drums with another model, turn the bass into MIDI.
@@ -20,9 +20,9 @@ generate a track, split it into stems, continue the drums with another model, tu
 
 - **Wiring:** drag from an output port to an input port. Running a module runs whatever feeds it first.
 - **Every knob:** each module exposes the model's settings, an *advanced* section, and a raw JSON box for anything else.
-- **✦ claude:** a chat panel that builds, tweaks and runs patches for you, through your own [Claude Code](https://claude.com/claude-code) CLI.
+- **✦ claude:** a chat panel that builds, tweaks and runs circuits for you, through your own [Claude Code](https://claude.com/claude-code) CLI.
 - **Library:** every run is saved with its exact settings and seed.
-- **Patches:** save and reload your wiring.
+- **Circuits:** save and reload your wiring.
 
 ## Requirements
 
@@ -55,7 +55,7 @@ Stable Audio Open is gated: accept the license on its
 | Drag from a port on the right of a module to a port on the left of another | Wire them |
 | Select a cable or module and press `⌫` | Remove it |
 | `▸` on a module (shift-click to redo everything upstream) | Run it |
-| `⌘↵` | Run the whole patch |
+| `⌘↵` | Run the whole circuit |
 | `⌘K` | Open the Claude chat |
 | Scroll / pinch, `F` | Pan / zoom, fit everything |
 | Drop audio files on the canvas or on a module | Bring in your own music |
@@ -214,7 +214,7 @@ Zvoid works offline once the models are downloaded. Set `ZVOID_CLAUDE_MODEL` to 
 | Folder | What |
 |---|---|
 | `outputs/` | Everything you generate, one folder per run with a `meta.json` |
-| `patches/` | Saved wiring |
+| `patches/` | Saved circuits |
 | `creatures/` | Vivarium creatures: the audio you fed them and their trained adapters |
 | `engines/<id>/` | One folder per engine: `engine.json` (ports and knobs) and `engine.py` (the code) |
 | `.envs/<id>/` | Each engine's own Python environment |
