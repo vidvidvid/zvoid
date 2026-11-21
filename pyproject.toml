@@ -1,20 +1,21 @@
 [project]
-name = "soundlab"
+name = "zvoid"
 version = "0.1.0"
-description = "Add your description here"
+description = "A modular patch canvas for open-source AI music models, running locally"
 authors = [
     { name = "vidvidvid", email = "35112939+vidvidvid@users.noreply.github.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "gradio>=6.32.0",
+    "fastapi>=0.165.0",
     "numpy>=2.5.5",
     "pywebview>=6.2.1",
     "soundfile>=0.14.0",
+    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]
-soundlab = "soundlab:main"
+zvoid = "zvoid:main"
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]

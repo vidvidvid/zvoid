@@ -56,7 +56,7 @@ def run(p, ctx):
     proc, model = _load(model_id, device)
     sr = model.config.audio_encoder.sampling_rate
 
-    gen_kwargs = dict(do_sample=True, guidance_scale=float(p.get("guidance_scale", 3)),
+    gen_kwargs = dict(do_sample=bool(p.get("do_sample", True)), guidance_scale=float(p.get("guidance_scale", 3)),
                       temperature=float(p.get("temperature", 1.0)), top_k=int(p.get("top_k") or 250))
     if float(p.get("top_p") or 0) > 0:
         gen_kwargs["top_p"] = float(p["top_p"])

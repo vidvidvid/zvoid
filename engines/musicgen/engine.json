@@ -3,37 +3,144 @@
   "tab": "MusicGen",
   "tagline": "Meta's text-to-music model. **Melody** models follow a tune you give them; regular models can **continue** audio you give them.",
   "python": "3.11",
-  "requirements": ["torch", "transformers>=4.45", "soundfile", "librosa", "numpy<3"],
+  "requirements": [
+    "torch",
+    "transformers>=4.45",
+    "soundfile",
+    "librosa",
+    "numpy<3"
+  ],
   "disk": "small 2 GB · medium 6 GB · melody 6 GB · large 13 GB",
   "license": "Weights: CC-BY-NC 4.0 (non-commercial)",
   "label_param": "prompt",
   "params": [
-    {"name": "model", "type": "choice", "default": "facebook/musicgen-melody", "custom": true,
-     "choices": ["facebook/musicgen-small", "facebook/musicgen-medium", "facebook/musicgen-large",
-                 "facebook/musicgen-melody", "facebook/musicgen-melody-large",
-                 "facebook/musicgen-stereo-small", "facebook/musicgen-stereo-medium", "facebook/musicgen-stereo-large",
-                 "facebook/musicgen-stereo-melody", "facebook/musicgen-stereo-melody-large"],
-     "help": "Any MusicGen model id from Hugging Face works, including fine-tunes. Type one in."},
-    {"name": "prompt", "type": "textarea", "default": "dark minimal techno, 126 bpm, rolling acid bassline, crisp hats, warehouse reverb"},
-    {"name": "audio", "type": "audio", "label": "Input audio (optional)",
-     "help": "Melody models: follows the melody/harmony of this. Other models: continues from it."},
-    {"name": "duration", "type": "slider", "min": 1, "max": 120, "step": 1, "default": 12,
-     "help": "Seconds. Over 30s, non-melody models extend in windows."},
-    {"name": "seed", "type": "seed"},
-    {"name": "guidance_scale", "type": "slider", "min": 1, "max": 10, "step": 0.5, "default": 3, "advanced": true,
-     "help": "How strongly to follow the prompt. Higher = more literal, less varied."},
-    {"name": "temperature", "type": "slider", "min": 0.1, "max": 2, "step": 0.05, "default": 1.0, "advanced": true},
-    {"name": "top_k", "type": "int", "default": 250, "advanced": true},
-    {"name": "top_p", "type": "slider", "min": 0, "max": 1, "step": 0.05, "default": 0, "advanced": true,
-     "help": "0 = off (use top_k)."},
-    {"name": "audio_start", "type": "number", "default": 0, "advanced": true, "help": "Use the input audio from this second…"},
-    {"name": "audio_length", "type": "number", "default": 10, "advanced": true,
-     "help": "…for this many seconds (continuation prompt / melody length)."},
-    {"name": "keep_input", "type": "bool", "default": false, "advanced": true,
-     "help": "Continuation: keep the input audio at the start of the result."},
-    {"name": "extend_overlap", "type": "slider", "min": 2, "max": 20, "step": 1, "default": 10, "advanced": true,
-     "help": "For songs over 30s: seconds of context carried into each new window."},
-    {"name": "normalize", "type": "bool", "default": true, "advanced": true, "help": "Peak-normalize to -1 dBFS."}
+    {
+      "name": "model",
+      "type": "choice",
+      "default": "facebook/musicgen-melody",
+      "custom": true,
+      "choices": [
+        "facebook/musicgen-small",
+        "facebook/musicgen-medium",
+        "facebook/musicgen-large",
+        "facebook/musicgen-melody",
+        "facebook/musicgen-melody-large",
+        "facebook/musicgen-stereo-small",
+        "facebook/musicgen-stereo-medium",
+        "facebook/musicgen-stereo-large",
+        "facebook/musicgen-stereo-melody",
+        "facebook/musicgen-stereo-melody-large"
+      ],
+      "help": "Any MusicGen model id from Hugging Face works, including fine-tunes. Type one in."
+    },
+    {
+      "name": "prompt",
+      "type": "textarea",
+      "default": "dark minimal techno, 126 bpm, rolling acid bassline, crisp hats, warehouse reverb"
+    },
+    {
+      "name": "audio",
+      "type": "audio",
+      "label": "Input audio (optional)",
+      "help": "Melody models: follows the melody/harmony of this. Other models: continues from it."
+    },
+    {
+      "name": "duration",
+      "type": "slider",
+      "min": 1,
+      "max": 120,
+      "step": 1,
+      "default": 12,
+      "help": "Seconds. Over 30s, non-melody models extend in windows."
+    },
+    {
+      "name": "seed",
+      "type": "seed"
+    },
+    {
+      "name": "guidance_scale",
+      "type": "slider",
+      "min": 1,
+      "max": 10,
+      "step": 0.5,
+      "default": 3,
+      "advanced": true,
+      "help": "How strongly to follow the prompt. Higher = more literal, less varied."
+    },
+    {
+      "name": "temperature",
+      "type": "slider",
+      "min": 0.1,
+      "max": 2,
+      "step": 0.05,
+      "default": 1.0,
+      "advanced": true
+    },
+    {
+      "name": "top_k",
+      "type": "int",
+      "default": 250,
+      "advanced": true
+    },
+    {
+      "name": "top_p",
+      "type": "slider",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0,
+      "advanced": true,
+      "help": "0 = off (use top_k)."
+    },
+    {
+      "name": "audio_start",
+      "type": "number",
+      "default": 0,
+      "advanced": true,
+      "help": "Use the input audio from this second…"
+    },
+    {
+      "name": "audio_length",
+      "type": "number",
+      "default": 10,
+      "advanced": true,
+      "help": "…for this many seconds (continuation prompt / melody length)."
+    },
+    {
+      "name": "keep_input",
+      "type": "bool",
+      "default": false,
+      "advanced": true,
+      "help": "Continuation: keep the input audio at the start of the result."
+    },
+    {
+      "name": "extend_overlap",
+      "type": "slider",
+      "min": 2,
+      "max": 20,
+      "step": 1,
+      "default": 10,
+      "advanced": true,
+      "help": "For songs over 30s: seconds of context carried into each new window."
+    },
+    {
+      "name": "normalize",
+      "type": "bool",
+      "default": true,
+      "advanced": true,
+      "help": "Peak-normalize to -1 dBFS."
+    },
+    {
+      "name": "do_sample",
+      "type": "bool",
+      "default": true,
+      "advanced": true,
+      "label": "Sampling",
+      "help": "Off = greedy decoding: deterministic but usually dull and repetitive."
+    }
   ],
-  "notes": "- **Melody conditioning:** pick a `melody` model, drop in your track or a hummed idea, and describe the new style.\n- **Continuation:** pick a non-melody model, drop in a loop, and it carries on from where your audio ends.\n- Prompts work best as comma-separated tags: genre, bpm, instruments, mood, production style.\n- Use **Runs** with a fixed seed to explore variations."
+  "notes": "- **Melody conditioning:** pick a `melody` model, drop in your track or a hummed idea, and describe the new style.\n- **Continuation:** pick a non-melody model, drop in a loop, and it carries on from where your audio ends.\n- Prompts work best as comma-separated tags: genre, bpm, instruments, mood, production style.\n- Hit run again for a new take; press “last” on the seed to lock one you like.",
+  "outputs": [
+    "audio"
+  ]
 }

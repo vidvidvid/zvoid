@@ -44,7 +44,7 @@ class Engine:
 
     @property
     def installed(self) -> bool:
-        return (self.env_dir / ".soundlab-installed").exists()
+        return (self.env_dir / ".zvoid-installed").exists()
 
     @property
     def running(self) -> bool:
@@ -59,7 +59,7 @@ class Engine:
         py = self.spec.get("python", "3.11")
         reqs = self.spec.get("requirements", [])
         self.stop()
-        marker = self.env_dir / ".soundlab-installed"
+        marker = self.env_dir / ".zvoid-installed"
         marker.unlink(missing_ok=True)
         _stream([uv, "venv", "--allow-existing", "--python", py, str(self.env_dir)], log)
         if reqs:
@@ -79,7 +79,7 @@ class Engine:
         if self.running:
             return
         if not self.installed:
-            raise RuntimeError(f"{self.name} isn't installed yet. Install it in the Engines tab.")
+            raise RuntimeError(f"{self.name} isn't installed yet. Open “engines” (top right) to install it.")
         env = dict(os.environ)
         env.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
         env.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -88,7 +88,7 @@ class Engine:
             [str(self.python), "-u", "-I", str(WORKER), str(self.dir)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=None,  # libraries' chatter goes straight to the terminal running soundlab
+            stderr=None,  # libraries' chatter goes straight to the terminal running zvoid
             text=True,
             bufsize=1,
             cwd=str(self.dir),

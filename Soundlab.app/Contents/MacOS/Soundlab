@@ -1,5 +1,0 @@
-#!/bin/bash
-# Opens Soundlab in its own window. Logs go to ~/Library/Logs/Soundlab.log
-HERE="$(cd "$(dirname "$0")/../../.." && pwd)"
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-cd "$HERE" && exec uv run --quiet soundlab >> "$HOME/Library/Logs/Soundlab.log" 2>&1

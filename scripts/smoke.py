@@ -1,7 +1,7 @@
 """Headless smoke test: uv run python scripts/smoke.py <engine> '<json params>'"""
 import json, sys, time
-from soundlab.engines import discover
-from soundlab import library
+from zvoid.engines import discover
+from zvoid import library
 
 eid, params = sys.argv[1], json.loads(sys.argv[2] if len(sys.argv) > 2 else "{}")
 e = discover()[eid]

@@ -1,0 +1,5 @@
+#!/bin/bash
+# Opens Zvoid in its own window. Logs go to ~/Library/Logs/Zvoid.log
+HERE="$(cd "$(dirname "$0")/../../.." && pwd)"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+cd "$HERE" && exec uv run --quiet zvoid >> "$HOME/Library/Logs/Zvoid.log" 2>&1

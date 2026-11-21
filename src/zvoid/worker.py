@@ -32,7 +32,7 @@ class Ctx:
     def __init__(self, out_dir):
         self.out_dir = out_dir
         os.makedirs(out_dir, exist_ok=True)
-        self.device = os.environ.get("SOUNDLAB_DEVICE", "auto")
+        self.device = os.environ.get("ZVOID_DEVICE", "auto")
 
     def progress(self, msg, frac=None):
         send({"type": "progress", "msg": str(msg), "frac": frac})

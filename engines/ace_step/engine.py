@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-# Keep ACE-Step's weights inside soundlab/models/ace_step instead of wherever the process starts
+# Keep ACE-Step's weights inside zvoid/models/ace_step instead of wherever the process starts
 _MODELS = Path(__file__).resolve().parents[2] / "models" / "ace_step"
 _MODELS.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("ACESTEP_PROJECT_ROOT", str(_MODELS))
@@ -122,6 +122,10 @@ def run(p, ctx):
         kw.update(repainting_start=float(p.get("repaint_start") or 0), repainting_end=float(p.get("repaint_end") or -1))
         if task == "repaint":
             kw["chunk_mask_mode"] = "explicit"
+    # any other control named after a GenerationParams field passes straight through
+    for k, v in p.items():
+        if k in GenerationParams.__dataclass_fields__ and k not in kw and v not in (None, "", "auto"):
+            kw[k] = v
     kw.update({k: v for k, v in extra.items() if k in GenerationParams.__dataclass_fields__})
     cfg_extra = {k: v for k, v in extra.items() if k in GenerationConfig.__dataclass_fields__}
 

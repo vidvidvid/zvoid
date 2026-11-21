@@ -1,10 +1,10 @@
-"""Soundlab: a local playground for open-source AI music models."""
+"""Zvoid: a local playground for open-source AI music models."""
 
 import argparse
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="soundlab", description="Local AI music lab")
+    ap = argparse.ArgumentParser(prog="zvoid", description="Local AI music lab")
     sub = ap.add_subparsers(dest="cmd")
     run = sub.add_parser("run", help="start the app (default)")
     for p in (ap, run):
@@ -31,6 +31,6 @@ def main():
 
         raise SystemExit(subprocess.call(["uvx", "--from", "huggingface_hub", "hf", "auth", "login"]))
     else:
-        from .ui import launch
+        from .server import launch
 
         launch(port=args.port, open_browser=args.browser, window=not (args.browser or args.headless))

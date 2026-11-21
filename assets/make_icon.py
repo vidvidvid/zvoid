@@ -1,4 +1,4 @@
-"""Generates the Soundlab app icon: domain-warped noise in acid colours with interference rings.
+"""Generates the Zvoid app icon: domain-warped noise in acid colours with interference rings.
 Run: uv run --no-project --with pillow --with numpy python assets/make_icon.py [seed]"""
 import os, subprocess, sys, tempfile
 import numpy as np
@@ -50,11 +50,11 @@ icon = Image.alpha_composite(icon, rim)
 here = os.path.dirname(os.path.abspath(__file__))
 icon.save(os.path.join(here, "icon.png"))
 with tempfile.TemporaryDirectory() as d:
-    iset = os.path.join(d, "Soundlab.iconset")
+    iset = os.path.join(d, "Zvoid.iconset")
     os.makedirs(iset)
     for s in (16, 32, 64, 128, 256, 512):
         icon.resize((s, s), Image.LANCZOS).save(f"{iset}/icon_{s}x{s}.png")
         icon.resize((s * 2, s * 2), Image.LANCZOS).save(f"{iset}/icon_{s}x{s}@2x.png")
-    dest = os.path.join(here, "..", "Soundlab.app", "Contents", "Resources", "Soundlab.icns")
+    dest = os.path.join(here, "..", "Zvoid.app", "Contents", "Resources", "Zvoid.icns")
     subprocess.run(["iconutil", "-c", "icns", iset, "-o", dest], check=True)
 print("icon written, seed", seed)

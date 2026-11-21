@@ -19,7 +19,7 @@ def _pipe(model_id, device):
             if "gated" in str(e).lower() or "401" in str(e) or "403" in str(e) or "access" in str(e).lower():
                 raise RuntimeError(
                     "Stable Audio Open is gated. Accept the license at https://huggingface.co/stabilityai/stable-audio-open-1.0 "
-                    "then run `./soundlab login` in a terminal, and try again.") from e
+                    "then run `./zvoid login` in a terminal, and try again.") from e
             raise
         _cache[key] = pipe.to(device)
     return _cache[key]
@@ -71,7 +71,7 @@ def run(p, ctx):
     dur = float(p.get("duration") or 10)
 
     kw = dict(prompt=p.get("prompt") or "", negative_prompt=p.get("negative_prompt") or None,
-              num_inference_steps=steps, guidance_scale=float(p.get("guidance_scale", 7)),
+              num_inference_steps=steps, guidance_scale=float(p.get("guidance_scale", 7)), eta=float(p.get("eta") or 0),
               audio_start_in_s=start_s, audio_end_in_s=start_s + dur, num_waveforms_per_prompt=n, generator=gen)
 
     restore = None

@@ -3,28 +3,124 @@
   "tab": "Stable Audio",
   "tagline": "Stability's diffusion model for **loops, one-shots, drums, textures and FX** up to 47s at 44.1 kHz stereo. Can also make **variations of your audio** (audio-to-audio).",
   "python": "3.11",
-  "requirements": ["torch", "diffusers>=0.32", "transformers>=4.45", "accelerate", "torchsde", "soundfile", "librosa", "sentencepiece", "protobuf", "numpy<3"],
+  "requirements": [
+    "torch",
+    "diffusers>=0.32",
+    "transformers>=4.45",
+    "accelerate",
+    "torchsde",
+    "soundfile",
+    "librosa",
+    "sentencepiece",
+    "protobuf",
+    "numpy<3"
+  ],
   "disk": "≈ 5 GB",
   "license": "Stability AI Community License (free under $1M revenue)",
   "label_param": "prompt",
   "params": [
-    {"name": "prompt", "type": "textarea", "default": "128 BPM tech house drum loop, punchy kick, crisp open hats, groovy percussion"},
-    {"name": "negative_prompt", "type": "text", "default": "low quality, distorted, muffled"},
-    {"name": "duration", "type": "slider", "min": 1, "max": 47, "step": 0.5, "default": 10, "help": "Seconds."},
-    {"name": "init_audio", "type": "audio", "label": "Audio to vary (optional)",
-     "help": "Starts from your audio instead of noise. Lower strength = closer to the original."},
-    {"name": "init_strength", "type": "slider", "min": 0.05, "max": 1, "step": 0.05, "default": 0.6,
-     "help": "How much to change the input audio (1 = ignore it)."},
-    {"name": "seed", "type": "seed"},
-    {"name": "model", "type": "choice", "default": "stabilityai/stable-audio-open-1.0", "advanced": true, "custom": true,
-     "choices": ["stabilityai/stable-audio-open-1.0"],
-     "help": "Any diffusers-format Stable Audio checkpoint works. The official one is gated (see Tips)."},
-    {"name": "steps", "type": "slider", "min": 10, "max": 250, "step": 1, "default": 100, "advanced": true},
-    {"name": "guidance_scale", "type": "slider", "min": 1, "max": 15, "step": 0.5, "default": 7, "advanced": true},
-    {"name": "waveforms", "type": "slider", "min": 1, "max": 4, "step": 1, "default": 1, "advanced": true,
-     "help": "Variations per run, generated in parallel."},
-    {"name": "start_offset", "type": "number", "default": 0, "advanced": true, "help": "Audio start second (rarely needed)."},
-    {"name": "normalize", "type": "bool", "default": true, "advanced": true}
+    {
+      "name": "model",
+      "type": "choice",
+      "default": "stabilityai/stable-audio-open-1.0",
+      "custom": true,
+      "choices": [
+        "stabilityai/stable-audio-open-1.0"
+      ],
+      "help": "Any diffusers-format Stable Audio checkpoint works. The official one is gated (see Tips)."
+    },
+    {
+      "name": "prompt",
+      "type": "textarea",
+      "default": "128 BPM tech house drum loop, punchy kick, crisp open hats, groovy percussion"
+    },
+    {
+      "name": "negative_prompt",
+      "type": "text",
+      "default": "low quality, distorted, muffled"
+    },
+    {
+      "name": "duration",
+      "type": "slider",
+      "min": 1,
+      "max": 47,
+      "step": 0.5,
+      "default": 10,
+      "help": "Seconds."
+    },
+    {
+      "name": "init_audio",
+      "type": "audio",
+      "label": "Audio to vary (optional)",
+      "help": "Starts from your audio instead of noise. Lower strength = closer to the original."
+    },
+    {
+      "name": "init_strength",
+      "type": "slider",
+      "min": 0.05,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.6,
+      "help": "How much to change the input audio (1 = ignore it)."
+    },
+    {
+      "name": "seed",
+      "type": "seed"
+    },
+    {
+      "name": "steps",
+      "type": "slider",
+      "min": 10,
+      "max": 250,
+      "step": 1,
+      "default": 100,
+      "advanced": true
+    },
+    {
+      "name": "guidance_scale",
+      "type": "slider",
+      "min": 1,
+      "max": 15,
+      "step": 0.5,
+      "default": 7,
+      "advanced": true
+    },
+    {
+      "name": "waveforms",
+      "type": "slider",
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "default": 1,
+      "advanced": true,
+      "help": "Variations per run, generated in parallel."
+    },
+    {
+      "name": "start_offset",
+      "type": "number",
+      "default": 0,
+      "advanced": true,
+      "help": "Audio start second (rarely needed)."
+    },
+    {
+      "name": "normalize",
+      "type": "bool",
+      "default": true,
+      "advanced": true
+    },
+    {
+      "name": "eta",
+      "type": "slider",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0,
+      "advanced": true,
+      "help": "Extra randomness injected at each step (0 = deterministic)."
+    }
   ],
-  "notes": "- **One-time setup:** the official weights are gated. Accept the license at huggingface.co/stabilityai/stable-audio-open-1.0, then run `./soundlab login` in a terminal.\n- Put **BPM** in the prompt for loops that fit your grid.\n- Great for drum loops, risers, impacts, ambient beds, foley and synth one-shots."
+  "notes": "- **One-time setup:** the official weights are gated. Accept the license at huggingface.co/stabilityai/stable-audio-open-1.0, then run `./zvoid login` in a terminal.\n- Put **BPM** in the prompt for loops that fit your grid.\n- Great for drum loops, risers, impacts, ambient beds, foley and synth one-shots.",
+  "outputs": [
+    "take 1"
+  ]
 }

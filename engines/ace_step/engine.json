@@ -3,48 +3,339 @@
   "tab": "ACE-Step",
   "tagline": "Full tracks from tags (+ optional lyrics) — instrumentals or songs, up to 10 min. Also **cover** (restyle your track), **repaint** (redo a section), and with the base model **lego** (add an instrument to your track) and **complete** (arrange around your idea).",
   "python": "3.11",
-  "requirements": ["ace-step @ git+https://github.com/ace-step/ACE-Step-1.5"],
+  "requirements": [
+    "ace-step @ git+https://github.com/ace-step/ACE-Step-1.5"
+  ],
   "disk": "turbo + LM ≈ 10 GB · base model +5 GB · 4B LM +8 GB",
   "license": "MIT (code and weights)",
   "label_param": "caption",
   "params": [
-    {"name": "task", "type": "choice", "default": "text2music",
-     "choices": ["text2music", "cover", "repaint", "lego", "complete", "extract"],
-     "help": "text2music = from scratch. cover = restyle input audio. repaint = redo a time range. lego / complete / extract need the base model."},
-    {"name": "caption", "type": "textarea", "label": "Caption (style tags)",
-     "default": "deep house, 122 bpm, warm sub bass, shuffled hats, dreamy pads, analog chords, late night club"},
-    {"name": "lyrics", "type": "textarea", "lines": 4, "default": "[Instrumental]",
-     "help": "Use [Instrumental] for no vocals, or write lyrics with [verse] / [chorus] tags."},
-    {"name": "src_audio", "type": "audio", "label": "Source audio (cover / repaint / lego / complete / extract)"},
-    {"name": "duration", "type": "slider", "min": 10, "max": 600, "step": 5, "default": 60, "help": "Seconds."},
-    {"name": "bpm", "type": "int", "default": 0, "help": "0 = let the model decide."},
-    {"name": "keyscale", "type": "text", "default": "", "help": "e.g. 'A minor', 'F# major'. Empty = auto."},
-    {"name": "seed", "type": "seed"},
-    {"name": "model", "type": "choice", "default": "acestep-v15-turbo", "advanced": true, "custom": true,
-     "choices": ["acestep-v15-turbo", "acestep-v15-turbo-shift3", "acestep-v15-sft", "acestep-v15-base",
-                 "acestep-v15-xl-turbo", "acestep-v15-xl-sft", "acestep-v15-xl-base"],
-     "help": "turbo = fast (8 steps). sft/base = higher quality, slower (use 32–64 steps). base is required for lego/complete/extract. Each new model downloads on first use."},
-    {"name": "track", "type": "choice", "default": "guitar", "advanced": true,
-     "choices": ["vocals", "backing_vocals", "drums", "bass", "guitar", "keyboard", "percussion", "strings", "synth", "fx", "brass", "woodwinds"],
-     "help": "lego / extract: which instrument. complete: comma list goes in Extra kwargs as {\"tracks\": [..]}."},
-    {"name": "cover_strength", "type": "slider", "min": 0, "max": 1, "step": 0.05, "default": 0.8, "advanced": true,
-     "help": "cover: 1 = keep the original structure closely, 0.2 = loose style transfer."},
-    {"name": "repaint_start", "type": "number", "default": 0, "advanced": true, "help": "repaint/lego: start second."},
-    {"name": "repaint_end", "type": "number", "default": -1, "advanced": true, "help": "repaint/lego: end second (-1 = end)."},
-    {"name": "steps", "type": "int", "default": 8, "advanced": true, "help": "Turbo: 8. Base/SFT: 32–64."},
-    {"name": "guidance_scale", "type": "slider", "min": 1, "max": 15, "step": 0.5, "default": 7, "advanced": true,
-     "help": "Base/SFT only. Turbo ignores it."},
-    {"name": "shift", "type": "slider", "min": 1, "max": 5, "step": 0.5, "default": 3, "advanced": true,
-     "help": "Timestep shift. 3 recommended for turbo."},
-    {"name": "infer_method", "type": "choice", "default": "ode", "choices": ["ode", "sde"], "advanced": true},
-    {"name": "batch", "type": "slider", "min": 1, "max": 8, "step": 1, "default": 2, "advanced": true,
-     "help": "Variations per run, generated in parallel."},
-    {"name": "thinking", "type": "bool", "default": true, "advanced": true,
-     "help": "Use the 5Hz language model to plan the song (BPM, key, structure). Better results, a bit slower."},
-    {"name": "lm_model", "type": "choice", "default": "acestep-5Hz-lm-1.7B", "advanced": true, "custom": true,
-     "choices": ["acestep-5Hz-lm-0.6B", "acestep-5Hz-lm-1.7B", "acestep-5Hz-lm-4B"]},
-    {"name": "lm_temperature", "type": "slider", "min": 0, "max": 2, "step": 0.05, "default": 0.85, "advanced": true},
-    {"name": "audio_format", "type": "choice", "default": "wav", "choices": ["wav", "flac", "mp3"], "advanced": true}
+    {
+      "name": "model",
+      "type": "choice",
+      "default": "acestep-v15-turbo",
+      "custom": true,
+      "choices": [
+        "acestep-v15-turbo",
+        "acestep-v15-turbo-shift3",
+        "acestep-v15-sft",
+        "acestep-v15-base",
+        "acestep-v15-xl-turbo",
+        "acestep-v15-xl-sft",
+        "acestep-v15-xl-base"
+      ],
+      "help": "turbo = fast (8 steps). sft/base = higher quality, slower (use 32–64 steps). base is required for lego/complete/extract. Each new model downloads on first use."
+    },
+    {
+      "name": "task",
+      "type": "choice",
+      "default": "text2music",
+      "choices": [
+        "text2music",
+        "cover",
+        "repaint",
+        "lego",
+        "complete",
+        "extract"
+      ],
+      "help": "text2music = from scratch. cover = restyle input audio. repaint = redo a time range. lego / complete / extract need the base model."
+    },
+    {
+      "name": "caption",
+      "type": "textarea",
+      "label": "Caption (style tags)",
+      "default": "deep house, 122 bpm, warm sub bass, shuffled hats, dreamy pads, analog chords, late night club"
+    },
+    {
+      "name": "lyrics",
+      "type": "textarea",
+      "lines": 4,
+      "default": "[Instrumental]",
+      "help": "Use [Instrumental] for no vocals, or write lyrics with [verse] / [chorus] tags."
+    },
+    {
+      "name": "src_audio",
+      "type": "audio",
+      "label": "Source audio (cover / repaint / lego / complete / extract)"
+    },
+    {
+      "name": "duration",
+      "type": "slider",
+      "min": 10,
+      "max": 600,
+      "step": 5,
+      "default": 60,
+      "help": "Seconds."
+    },
+    {
+      "name": "bpm",
+      "type": "int",
+      "default": 0,
+      "help": "0 = let the model decide."
+    },
+    {
+      "name": "keyscale",
+      "type": "text",
+      "default": "",
+      "help": "e.g. 'A minor', 'F# major'. Empty = auto."
+    },
+    {
+      "name": "seed",
+      "type": "seed"
+    },
+    {
+      "name": "track",
+      "type": "choice",
+      "default": "guitar",
+      "advanced": true,
+      "choices": [
+        "vocals",
+        "backing_vocals",
+        "drums",
+        "bass",
+        "guitar",
+        "keyboard",
+        "percussion",
+        "strings",
+        "synth",
+        "fx",
+        "brass",
+        "woodwinds"
+      ],
+      "help": "lego / extract: which instrument. complete: comma list goes in Extra kwargs as {\"tracks\": [..]}."
+    },
+    {
+      "name": "cover_strength",
+      "type": "slider",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.8,
+      "advanced": true,
+      "help": "cover: 1 = keep the original structure closely, 0.2 = loose style transfer."
+    },
+    {
+      "name": "repaint_start",
+      "type": "number",
+      "default": 0,
+      "advanced": true,
+      "help": "repaint/lego: start second."
+    },
+    {
+      "name": "repaint_end",
+      "type": "number",
+      "default": -1,
+      "advanced": true,
+      "help": "repaint/lego: end second (-1 = end)."
+    },
+    {
+      "name": "steps",
+      "type": "int",
+      "default": 8,
+      "advanced": true,
+      "help": "Turbo: 8. Base/SFT: 32–64."
+    },
+    {
+      "name": "guidance_scale",
+      "type": "slider",
+      "min": 1,
+      "max": 15,
+      "step": 0.5,
+      "default": 7,
+      "advanced": true,
+      "help": "Base/SFT only. Turbo ignores it."
+    },
+    {
+      "name": "shift",
+      "type": "slider",
+      "min": 1,
+      "max": 5,
+      "step": 0.5,
+      "default": 3,
+      "advanced": true,
+      "help": "Timestep shift. 3 recommended for turbo."
+    },
+    {
+      "name": "infer_method",
+      "type": "choice",
+      "default": "ode",
+      "choices": [
+        "ode",
+        "sde"
+      ],
+      "advanced": true
+    },
+    {
+      "name": "batch",
+      "type": "slider",
+      "min": 1,
+      "max": 8,
+      "step": 1,
+      "default": 2,
+      "advanced": true,
+      "help": "Variations per run, generated in parallel."
+    },
+    {
+      "name": "thinking",
+      "type": "bool",
+      "default": true,
+      "advanced": true,
+      "help": "Use the 5Hz language model to plan the song (BPM, key, structure). Better results, a bit slower."
+    },
+    {
+      "name": "lm_model",
+      "type": "choice",
+      "default": "acestep-5Hz-lm-1.7B",
+      "advanced": true,
+      "custom": true,
+      "choices": [
+        "acestep-5Hz-lm-0.6B",
+        "acestep-5Hz-lm-1.7B",
+        "acestep-5Hz-lm-4B"
+      ]
+    },
+    {
+      "name": "lm_temperature",
+      "type": "slider",
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "default": 0.85,
+      "advanced": true
+    },
+    {
+      "name": "audio_format",
+      "type": "choice",
+      "default": "wav",
+      "choices": [
+        "wav",
+        "flac",
+        "mp3"
+      ],
+      "advanced": true
+    },
+    {
+      "name": "reference_audio",
+      "type": "audio",
+      "label": "Style reference",
+      "help": "Optional: a track whose overall sound/timbre to borrow."
+    },
+    {
+      "name": "timesignature",
+      "type": "choice",
+      "default": "auto",
+      "choices": [
+        "auto",
+        "2",
+        "3",
+        "4",
+        "6"
+      ],
+      "advanced": true,
+      "help": "2 = 2/4, 3 = 3/4, 4 = 4/4, 6 = 6/8."
+    },
+    {
+      "name": "vocal_language",
+      "type": "choice",
+      "default": "unknown",
+      "custom": true,
+      "choices": [
+        "unknown",
+        "en",
+        "zh",
+        "ja",
+        "ko",
+        "es",
+        "fr",
+        "de",
+        "it",
+        "pt",
+        "ru",
+        "sl"
+      ],
+      "advanced": true,
+      "help": "Language of the vocals (unknown = auto)."
+    },
+    {
+      "name": "use_cot_caption",
+      "type": "bool",
+      "default": true,
+      "advanced": true,
+      "label": "LM rewrites caption",
+      "help": "Let the planner LM expand your caption. Turn OFF to keep your exact tags."
+    },
+    {
+      "name": "use_cot_metas",
+      "type": "bool",
+      "default": true,
+      "advanced": true,
+      "label": "LM picks bpm/key",
+      "help": "Let the planner LM choose BPM, key and time signature when you leave them empty."
+    },
+    {
+      "name": "lm_cfg_scale",
+      "type": "slider",
+      "min": 1,
+      "max": 5,
+      "step": 0.1,
+      "default": 2,
+      "advanced": true,
+      "help": "How strictly the planner LM follows your caption."
+    },
+    {
+      "name": "lm_top_k",
+      "type": "int",
+      "default": 0,
+      "advanced": true,
+      "help": "Planner LM top-k (0 = off)."
+    },
+    {
+      "name": "lm_top_p",
+      "type": "slider",
+      "min": 0.1,
+      "max": 1,
+      "step": 0.01,
+      "default": 0.9,
+      "advanced": true
+    },
+    {
+      "name": "lm_negative_prompt",
+      "type": "text",
+      "default": "NO USER INPUT",
+      "advanced": true,
+      "help": "What the planner LM should steer away from."
+    },
+    {
+      "name": "use_adg",
+      "type": "bool",
+      "default": false,
+      "advanced": true,
+      "label": "Adaptive dual guidance",
+      "help": "Base/SFT models only. Better quality, slower."
+    },
+    {
+      "name": "cfg_interval_start",
+      "type": "slider",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0,
+      "advanced": true,
+      "help": "Base/SFT: where guidance starts (fraction of the steps)."
+    },
+    {
+      "name": "cfg_interval_end",
+      "type": "slider",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 1,
+      "advanced": true,
+      "help": "Base/SFT: where guidance ends."
+    }
   ],
-  "notes": "- **Instrumental:** keep lyrics as `[Instrumental]`.\n- **Restyle your own track:** task `cover`, drop in your track, describe the new style, and lower *cover strength* for looser takes.\n- **Fix a section:** task `repaint` with start/end seconds.\n- **Add an instrument to your track:** model `acestep-v15-base`, task `lego`, pick a track, and use ~32+ steps.\n- First run downloads ~10 GB into `models/ace_step/`."
+  "notes": "- **Instrumental:** keep lyrics as `[Instrumental]`.\n- **Restyle your own track:** task `cover`, drop in your track, describe the new style, and lower *cover strength* for looser takes.\n- **Fix a section:** task `repaint` with start/end seconds.\n- **Add an instrument to your track:** model `acestep-v15-base`, task `lego`, pick a track, and use ~32+ steps.\n- First run downloads ~10 GB into `models/ace_step/`.",
+  "outputs": [
+    "take 1"
+  ]
 }

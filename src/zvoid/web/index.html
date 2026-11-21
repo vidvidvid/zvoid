@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zvoid</title>
+<link rel="stylesheet" href="/web/app.css">
+</head>
+<body>
+<div id="space">
+  <div id="world">
+    <svg id="cables" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+</div>
+
+<header id="bar">
+  <div class="brand"><img id="orb" src="/web/icon.png" alt=""><span id="word"></span></div>
+  <div class="patch">
+    <input id="patch-name" placeholder="patch name" spellcheck="false">
+    <button id="patch-save" title="Save this wiring under that name">save</button>
+    <select id="patch-load" title="Load a saved patch"></select>
+    <button id="patch-clear" title="Remove every module">clear</button>
+  </div>
+  <div class="grow"></div>
+  <button id="btn-chat" title="Talk to Claude: it can build, tweak and run the patch for you (⌘K)">✦ claude</button>
+  <button id="btn-library">library</button>
+  <button id="btn-engines">engines</button>
+  <button id="run-all" class="hot" title="Run every module, upstream first (⌘↵)">run patch ▸</button>
+</header>
+
+<nav id="dock"></nav>
+
+<div id="hud">
+  <span id="status">ready_</span>
+</div>
+<div id="zoom">
+  <button data-z="out" title="Zoom out">−</button>
+  <button data-z="fit" title="Fit everything (F)">fit</button>
+  <button data-z="in" title="Zoom in">+</button>
+</div>
+
+<aside id="drawer" hidden>
+  <div class="drawer-head"><span id="drawer-title"></span><button id="drawer-close">×</button></div>
+  <div id="drawer-body"></div>
+</aside>
+
+<section id="chat" hidden>
+  <div class="drawer-head"><span>✦ claude</span><span><button id="chat-new" title="Forget this conversation">new</button> <button id="chat-close">×</button></span></div>
+  <div id="chat-log"></div>
+  <div class="chat-note">Uses your Claude Code login. Sends your messages and module settings to Anthropic. Audio stays on this Mac.</div>
+  <form id="chat-form"><textarea id="chat-in" rows="2" placeholder="e.g. make a dark 128 bpm techno loop, then split it and turn the bass into midi" spellcheck="false"></textarea><button class="hot">send</button></form>
+</section>
+
+<div id="palette" hidden></div>
+<div id="toasts"></div>
+<input id="file-pick" type="file" accept="audio/*,.wav,.mp3,.flac,.aiff,.aif,.ogg,.m4a" hidden>
+<script src="/web/app.js"></script>
+</body>
+</html>
