@@ -288,6 +288,13 @@ def create_app():
     def gym_feed_links(slug: str, body: dict):
         return gym_call(gym.feed_links, slug, [str(p) for p in (body.get("paths") or [])][:50])
 
+    @app.get("/api/gym/{slug}/food/{name}")
+    def gym_food_file(slug: str, name: str):
+        f = gym_call(gym._dir, slug) / "food" / Path(name).name
+        if not f.exists():
+            raise HTTPException(404, "that track is gone (was the original moved?)")
+        return FileResponse(f.resolve())
+
     @app.delete("/api/gym/{slug}/food/{name}")
     def gym_unfeed(slug: str, name: str):
         return gym_call(gym.unfeed, slug, name)

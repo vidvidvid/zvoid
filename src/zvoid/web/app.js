@@ -99,6 +99,19 @@ $('#zoom').addEventListener('click', e => {
 
 /* ---------- audio players ---------- */
 let AC; const ac = () => (AC ||= new (window.AudioContext || window.webkitAudioContext)());
+/* everything that plays goes through one analyser, so the gym entity can hear it */
+let ANA = null; const _fq = new Uint8Array(512), _tm = new Uint8Array(512), _wave = new Float32Array(512);
+function bus() { if (!ANA) { ANA = ac().createAnalyser(); ANA.fftSize = 1024; ANA.smoothingTimeConstant = .72; ANA.connect(ac().destination); } return ANA; }
+function audioLevels() {
+  if (!ANA) return null;
+  ANA.getByteFrequencyData(_fq); ANA.getByteTimeDomainData(_tm);
+  let b = 0, m = 0, hsum = 0, tot = 0;
+  for (let i = 1; i < 6; i++) b += _fq[i]; for (let i = 6; i < 90; i++) m += _fq[i]; for (let i = 90; i < 380; i++) hsum += _fq[i];
+  for (let i = 0; i < 512; i++) { _wave[i] = (_tm[i] - 128) / 128; tot += Math.abs(_wave[i]); }
+  const bass = Math.min(1, b / 5 / 255 * 1.1), mid = Math.min(1, m / 84 / 255 * 1.7), high = Math.min(1, hsum / 290 / 255 * 1.5);
+  const level = Math.min(1, Math.max(tot / 512 * 3.5, (bass + mid + high) / 3 * .85));
+  return level < .004 ? null : { level, bass, mid, high, freq: _fq, wave: _wave };
+}
 const bufs = new Map();
 function loadBuf(path) {
   if (!bufs.has(path)) bufs.set(path, fetch(fileUrl(path)).then(r => r.arrayBuffer())
@@ -139,7 +152,7 @@ function player(nodeId, path, col) {
     await ac().resume(); if (!P.buf) return;
     if (P.src) P.stop(true);
     if (from != null) P.off = from;
-    const s = ac().createBufferSource(); s.buffer = P.buf; s.loop = P.loop; s.connect(ac().destination);
+    const s = ac().createBufferSource(); s.buffer = P.buf; s.loop = P.loop; s.connect(bus());
     s.onended = () => { if (P.src === s) { P.src = null; P.off = 0; el.classList.remove('playing'); pp.textContent = '▶'; draw(); } };
     P.t0 = ac().currentTime; s.start(0, P.off % P.buf.duration); P.src = s;
     el.classList.add('playing'); pp.textContent = '■'; tick();
