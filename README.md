@@ -21,7 +21,7 @@ generate a track, split it into stems, continue the drums with another model, tu
 - **Wiring:** drag from an output port to an input port. Running a module runs whatever feeds it first.
 - **Every knob:** each module exposes the model's settings, an *advanced* section, and a raw JSON box for anything else.
 - **✦ claude:** a chat panel that builds, tweaks and runs circuits for you, through your own [Claude Code](https://claude.com/claude-code) CLI.
-- **Library:** every run is saved with its exact settings and seed.
+- **Library:** everything you make in one place: audio, MIDI, stills, time-lapses and films, grouped by day. Filter by what made it or by creature, star the keepers, drag audio back onto the canvas, and move the rest to the Trash. Every run is saved with its exact settings and seed.
 - **Circuits:** save and reload your wiring.
 
 ## Requirements

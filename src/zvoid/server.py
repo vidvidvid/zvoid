@@ -220,6 +220,30 @@ def create_app():
         dst.write_bytes(await request.body())
         return {"path": str(dst), "name": safe}
 
+    @app.get("/api/made")
+    def made():
+        return library.list_items()
+
+    @app.post("/api/made/star")
+    async def made_star(request: Request):
+        b = await request.json()
+        return {"star": library.star(str(_inside_outputs(b.get("path"))), bool(b.get("on")))}
+
+    @app.post("/api/made/trash")
+    async def made_trash(request: Request):
+        f = _inside_outputs((await request.json()).get("path"))
+        if not f.is_file():
+            raise HTTPException(404, "that file is gone")
+        library.trash(f)
+        return {"ok": True}
+
+    @app.get("/api/thumb")
+    def thumb(path: str):
+        try:
+            return FileResponse(library.thumb(_inside_outputs(path)), media_type="image/jpeg")
+        except FileNotFoundError as ex:
+            raise HTTPException(404, str(ex))
+
     @app.post("/api/reveal")
     async def reveal(request: Request):
         path = (await request.json()).get("path")

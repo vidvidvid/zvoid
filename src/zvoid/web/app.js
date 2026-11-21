@@ -520,20 +520,8 @@ function openDrawer(kind, arg) {
   const d = $('#drawer'), body = $('#drawer-body'); d.hidden = !kind; if (!kind) return;
   $('#drawer-title').textContent = kind; body.replaceChildren();
   if (kind === 'tips') { const s = ENG[arg]; $('#drawer-title').textContent = (s.tab || s.name) + ' · tips'; body.append(h('div', { class: 'card' }, h('p', { style: 'white-space:pre-wrap;color:var(--text);user-select:text;-webkit-user-select:text' }, (s.tagline + '\n\n' + s.notes).replace(/\*\*|`/g, '')))); }
-  if (kind === 'library') {
-    const q = h('input', { placeholder: 'filter by prompt, engine, model…', spellcheck: 'false' }), list = h('div');
-    const load = async () => {
-      const runs = await api('/api/library?q=' + encodeURIComponent(q.value));
-      list.replaceChildren(...(runs.length ? runs.map(r => h('div', { class: 'run-item' },
-        h('div', { class: 'meta' }, `${(r.created || '').slice(5, 16)} · ${r.engine_name || r.engine}${r.seed != null ? ' · seed ' + r.seed : ''}`),
-        h('div', { class: 'what', title: r.label }, r.label || '—'),
-        h('div', { class: 'chips' }, r.files.map(f => f.kind === 'audio'
-          ? h('button', { class: 'chip', title: 'Add to the canvas as a sample', onclick: () => addNode('sample', undefined, undefined, { file: { path: f.path, name: f.name } }) }, '+ ' + f.name)
-          : h('button', { class: 'chip file', title: 'Show in Finder', onclick: () => api('/api/reveal', { json: { path: f.path } }) }, f.name))))) : [h('p', { style: 'color:var(--muted)' }, 'Nothing here yet. Everything you generate lands here.')]));
-    };
-    q.oninput = () => { clearTimeout(q._t); q._t = setTimeout(load, 200); };
-    body.append(q, h('button', { onclick: () => api('/api/reveal', { json: {} }) }, 'open outputs folder'), list); load();
-  }
+  d.classList.toggle('wide', kind === 'library');
+  if (kind === 'library') libraryOpen(body);
   if (kind === 'engines') {
     const draw = async () => {
       const list = await api('/api/engines?sizes=true'); if (drawerKind !== 'engines') return;
@@ -554,6 +542,67 @@ function openDrawer(kind, arg) {
     draw(); drawerTimer = setInterval(draw, 2500);
   }
 }
+/* ---------- library: everything that was made, in one place ---------- */
+const LIB = { tab: 'all', q: '', source: '', creature: '', stars: false, items: [], audio: null, playing: null };
+const libDay = w => { const d = new Date((w || '').replace(' ', 'T')), t = new Date(), y = new Date(Date.now() - 864e5), same = (a, b) => a.toDateString() === b.toDateString();
+  return isNaN(d) ? 'earlier' : same(d, t) ? 'today' : same(d, y) ? 'yesterday' : d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }); };
+const libSize = n => n > 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n > 1e6 ? (n / 1e6).toFixed(n > 1e7 ? 0 : 1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
+function libPlay(it) {
+  if (!LIB.audio) { LIB.audio = new Audio(); LIB.audio.onended = () => { LIB.playing = null; libraryDraw(); }; try { ac().createMediaElementSource(LIB.audio).connect(bus()); } catch {} }
+  if (LIB.playing === it.path) { LIB.audio.pause(); LIB.playing = null; } else { ac().resume(); LIB.audio.src = fileUrl(it.path); LIB.audio.play().catch(e => toast('could not play that: ' + e.message, true)); LIB.playing = it.path; }
+  libraryDraw();
+}
+function libPreview(it) {                           // a still or a video, large
+  const close = () => ov.remove(), ov = h('div', { class: 'lib-over', onclick: e => { if (e.target === ov) close(); } },
+    it.kind === 'video' ? h('video', { src: fileUrl(it.path), controls: true, autoplay: true, loop: true }) : h('img', { src: fileUrl(it.path) }),
+    h('div', { class: 'lib-over-bar' }, h('span', {}, it.title), h('button', { onclick: () => api('/api/reveal', { json: { path: it.path } }) }, 'show in finder'), h('button', { onclick: close }, 'close')));
+  document.body.append(ov);
+}
+async function libTrash(it, btn) {
+  if (!btn.dataset.armed) { btn.dataset.armed = '1'; btn.textContent = 'sure?'; btn.classList.add('armed'); setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = '×'; btn.classList.remove('armed'); } }, 3000); return; }
+  try { await api('/api/made/trash', { json: { path: it.path } }); LIB.items = LIB.items.filter(x => x.path !== it.path); if (LIB.playing === it.path) { LIB.audio.pause(); LIB.playing = null; } libraryDraw(); toast('moved to the Trash'); } catch (e) { toast('could not delete: ' + e.message, true); }
+}
+async function libStar(it) { it.star = !it.star; libraryDraw(); try { await api('/api/made/star', { json: { path: it.path, on: it.star } }); } catch { it.star = !it.star; libraryDraw(); } }
+function libraryDraw() {
+  const list = $('#lib-list'); if (!list) return;
+  const q = LIB.q.toLowerCase(), want = LIB.tab === 'all' ? null : LIB.tab;
+  const items = LIB.items.filter(it => (!want || it.kind === want) && (!LIB.stars || it.star) && (!LIB.source || it.source === LIB.source) && (!LIB.creature || it.creature === LIB.creature)
+    && (!q || (it.title + ' ' + it.name + ' ' + it.source + ' ' + it.creature + ' ' + it.model).toLowerCase().includes(q)));
+  const counts = k => LIB.items.filter(it => k === 'all' || it.kind === k).length;
+  $('#lib-tabs').replaceChildren(...[['all', 'all'], ['audio', 'audio'], ['midi', 'midi'], ['still', 'stills'], ['video', 'videos']].map(([k, label]) =>
+    h('button', { class: LIB.tab === k ? 'on' : '', onclick: () => { LIB.tab = k; libraryDraw(); } }, `${label} ${counts(k)}`)));
+  if (!items.length) { list.replaceChildren(h('p', { class: 'lib-empty' }, LIB.items.length ? 'Nothing matches these filters.' : 'Nothing here yet. Everything you make lands here.')); return; }
+  const days = []; for (const it of items) { const dname = libDay(it.when); if (!days.length || days[days.length - 1].name !== dname) days.push({ name: dname, items: [] }); days[days.length - 1].items.push(it); }
+  const meta = it => [it.source, it.creature && '◍ ' + it.creature.replace(/-/g, ' '), (it.when || '').slice(11, 16), it.seed != null && it.seed !== -1 && 'seed ' + it.seed, libSize(it.size)].filter(Boolean).join(' · ');
+  const tools = it => h('div', { class: 'lib-tools' },
+    h('button', { class: 'lib-star' + (it.star ? ' on' : ''), title: it.star ? 'Remove the star' : 'Star this as a keeper', onclick: () => libStar(it) }, it.star ? '★' : '☆'),
+    it.kind === 'audio' && h('button', { title: 'Add to the canvas as a sample', onclick: () => { addNode('sample', undefined, undefined, { file: { path: it.path, name: it.name } }); toast('added to the canvas'); } }, '+ canvas'),
+    h('button', { title: 'Show in Finder', onclick: () => api('/api/reveal', { json: { path: it.path } }) }, '↗'),
+    h('button', { class: 'lib-del', title: 'Move to the Trash (click twice)', onclick: e => libTrash(it, e.currentTarget) }, '×'));
+  list.replaceChildren(...days.flatMap(dy => {
+    const rows = dy.items.filter(it => it.kind === 'audio' || it.kind === 'midi'), tiles = dy.items.filter(it => it.kind === 'still' || it.kind === 'video');
+    return [h('h5', { class: 'lib-day' }, `${dy.name} · ${dy.items.length}`),
+      tiles.length && h('div', { class: 'lib-grid' }, tiles.map(it => h('div', { class: 'lib-tile' },
+        h('button', { class: 'lib-thumb', title: 'Open', onclick: () => libPreview(it) }, h('img', { loading: 'lazy', src: '/api/thumb?path=' + encodeURIComponent(it.path) }), it.kind === 'video' && h('i', {}, it.source === 'film' ? '▶ film' : '▶ time-lapse')),
+        h('div', { class: 'lib-what', title: it.name }, it.title), h('div', { class: 'lib-meta' }, meta(it)), tools(it)))),
+      ...rows.map(it => h('div', { class: 'lib-row' + (LIB.playing === it.path ? ' playing' : '') },
+        it.kind === 'audio' ? h('button', { class: 'lib-pp', title: 'Play / stop', onclick: () => libPlay(it) }, LIB.playing === it.path ? '■' : '▶') : h('span', { class: 'lib-pp midi' }, '♪'),
+        h('div', { class: 'lib-text' }, h('div', { class: 'lib-what', title: it.title + '\n' + it.name }, it.title), h('div', { class: 'lib-meta' }, meta(it))), tools(it)))];
+  }).filter(Boolean));
+}
+async function libraryOpen(body) {
+  const q = h('input', { placeholder: 'search…', spellcheck: 'false', value: LIB.q, oninput: e => { LIB.q = e.target.value; clearTimeout(q._t); q._t = setTimeout(libraryDraw, 150); } });
+  const src = h('select', { title: 'Made by', onchange: e => { LIB.source = e.target.value; libraryDraw(); } }), cre = h('select', { title: 'Creature', onchange: e => { LIB.creature = e.target.value; libraryDraw(); } });
+  const starB = h('button', { class: LIB.stars ? 'on' : '', title: 'Show only starred', onclick: () => { LIB.stars = !LIB.stars; starB.classList.toggle('on', LIB.stars); libraryDraw(); } }, '★ only');
+  body.append(h('div', { id: 'lib-tabs' }), h('div', { class: 'lib-filters' }, q, src, cre, starB, h('button', { onclick: () => api('/api/reveal', { json: {} }) }, 'open folder')), h('div', { id: 'lib-list' }, h('p', { class: 'lib-empty' }, 'loading…')));
+  try { LIB.items = await api('/api/made'); } catch (e) { LIB.items = []; toast('could not read the library: ' + e.message, true); }
+  if (drawerKind !== 'library') return;
+  const uniq = k => [...new Set(LIB.items.map(it => it[k]).filter(Boolean))].sort();
+  src.replaceChildren(h('option', { value: '' }, 'made by anything'), ...uniq('source').map(v => h('option', { value: v, selected: v === LIB.source }, v)));
+  cre.replaceChildren(h('option', { value: '' }, 'any creature'), ...uniq('creature').map(v => h('option', { value: v, selected: v === LIB.creature }, '◍ ' + v.replace(/-/g, ' '))));
+  libraryDraw();
+}
+
 async function refreshEngines() { try { for (const e of await api('/api/engines')) ENG[e.id] = e; } catch {} }
 
 /* ---------- patches ---------- */
