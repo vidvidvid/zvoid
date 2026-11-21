@@ -118,10 +118,29 @@ def create_app():
     @app.get("/api/engines")
     def list_engines(sizes: bool = False):
         creatures = gym.trained_slugs()
-        return [dict(e.spec, id=e.id, installed=e.installed, running=e.running,
+        far = gym.remote_status() if gym.remote() else {}
+        return [dict(e.spec, id=e.id, installed=e.installed, running=e.running, where=e.where,
+                     far=({"name": far.get("name"), "reachable": far.get("reachable")} if far.get("configured") and e.id == "ace_step" else None),
                      params=[dict(q, choices=[""] + creatures) if q.get("type") == "creature" else q for q in e.spec.get("params", [])],
                      env_size=env_size(e) if sizes else None,
                      installing=installs.get(e.id, {}).get("running", False)) for e in engines.values()]
+
+    @app.post("/api/engines/{eid}/where")
+    def engine_where(eid: str, body: dict):
+        """Choose which machine an engine runs on: "mac" or "pc" (needs remote.json and the PC set up, see scripts/remote/)."""
+        e, w = engine_or_404(eid), "pc" if body.get("where") == "pc" else "mac"
+        if w == "pc" and (eid != "ace_step" or not gym.remote()):
+            raise HTTPException(400, "Only ACE-Step can run on the PC, and the PC has to be set up first.")
+        if w != e.where:
+            e.stop()
+            e.where = w
+            try:
+                cfg = json.loads(gym.REMOTE_FILE.read_text())
+                cfg.setdefault("engines", {})[eid] = w
+                gym.REMOTE_FILE.write_text(json.dumps(cfg))
+            except Exception:
+                pass
+        return {"where": e.where}
 
     @app.post("/api/engines/{eid}/unload")
     def unload(eid: str):
@@ -434,7 +453,7 @@ def create_app():
                 limbs.append({"share": l["count"] / max(1, len(c["food"])), "low": (l.get("mean") or {}).get("low", .3), "tracks": tracks})
         clips, song, tail = [], None, 0.0
         e = engines.get("ace_step")
-        busy_here = gym._train.get("state") in ("running", "stopping") and not gym._train.get("remote")   # while it trains on this Mac the GPU is taken
+        busy_here = bool(e) and gym._train.get("state") in ("running", "stopping") and bool(gym._train.get("remote")) == (e.where == "pc")   # the machine that would make the clips is busy training
         if e and not busy_here:
             main = max(c.get("limbs") or [{}], key=lambda l: l.get("count", 0))
             caption = ", ".join(x for x in [c.get("style") or "", *((main.get("tags") or []) if not c.get("style") else []), "instrumental"] if x)
@@ -547,7 +566,7 @@ def create_app():
 
     @app.post("/api/gym/{slug}/train")
     def gym_train(slug: str, body: dict):
-        return gym_call(gym.train, slug, body, before=lambda: "ace_step" in engines and engines["ace_step"].stop())
+        return gym_call(gym.train, slug, body, before=lambda far: "ace_step" in engines and (engines["ace_step"].where == "pc") == far and engines["ace_step"].stop())
 
     @app.get("/api/gym_remote")
     def gym_remote(fresh: int = 0):

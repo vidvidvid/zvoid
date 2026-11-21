@@ -200,6 +200,9 @@ Set it up once:
 3. On the Mac, create `remote.json` in the project folder (it is not committed):
    `{"host": "10.0.1.10", "user": "me", "key": "~/.ssh/id_ed25519", "name": "PC · RTX 4080"}`
 
+ACE-Step can also *make* sound there: in **engines**, set ACE-Step to **runs on: PC**. Input audio and the creature's adapter are sent
+over, the clip is made on the PC's card and comes back into your library (a 14 s clip takes a few seconds once the model is loaded).
+
 The training panel then shows **train on: this Mac / PC**. Choosing the PC sends the tracks it does not have yet and
 the creature's newest checkpoint, trains there (in bf16, which Nvidia's attention code requires), streams progress into
 the same readout and living view, and brings the result back when it finishes or when you press stop.

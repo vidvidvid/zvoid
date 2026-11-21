@@ -28,6 +28,8 @@ class Engine:
     _proc: subprocess.Popen | None = field(default=None, repr=False)
     _lines: queue.Queue | None = field(default=None, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    where: str = "mac"          # "pc" = run this engine's worker on the second machine (see remote.json), over SSH
+    _far: dict | None = field(default=None, repr=False)
 
     # ---- spec helpers -------------------------------------------------
     @property
@@ -78,6 +80,9 @@ class Engine:
     def start(self):
         if self.running:
             return
+        if self.where == "pc":
+            return self._start_far()
+        self._far = None
         if not self.installed:
             raise RuntimeError(f"{self.name} isn't installed yet. Open “engines” (top right) to install it.")
         env = dict(os.environ)
@@ -94,6 +99,9 @@ class Engine:
             cwd=str(self.dir),
             env=env,
         )
+        self._pump()
+
+    def _pump(self):
         self._lines = queue.Queue()
         proc, q = self._proc, self._lines
 
@@ -114,8 +122,81 @@ class Engine:
             self.stop()
             raise RuntimeError(msg.get("error", "worker failed to start") + "\n" + msg.get("trace", ""))
 
+    # ---- the worker on a second machine ------------------------------------
+    def _start_far(self):
+        """Start the worker on the PC. Its code is sent over each time, so the PC always runs what this Mac has."""
+        from . import gym
+
+        r = gym.remote()
+        if not r or not gym.remote_status(True).get("reachable"):
+            raise RuntimeError("The PC is not reachable right now. Check that it is on, or set this engine to run on this Mac (in “engines”).")
+        if gym._train.get("state") in ("running", "stopping") and gym._train.get("remote"):
+            raise RuntimeError("The PC is busy training a creature. Wait for it to finish, or set this engine to run on this Mac (in “engines”).")
+        base = f"{r['dir']}\\app"
+        gym._ps(r, f"New-Item -ItemType Directory -Force -Path {base}\\engines, {base}\\in, {base}\\out, {base}\\creatures | Out-Null")
+        gym._tar_to(r, self.dir.parent, [self.id, "_common"], f"{base}\\engines")
+        gym._tar_to(r, WORKER.parent, [WORKER.name], base)
+        gym._tar_to(r, ENGINES_DIR.parent / "scripts" / "remote", ["run_engine.cmd"], base)
+        home = gym._ps(r, "$env:USERPROFILE").strip()
+        self._far = dict(r, base=f"{home}\\{r['dir']}\\app", rel=base)
+        self._proc = subprocess.Popen(gym._ssh_base(r) + [f"cmd /c {base}\\run_engine.cmd"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None, text=True, bufsize=1)
+        self._pump()
+
+    def _far_params(self, params: dict, ctx_id: str) -> dict:
+        """Send what this run needs to the PC (input audio, the creature's adapter) and point the parameters at the copies there."""
+        from . import gym
+
+        r, p = self._far, dict(params)
+        for q in self.spec.get("params", []):
+            v = p.get(q["name"])
+            if q.get("type") in ("audio", "file") and v and Path(str(v)).is_file():
+                src = Path(str(v))
+                gym._tar_to(r, src.parent, [src.name], f"{r['rel']}\\in")
+                p[q["name"]] = f"{r['base']}\\in\\{src.name}"
+        slug = (p.get("creature") or "").strip()
+        if slug:
+            lora = gym._dir(slug) / "lora"
+            at = Path(str(p.get("creature_at") or "")) if p.get("creature_at") else None
+            if not (at and (at / "adapter_config.json").exists()):
+                found = [x for x in [lora / "final", *(lora / "checkpoints").glob("epoch_*")] if (x / "adapter_config.json").exists()]
+                if not found:
+                    raise RuntimeError(f"Creature “{slug}” hasn't been trained yet. Train it in the vivarium first.")
+                at = max(found, key=lambda x: (x / "adapter_config.json").stat().st_mtime)
+            name = "gen_" + "".join(ch if ch.isalnum() else "_" for ch in at.name) + f"_{int((at / 'adapter_model.safetensors').stat().st_mtime)}"
+            cdir = f"{r['rel']}\\creatures\\{slug}"
+            if "yes" not in gym._ps(r, f"if (Test-Path {cdir}\\lora\\{name}\\adapter_model.safetensors) {{ 'yes' }}"):
+                gym._ps(r, f"Get-ChildItem {cdir}\\lora -Directory -Filter gen_* -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force; New-Item -ItemType Directory -Force -Path {cdir}\\lora\\{name} | Out-Null")
+                gym._tar_to(r, at, ["adapter_config.json", "adapter_model.safetensors"], f"{cdir}\\lora\\{name}")
+            gym._tar_to(r, gym._dir(slug), ["creature.json"], cdir)
+            p["creature_at"] = f"{r['base']}\\creatures\\{slug}\\lora\\{name}"
+        return p
+
+    def _far_fetch(self, rid: str, outputs: list, out_dir: Path) -> list:
+        """Bring what the PC made back into this run's folder."""
+        from pathlib import PureWindowsPath
+        from . import gym
+
+        r = self._far
+        out_dir.mkdir(parents=True, exist_ok=True)
+        a = subprocess.Popen(gym._ssh_base(r) + [f"tar -cf - -C {r['rel']}\\out\\{rid} ."], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        b = subprocess.run(["tar", "-xf", "-", "-C", str(out_dir)], stdin=a.stdout, capture_output=True, text=True)
+        a.wait()
+        if a.returncode or b.returncode:
+            raise RuntimeError("The PC made it, but it could not be brought back.")
+        try:
+            gym._ps(r, f"Remove-Item -Recurse -Force {r['rel']}\\out\\{rid}", timeout=20)
+        except Exception:
+            pass
+        return [dict(o, path=str(out_dir / PureWindowsPath(str(o.get("path", ""))).name)) for o in outputs]
+
     def stop(self):
         """Kill the worker. Frees the model from memory."""
+        if self._proc is not None and self._far:
+            try:
+                from . import gym
+                gym._ps(self._far, "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'worker.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }", timeout=20)
+            except Exception:
+                pass
         if self._proc is not None:
             try:
                 self._proc.kill()
@@ -127,8 +208,18 @@ class Engine:
     def run(self, params: dict, out_dir: Path):
         """Generator: yields ("progress", msg, frac) and finally ("result", outputs, info)."""
         with self._lock:
+            if self.running and bool(self._far) != (self.where == "pc"):
+                self.stop()                                   # it was moved to the other machine since it last ran
+            if self.where == "pc":
+                yield ("progress", "reaching the PC…", None)
             self.start()
-            self._proc.stdin.write(json.dumps({"cmd": "run", "params": params, "out_dir": str(out_dir)}) + "\n")
+            rid = ""
+            if self._far:
+                import uuid
+                rid = uuid.uuid4().hex[:10]
+                yield ("progress", "sending what it needs to the PC…", None)
+                params, far_out = self._far_params(params, rid), f"{self._far['base']}\\out\\{rid}"
+            self._proc.stdin.write(json.dumps({"cmd": "run", "params": params, "out_dir": far_out if self._far else str(out_dir)}) + "\n")
             self._proc.stdin.flush()
             while True:
                 msg = self._lines.get()
@@ -136,7 +227,11 @@ class Engine:
                 if t == "progress":
                     yield ("progress", msg.get("msg", ""), msg.get("frac"))
                 elif t == "result":
-                    yield ("result", msg.get("outputs", []), msg.get("info", {}))
+                    outs = msg.get("outputs", [])
+                    if self._far:
+                        yield ("progress", "bringing it back from the PC…", None)
+                        outs = self._far_fetch(rid, outs, Path(out_dir))
+                    yield ("result", outs, msg.get("info", {}))
                     return
                 elif t == "error":
                     raise RuntimeError(msg["error"] + "\n\n" + msg.get("trace", ""))
@@ -161,6 +256,13 @@ def discover() -> dict[str, Engine]:
         if d.is_dir() and spec_file.exists() and (d / "engine.py").exists():
             spec = json.loads(spec_file.read_text())
             engines[d.name] = Engine(id=d.name, dir=d, spec=spec)
+    try:                                                      # which engines were set to run on the second machine
+        from . import gym
+        for eid, w in ((gym.remote() or {}).get("engines") or {}).items():
+            if eid in engines and w == "pc":
+                engines[eid].where = "pc"
+    except Exception:
+        pass
     return engines
 
 

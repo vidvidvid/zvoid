@@ -563,8 +563,8 @@ def train(slug: str, opt: dict, before=None) -> dict:
     with _lock:
         if _train["state"] == "running":
             raise RuntimeError(f"“{_train['slug']}” is training right now. One creature at a time.")
-        if before and not far:
-            before()                                  # free the generation model's memory
+        if before:
+            before(far is not None)                   # free the generation model's memory on the machine that is about to train
         more = max(1, int(opt.get("epochs", 100)))
         fresh = bool(opt.get("fresh"))
         lora = _dir(slug) / "lora"
