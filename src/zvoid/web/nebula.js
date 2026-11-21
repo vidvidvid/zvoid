@@ -579,6 +579,8 @@ function nebCanvas() {                            // one canvas and one GL conte
       const now = performance.now(), sp = Math.hypot(e.offsetX - down.lx, e.offsetY - down.ly) / Math.max(8, now - down.t) * 1000; down.moved = true; down.lx = e.offsetX; down.ly = e.offsetY; down.t = now; nebDrag(e.offsetX, e.offsetY, sp); });
     const up = e => { if (down && !down.moved && e.type === 'mouseup') nebTouch(down.x, down.y); down = null; nebDragEnd(); };
     cv.addEventListener('mouseup', up); cv.addEventListener('mouseleave', up);
+    cv.addEventListener('dblclick', e => { const c = Gym.cur; if (!c) return; const G = fxOf(c.slug).ngeom; if (!G) return; const hit = nebUnder(c, G, e.offsetX, e.offsetY);   // double-click a limb: ask it to sing
+      if (hit.kind === 'pillar') gymSing(c, c.limbs && c.limbs.length > 1 ? c.limbs[hit.o.j % c.limbs.length].id : null); });
   }
   return NEB.canvas;
 }
@@ -601,7 +603,7 @@ function nebFrame(c, t, mouse) {
       if (ms > 18.5) drop(ms); else if (ms < room) { if (NEB.cap && t - NEB.capT > 25) NEB.cap = 0; NEB.q = Math.min(1, NEB.cap ? NEB.cap * .9 : 1, NEB.q * 1.06); }
       NEB.acc = 0; NEB.frames = 0; } }
   NEB.last = t;
-  if (NEB.frames === 0 && NEB.hud !== false) { const hud = document.getElementById('gym-fps'); if (hud && NEB.ms) hud.textContent = `${Math.round(1000 / NEB.ms)} fps · ${NEB.tw || 0}×${NEB.th || 0}`; }
+  if (NEB.frames === 0 && NEB.hud !== false) { const hud = document.getElementById('gym-fps'); if (hud && Gym.sing) hud.textContent = Gym.sing.msg; else if (hud && NEB.ms) hud.textContent = `${Math.round(1000 / NEB.ms)} fps · ${NEB.tw || 0}×${NEB.th || 0}`; }
   if ((fx.waves && fx.waves.some(w => t - w.t0 < 1.6)) || NEB.drag.on || (fx.ev && fx.ev.length)) NEB.busyT = t;   // while it is being touched or struck, each frame costs more:
   const busy = NEB.busyT != null && t - NEB.busyT < 1.2;                                                              // render a little smaller for that moment so it never stutters. The frame blend hides the step.
   let dpr = devicePixelRatio || 1, cw = cv.clientWidth, ch = cv.clientHeight, sc = dpr * NEB.q * (busy ? .8 : 1), W = Math.max(2, Math.round(cw * sc)), H = Math.max(2, Math.round(ch * sc));
@@ -654,6 +656,7 @@ function nebFrame(c, t, mouse) {
     [S_.noise, S_.dyn, S_.bright, S_.low, S_.bpm, clamp(share * K * .5, 0, 1)].forEach((v, k) => { s.tr[k] += ((n ? v : s.tr[k]) - s.tr[k]) * e; });
     s.len += (tl - s.len) * e * .6; s.rad += (trd - s.rad) * Math.min(1, e * 4); s.w += (tw - s.w) * e; s.ring *= Math.exp(-dt * 2.2);
   });
+  if (Gym.sing && Gym.sing.slug === c.slug) { const si = limbs ? Math.max(0, limbs.findIndex(l => l.id === Gym.sing.limb)) : 0, ss = N.slots[Math.min(si, K - 1)]; if (ss) ss.ring = Math.max(ss.ring, .45 + .3 * Math.sin(t * 5)); }   // the limb that was asked hums while it composes
   N.fresh = false;
   { let er = 0; N.slots.forEach(sl => { if (sl.w > .3) er = Math.max(er, Math.hypot(Math.abs(sl.p[0]) + Math.abs(sl.a[0]) * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 1.3 + sl.len * .28); }); fx.extR = fx.extR == null ? er : fx.extR + (er - fx.extR) * Math.min(1, dt * .8); }
   const pole = new Float32Array(24), axis = new Float32Array(24), col = new Float32Array(24), trA = new Float32Array(24), trB = new Float32Array(24);

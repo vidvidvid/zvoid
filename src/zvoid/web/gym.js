@@ -401,7 +401,7 @@ function gymBuild() {
       h('div', { class: 'acts' }, h('button', { disabled: running, onclick: () => { const i = $('#gym-pick'); i.value = ''; i.click(); } }, '+ feed audio or video…'), h('button', { disabled: running, title: 'Pick a folder. Tracks are linked where they are, not copied.', onclick: gymPickFolder }, '+ feed a folder…')),
       ...((c.limbs || []).length > 1 ? [h('h3', {}, 'limbs'),
         h('p', { class: 'gym-note' }, 'Tracks that sound alike grow together as one limb. Each limb learns its own word: put it in a caption to call that side of the creature.'),
-        h('div', { class: 'limbs' }, c.limbs.map(l => h('div', { class: 'limb-row', style: `--c:hsl(${hueOf(l.mean.bright)},90%,60%)` }, h('i'), h('span', {}, l.tags.join(' · ')), h('small', {}, l.count + ' tracks'), h('code', { title: 'The trigger word of this limb' }, l.trigger))))] : []),
+        h('div', { class: 'limbs' }, c.limbs.map(l => h('div', { class: 'limb-row', style: `--c:hsl(${hueOf(l.mean.bright)},90%,60%)` }, h('i'), h('span', {}, l.tags.join(' · ')), h('small', {}, l.count + ' tracks'), h('code', { title: 'The trigger word of this limb' }, l.trigger), h('button', { class: 'limb-sing', title: 'Ask this limb to sing: ACE-Step makes a short new clip in its style and the creature performs it. You can also double-click the limb itself.', disabled: running, onclick: () => gymSing(c, l.id) }, '♪'))))] : []),
       h('h3', {}, 'identity'),
       h('label', { title: 'Used as the caption for every track that has no caption of its own. Good tags make a much better creature.' }, h('span', {}, 'its sound, in tags'), style),
       h('label', { title: 'A made-up word the model learns to associate with this sound. Zvoid adds it to your caption automatically when the creature is active.' }, h('span', {}, 'trigger word'), tag),
@@ -435,10 +435,30 @@ function gymDelete(btn, c) {
 }
 
 /* play one of its tracks: the sound goes through the analyser, so the entity reacts, and that track's string lights up */
-function gymPlay(slug, name) {
+/* Ask a limb to sing: ACE-Step makes a short new clip in that limb's style (through the creature's adapter if it has trained),
+   and the creature performs it. Until it has trained, you hear what the plain model makes of that limb's description. */
+async function gymSing(c, limbId) {
+  if (!c || !c.food.length) return toast('feed it first');
+  if (c.training && c.training.state === 'running') return toast('it cannot sing while it trains: training has the GPU');
+  if (Gym.sing) return toast('it is already composing…');
+  const limb = (c.limbs || []).find(l => l.id === limbId) || null, m = limb ? limb.mean : dna(c);
+  const caption = [limb && c.trained ? limb.trigger : '', c.trained ? c.tag : '', c.style || '', ...(limb ? limb.tags : []), 'instrumental'].filter(Boolean).join(', ');
+  const params = { task: 'text2music', caption, lyrics: '[Instrumental]', duration: 14, thinking: false, batch: 1, seed: -1, creature: c.trained ? c.slug : '', creature_strength: 1 };
+  if (m && m.bpm) params.bpm = Math.round(clamp(m.bpm, 50, 200));
+  Gym.sing = { slug: c.slug, limb: limbId == null ? 0 : limbId, t0: performance.now(), msg: 'composing…' }; toast(c.trained ? 'it is composing…' : 'it has not trained yet: this is the plain model\'s guess at that limb');
+  try {
+    const { id } = await api('/api/run', { json: { engine: 'ace_step', params } });
+    for (;;) { await sleep(500); const j = await api('/api/jobs/' + id); Gym.sing.msg = (j.msg || 'composing…') + (j.frac != null ? ` · ${Math.round(j.frac * 100)}%` : '');
+      if (j.state === 'done') { const out = (j.outputs || [])[0]; if (!out) throw new Error('nothing came back'); gymPlayPath(out.path); toast('it sings (saved to the library)'); break; }
+      if (j.state === 'error' || j.state === 'cancelled') throw new Error((j.error || j.msg || 'failed').split('\n')[0]); }
+  } catch (e) { toast('it could not sing: ' + (e.message || e), true); }
+  Gym.sing = null;
+}
+function gymPlayPath(path) { gymPlay(null, 'song ' + Date.now(), '/api/file?path=' + encodeURIComponent(path)); }
+function gymPlay(slug, name, url, label) {
   if (!Gym.audio) { Gym.audio = new Audio(); Gym.audio.crossOrigin = 'anonymous'; try { ac().createMediaElementSource(Gym.audio).connect(bus()); } catch (e) {} Gym.audio.onended = () => { Gym.playing = null; Gym.key = ''; gymRender(); }; }
   if (Gym.playing === name) { Gym.audio.pause(); Gym.playing = null; }
-  else { ac().resume(); Gym.audio.src = `/api/gym/${slug}/food/${encodeURIComponent(name)}`; Gym.audio.play().catch(e => toast('could not play that file: ' + e.message, true)); Gym.playing = name; }
+  else { ac().resume(); Gym.audio.src = url || `/api/gym/${slug}/food/${encodeURIComponent(name)}`; Gym.audio.play().catch(e => toast('could not play that file: ' + e.message, true)); Gym.playing = name; }
   Gym.key = ''; gymRender();
 }
 

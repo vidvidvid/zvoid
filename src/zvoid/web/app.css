@@ -343,3 +343,6 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 
 #gym-shot { position: absolute; top: 9px; left: 14px; z-index: 3; font: 9.5px var(--mono); letter-spacing: .12em; padding: 4px 9px; opacity: .55; }
 #gym-shot:hover { opacity: 1; }
+
+.limb-sing { font: 11px var(--mono); padding: 1px 7px; margin-left: 6px; opacity: .7; }
+.limb-sing:hover { opacity: 1; }
