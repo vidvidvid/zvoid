@@ -957,8 +957,13 @@ function nebDrag(x, y, speed) {
   D.v.o1.frequency.setTargetAtTime(hit.freq * wob, now, .05); D.v.o2.frequency.setTargetAtTime(hit.freq * (hit.kind === 'void' ? .5 : ALIEN_SCALE[4]) * (1 + (1 - pure) * .012), now, .05);
   D.v.lp.frequency.setTargetAtTime(500 + speed * 1.6 + pure * 1800, now, .08); D.v.g.gain.setTargetAtTime(lvl, now, .06);
   if (hit.kind === 'pillar') hit.o.slot.ring = Math.max(hit.o.slot.ring, .6);
-  if (hit.kind === 'pillar' && hit.track && (!D.lastGrain || t - D.lastGrain > .075)) { const b = grainBuf(c.slug, hit.track);   // dragging along a limb scrubs through its memory of that track
-    if (b) { D.lastGrain = t; grainOne(b, { pos: hit.u, dur: .16 + pure * .3, gain: clamp(speed / 900, .08, .32), rate: 1 + (1 - pure) * (Math.random() - .5) * .08, attack: .03 }); D.v.g.gain.setTargetAtTime(lvl * .35, now, .06); } }
+  if (hit.kind === 'pillar' && hit.track) {                                               // dragging along a limb plays through its memory of the track under your hand
+    const b = grainBuf(c.slug, hit.track), gap = clamp(.11 - speed / 22000, .045, .11);   // the faster you move, the denser the grains
+    if (D.track !== hit.track) { D.track = hit.track; D.head = hit.u; }                   // a new track: start where you touched it
+    if (b && (!D.lastGrain || t - D.lastGrain > gap)) { const since = D.lastGrain ? Math.min(.3, t - D.lastGrain) : gap; D.lastGrain = t;
+      D.head = (D.head + since * (.25 + speed / 1500) / b.duration) % 1;                  // the playhead moves on as you drag, faster with your hand, so it never repeats one spot
+      grainOne(b, { pos: D.head, dur: .2 + pure * .3, gain: clamp(speed / 900, .1, .34), rate: (1 + clamp(speed / 5000, 0, .35)) * (1 + (1 - pure) * (Math.random() - .5) * .08), attack: .035 });
+      D.v.g.gain.setTargetAtTime(lvl * .2, now, .06); } }
   if (!D.lastWave || t - D.lastWave > (hit.kind === 'space' ? .5 : .22)) { D.lastWave = t; fx.waves.push({ t0: t, o: hit.p, soft: true, mode: Math.random() > .5 ? 2 : 0, n: [Math.random() - .5, Math.random() - .5, Math.random() - .5].map((c, i, v) => c / (Math.hypot(...v) || 1)), taps: [[0, 1], [.4, .4]], speed: 1.8 }); if (fx.waves.length > 18) fx.waves.shift(); }
 }
 function nebDragEnd() {
