@@ -1,6 +1,11 @@
 /* Patch canvas: modules, cables, players, and the run engine. Plain JS, no build step. */
 'use strict';
 
+/* report script errors to the app log (~/Library/Logs/Zvoid.log) */
+const _clog = m => { try { fetch('/api/clientlog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ msg: m }) }); } catch {} };
+addEventListener('error', e => _clog(`${e.message} @ ${(e.filename || '').split('/').pop()}:${e.lineno}:${e.colno}`));
+addEventListener('unhandledrejection', e => _clog('promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)));
+
 const $ = (s, root = document) => root.querySelector(s);
 function h(tag, props, ...kids) {
   const e = document.createElement(tag);

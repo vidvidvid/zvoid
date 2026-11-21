@@ -257,16 +257,17 @@ function gymFrame() {
   if (!Gym.open) return;
   const t = performance.now() / 1000;
   const cv = $('#gym-canvas');
-  if (cv) {
+  if (cv && NEB.ok) {                                    // GPU nebula
+    if (Gym.cur) nebFrame(Gym.cur, t, Gym.mouse);
+  } else if (cv) {                                       // fallback: the older 2D renderer
     const d = devicePixelRatio || 1, w = cv.clientWidth, hh = cv.clientHeight;
     if (cv.width !== Math.round(w * d)) { cv.width = Math.round(w * d); cv.height = Math.round(hh * d); }
     const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0);
     if (Gym.cur) drawCreature(g, w, hh, Gym.cur, t, Gym.mouse); else g.clearRect(0, 0, w, hh);
-    const bl = $('#gym-bloom'); if (bl) { if (bl.width !== Math.round(w / 2)) { bl.width = Math.round(w / 2); bl.height = Math.round(hh / 2); } const b = bl.getContext('2d'); b.clearRect(0, 0, bl.width, bl.height); b.drawImage(cv, 0, 0, bl.width, bl.height); }
   }
   document.querySelectorAll('canvas.mini-creature').forEach(m => {
     const c = Gym.list.find(x => x.slug === m.dataset.slug); if (!c) return;
-    const g = m.getContext('2d'); if (m.width !== 112) { m.width = 112; m.height = 112; } g.setTransform(2, 0, 0, 2, 0, 0); drawCreature(g, 56, 56, c, t, null, true);
+    const g = m.getContext('2d'); if (m.width !== 112) { m.width = 112; m.height = 112; } g.setTransform(2, 0, 0, 2, 0, 0); drawMini(g, 56, 56, c, t);
   });
   Gym.raf = requestAnimationFrame(gymFrame);
 }
@@ -315,11 +316,11 @@ function gymBuild() {
       h('span', { class: 'row-del', data: { label: '×' }, title: 'Delete this creature', onclick: e => { e.stopPropagation(); gymDelete(e.currentTarget, x); } }, '×')))),
     h('div', { class: 'gym-new' }, nameIn, hatchB));
 
-  const stage = h('div', { id: 'gym-stage' }, h('canvas', { id: 'gym-bloom' }), h('canvas', { id: 'gym-canvas' }),
+  const stage = h('div', { id: 'gym-stage' }, nebCanvas(), h('div', { id: 'gym-fps' }),
     c ? h('div', { id: 'gym-caption' }, h('h1', {}, c.name), h('div', { id: 'gym-stats' })) : h('div', { id: 'gym-caption' }, h('h1', {}, 'no creatures yet'), h('div', {}, 'name one on the left and press hatch')));
   stage.addEventListener('mousemove', e => { const r = stage.getBoundingClientRect(); Gym.mouse = { x: e.clientX - r.left, y: e.clientY - r.top }; });
   stage.addEventListener('mouseleave', () => { Gym.mouse = null; });
-  stage.addEventListener('mousedown', e => { if (e.target.tagName === 'CANVAS') { const r = stage.getBoundingClientRect(); gymTouch(e.clientX - r.left, e.clientY - r.top); } });
+  stage.addEventListener('mousedown', e => { if (!NEB.ok && e.target.tagName === 'CANVAS') { const r = stage.getBoundingClientRect(); gymTouch(e.clientX - r.left, e.clientY - r.top); } });   // the nebula canvas handles its own touch and drag
 
   const right = h('div', { id: 'gym-right' });
   if (c) {

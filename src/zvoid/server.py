@@ -91,6 +91,12 @@ def create_app():
             raise HTTPException(404)
         return FileResponse(f, headers=NO_CACHE)
 
+    @app.post("/api/clientlog")
+    def clientlog(body: dict):
+        """Errors from the window's JavaScript, so they show up in the app log."""
+        print("[ui]", str(body.get("msg", ""))[:1500], flush=True)
+        return {"ok": True}
+
     @app.get("/api/meta")
     def meta():
         return {"name": NAME, "claude": chat.available()}

@@ -74,20 +74,24 @@ Press **◍ gym**. A creature is a LoRA adapter for ACE-Step, trained on audio y
 
 To delete a creature, press the × on its row or *delete creature* in the gym (click twice to confirm). Your original audio is never touched.
 
-**What you see** is the entity: a void creature made of sound. It has no body and no centre; it is a flow.
+**What you see** is the entity: a nebula made of the sound it ate, rendered on the GPU as real 3D dust and gas
+(a ray-marched volume, so there are no lines or particles).
 
-- **Voids:** dark lobes that wander, merge and part. Light bends around them.
-- **Currents:** every track is a family of strands streaming through the field the voids create (colour from brightness,
-  weight from bass). Untrained, the field is turbulent smoke. As it learns, the strands settle into folded orbits.
-  New tracks stream in when you feed it.
-- **Dust and script:** thousands of specks ride the same flow, so it never repeats. Marks of its own script appear near
-  the voids, one per ten epochs.
-- **It hears.** Press ▶ on a track in the food list, or play anything on the canvas: the sound stirs the field, shakes the
-  strands with the live waveform, and the voids kick on the beat.
-- **It behaves.** It wanders, breathes unevenly, and drifts toward your pointer when it is curious.
-- **It answers touch, in its own voice.** A void swallows and answers with a deep tone. A strand rings at its track's pitch,
-  and its kin ring with it. The open flow chimes and forms a new eddy where you touched. Empty space gets a small chirp.
+- **Pillars:** one per limb. Their size follows how much that limb ate, their colour its brightness. Feeding makes them grow.
+- **Dust and light:** the dust is lit by one wandering light with true self-shadowing, so it has dark cores and bright rims.
+  Untrained, the entity is soft fog. Training sharpens it into sculpted forms.
+- **Stars:** one ignites inside the dust every 25 epochs and lights the cloud around it. Voids are cavities carved out of it.
+- **It hears.** Press ▶ on a track in the food list, or play anything on the canvas: the pillars swell with the bass,
+  the dust churns with the level, and the rims sparkle with the treble.
+- **It reverberates.** Every pillar emits waves at its limb's tempo. They cross and interfere, so the dust shows moving
+  standing patterns. Beats, touches and feeding send shock fronts that echo three times, and it rings on after sound stops.
+- **It behaves.** It drifts, breathes unevenly, and leans toward your pointer when it is curious.
+- **It answers touch, in its own voice.** A void flinches and answers with a deep tone. A pillar sings the track that lives
+  at the height you touched. The haze chimes. Empty space gets a chirp. Each sends a shock front through the dust.
+  **Drag** across it to push through the dust and bow it: a continuous voice whose pitch follows what you pass over.
   Untrained, the voice is noisy, detuned and short. Training makes it purer, richer and longer.
+
+The renderer picks the highest resolution that holds full frame rate on your machine (shown small in the top right).
 
 **Limbs.** Tracks that sound alike are grouped automatically (k-means on tempo, bass, brightness, dynamics and noise) and
 grow together as one limb. Each limb gets a description and its own trigger word, which goes into the training

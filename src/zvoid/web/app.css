@@ -318,3 +318,8 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 .creature-row .row-del:hover, .creature-row .row-del.armed { color: #ff5c9d; background: #2a0d1c; }
 .creature-row .row-del.armed { font-size: 10px; }
 #gym .danger.armed { color: #ff5c9d; border-color: #7a1f45 !important; }
+
+#gym-stage { background: #010104; }
+#gym::before { display: none; }
+
+#gym-fps { position: absolute; top: 12px; right: 14px; font: 9.5px var(--mono); color: #4d4a66; letter-spacing: .08em; pointer-events: none; }
