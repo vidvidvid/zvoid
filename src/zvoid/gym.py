@@ -67,7 +67,7 @@ def _view(c: dict) -> dict:
     if c["training"] and c["training"]["state"] == "running":
         tr = c["training"]
         tr["now"] = time.time()                           # lets the window animate smoothly between polls
-        if tr["stage"] in ("digest", "start"):
+        if tr["stage"] in ("digest", "start") and not tr.get("remote"):   # on the PC, _remote_count keeps this number
             tr["digested"] = len(list((_dir(slug) / "tensors").glob("*.pt")))
     return c
 
@@ -565,7 +565,7 @@ def train(slug: str, opt: dict, before=None) -> dict:
         proc = None if far else subprocess.Popen([str(py), "-u", str(ENGINES_DIR / "ace_step" / "gym.py"), str(_dir(slug)), json.dumps(run)],
                                                  stdout=subprocess.PIPE, stderr=log, text=True, bufsize=1, cwd=str(ROOT))
         _train.update(slug=slug, proc=proc, state="running", msg=f"reaching {far['name']}…" if far else "waking up…", stage="start", epoch=base, max_epochs=base + more,
-                      remote=far["name"] if far else "",
+                      remote=far["name"] if far else "", digested=0,
                       loss=None, step=0, error=None, started=time.time(), audio_secs=audio_secs, tracks=len(chosen), from_epoch=base,
                       epoch_t0=0, epoch_time=0, step0=0, stage_t0=time.time(), first_loss=None,
                       steps_per_epoch=max(1, -(-len(chosen) // (int(run.get("batch_size", 1)) * int(run.get("grad_accum", 4))))))
@@ -589,7 +589,20 @@ def _remote_session(slug: str, run: dict, far: dict, fresh: bool, log):
     except Exception as ex:
         _train.update(proc=None, state="error", error=f"Could not start on the PC: {ex}", msg="failed", stage="")
         return
+    threading.Thread(target=_remote_count, args=(slug, proc, far), daemon=True).start()
     _watch(slug, proc, far)
+
+
+def _remote_count(slug: str, proc, far: dict):
+    """While the PC turns tracks into training data, ask it now and then how many are done."""
+    while proc.poll() is None and _train.get("stage") in ("start", "digest"):
+        try:
+            n = _ps(far, f"(Get-ChildItem {far['dir']}\\app\\creatures\\{slug}\\tensors -Filter *.pt -ErrorAction SilentlyContinue | Measure-Object).Count", timeout=15).strip()
+            if n.isdigit():
+                _train["digested"] = int(n)
+        except Exception:
+            pass
+        time.sleep(4)
 
 
 def _watch(slug: str, proc, far: dict | None = None):
