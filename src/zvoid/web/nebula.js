@@ -39,6 +39,8 @@ uniform vec4 uLife;      // learned, growth, turbulence, kick
 uniform vec3 uLight, uKey, uAmb;
 uniform float uB, uFrame, uFine;
 uniform vec3 uEvP[51];    // energy arcs from outside: three jagged paths of 17 points each, re-struck by the app like lightning
+uniform vec3 uFil[72];    // filaments rooted on the body: eight threads of nine points each
+uniform vec4 uFilC[8];    // each one's colour and strength
 uniform vec4 uEvI[3];     // each arc's brightness, where its bead of light is along it, the flare where it lands, its tint
 uniform vec4 uTouch;     // xyz where the pointer is dragging, w strength
 uniform float uForm;     // 0 = cloud, 1 = fully formed (grows with training)
@@ -358,6 +360,21 @@ void main() {
       C += mix(mix(uKey, uAmb, fract(uEvI[k].w)), vec3(.84, .95, 1.), .55 - wide * .15) * g * ei * mix(1., T, .7);
     }
   }
+  for (int k = 0; k < 8; k++) {                // filaments: fine threads that grow out of the limbs' tips and spines, thick at the root, and sway
+    float fi = uFilC[k].w;
+    if (fi > 0.) {
+      float dm = 1e9, sm = 0.;
+      for (int i = 0; i < 8; i++) {
+        vec3 A = uFil[k * 9 + i], u = uFil[k * 9 + i + 1] - A, w0 = ro - A;
+        float a = dot(u, u), b = dot(u, rd), c = dot(u, w0), d = dot(rd, w0), sc = clamp((c - b * d) / max(a - b * b, 1e-5), 0., 1.), tr = sc * b - d;
+        vec3 dv = w0 + rd * tr - u * sc; float d2 = tr > 0. ? dot(dv, dv) : 1e9;
+        if (d2 < dm) { dm = d2; sm = (float(i) + sc) / 8.; }
+      }
+      float tp = 1. - sm * .86, wd = .00022 * tp * tp + .000008, pd = (sm - fract(uT * .2 + float(k) * .37) * 1.4) / .07, bead = exp(-pd * pd);
+      float g = wd / (dm + wd) * (.85 + bead * 1.4 + uAud.w * 1.4) * (1. - sm * .5) + exp(-dm * 170.) * .018 * tp;
+      C += mix(uFilC[k].rgb, vec3(.93, .9, .84), .4) * g * fi * mix(1., T, .8);
+    }
+  }
   for (int k = 0; k < 12; k++) {               // digesting: the tracks it has yet to eat drift around it as motes
     float fb = uFood[k].w;
     if (fb > 0.) {                               // each is a soft clump of its own dust drifting in, with a faint tail behind it
@@ -511,7 +528,7 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uTrait', 'uTrait2', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine', 'uEvP', 'uEvI']) NEB.U[n] = n;
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uTrait', 'uTrait2', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine', 'uEvP', 'uEvI', 'uFil', 'uFilC']) NEB.U[n] = n;
   NEB.gl = gl; NEB.nz = r;
 }
 /* Three off-screen targets at the render resolution: this frame, and two that take turns holding the running blend. */
@@ -687,7 +704,7 @@ function nebFrame(c, t, mouse) {
     const wF = .55 * trn, cf = rot([0, 0, 1]), mixN = [DN[0] * (1 - wF) + cf[0] * wF, DN[1] * (1 - wF) + cf[1] * wF, DN[2] * (1 - wF) + cf[2] * wF], ml = Math.hypot(...mixN) || 1; for (let k = 0; k < 3; k++) DN[k] = mixN[k] / ml;
     DU = [DN[1], -DN[0], 0]; const l2 = Math.hypot(...DU) || 1; DU = DU.map(v => v / l2); DV[0] = DN[1] * DU[2] - DN[2] * DU[1]; DV[1] = DN[2] * DU[0] - DN[0] * DU[2]; DV[2] = DN[0] * DU[1] - DN[1] * DU[0];
   }
-  gl.uniform3fv(U.uDiscN, DN); gl.uniform3fv(U.uDiscU, DU); gl.uniform3fv(U.uDiscV, DV); gl.uniform4f(U.uDisc, trn > .01 ? 1.42 : 1.8, Math.max(trn > .01 ? 1.78 : 0, 2.1 + nrings * .25), .13, nrings || trn > .01 ? 1 : 0); gl.uniform4fv(U.uRing, rings);
+  gl.uniform3fv(U.uDiscN, DN); gl.uniform3fv(U.uDiscU, DU); gl.uniform3fv(U.uDiscV, DV); gl.uniform4f(U.uDisc, trn > .01 ? 1.42 : 1.8, Math.max(trn > .01 ? 1.78 : 0, 2.1 + nrings * .25), .13, trn > .01 ? 1 : 0); gl.uniform4fv(U.uRing, new Float32Array(32));   // the loose orbiting threads are gone: see the filaments, which are rooted on the body
   // food motes: one per track (or per group of tracks) while it digests; each is drawn in and absorbed as it is eaten
   const food = new Float32Array(48), FS = fx.foodS || (fx.foodS = []);
   if (tr && (tr.stage === 'digest' || tr.stage === 'start')) {
@@ -756,6 +773,20 @@ function nebFrame(c, t, mouse) {
       ep.set(e.pts, i * 51); ei.set([Math.min(1, age / .06) * Math.min(1, (e.life - age) / .35) * (e.kd.soft ? .55 + .25 * Math.sin(age * 2.3) : .22 + .78 * Math.min(1, e.flash)), e.kd.soft ? (age * .7) % 1.5 : (t - e.last) / .14, Math.min(1.5, e.flash), e.hue * .999 + e.kd.wide], i * 4);   // a tendril carries slow beads of light inward, over and over
     });
     gl.uniform3fv(U.uEvP, ep); gl.uniform4fv(U.uEvI, ei);
+    // filaments: threads that grow out of the body itself, first from the limbs' tips, then from points along their spines. More appear as it trains.
+    const fp = new Float32Array(216), fc = new Float32Array(32), NF = Math.min(8, nrings);
+    for (let k = 0; k < NF; k++) {
+      const j = k % K, round = Math.floor(k / K), sl = N.slots[j]; if (!sl || sl.w < .3) continue;
+      const e = { j, hh: round === 0 ? 1 : round === 1 && j ? 1 : [.62, .36, .8][round % 3], mx: j && n ? (round % 2 ? -1 : 1) : 1 }, P = land(e), ax = [sl.a[0] * e.mx, sl.a[1], sl.a[2]];
+      let dir = ax.slice();
+      if (e.hh < 1) { const sv = nvec(t * .03, k * 31 + 7), c0 = [ax[1] * sv[2] - ax[2] * sv[1], ax[2] * sv[0] - ax[0] * sv[2], ax[0] * sv[1] - ax[1] * sv[0]], cl = Math.hypot(...c0) || 1; dir = [c0[0] / cl + ax[0] * .35, c0[1] / cl + ax[1] * .35, c0[2] / cl + ax[2] * .35]; }   // from the side of a limb it grows outward, not along it
+      const seg = sl.len * (.13 + .09 * d.growth) * (.8 + .4 * ((k * .618) % 1)) * (e.hh < 1 ? .8 : 1);
+      fp.set(P, k * 27);
+      for (let i = 1; i < 9; i++) { const w = nvec(t * .11 + i * .33, k * 17 + 3), bend = .16 + i * .075 + lv * .5; dir = [dir[0] + w[0] * bend, dir[1] + w[1] * bend - .02 * i, dir[2] + w[2] * bend]; const dl = Math.hypot(...dir) || 1; dir = dir.map(v => v / dl);
+        P[0] += dir[0] * seg; P[1] += dir[1] * seg; P[2] += dir[2] * seg; fp.set(P, k * 27 + i * 3); }
+      fc.set([sl.col[0], sl.col[1], sl.col[2], Math.min(1, sl.w) * (.8 + sl.ring * .8) * clamp(nrings - k, 0, 1)], k * 4);
+    }
+    gl.uniform3fv(U.uFil, fp); gl.uniform4fv(U.uFilC, fc);
   }
   const D = NEB.drag; D.s += ((D.on ? 1 : 0) - D.s) * Math.min(1, dt * (D.on ? 9 : 2.2)); gl.uniform4f(U.uTouch, D.p[0], D.p[1], D.p[2], D.s < .01 ? 0 : D.s);
   gl.uniform1f(U.uFine, NEB.fine == null ? .42 : NEB.fine); gl.uniform3fv(U.uLight, light); gl.uniform3fv(U.uKey, key); gl.uniform3fv(U.uAmb, amb);

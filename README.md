@@ -89,7 +89,7 @@ To delete a creature, press the × on its row or *delete creature* in the gym (c
   its back. Where it is being built it glows white-hot, and the readout says which part is in progress. The frame is
   dark and glossy, its seams glow and carry the sound, and the whole entity is mirrored across a midline (one central
   spine, the other limbs in pairs). The dust thins to a veil as soon as the spine exists, and crystallises into a lattice
-  of thin sheets. The voids become faceted cavities, and arcs begin to orbit it, one ring per limb.
+  of thin sheets. The voids become faceted cavities, and fine filaments grow out of it: first from the tips of its limbs, then from points along their spines. They are thick at the root, taper, sway, and carry beads of light outward. More appear as it trains.
 - **It grows like a fractal.** Every limb sprouts branches, and branches sprout smaller ones. Each has its own life
   cycle: it builds outward with a glowing tip, holds, then crumbles into dust and regrows elsewhere, so something is
   always being made and unmade. Branching gets deeper with training.
