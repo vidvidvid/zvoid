@@ -39,7 +39,7 @@ uniform vec4 uLife;      // learned, growth, turbulence, kick
 uniform vec3 uLight, uKey, uAmb;
 uniform float uB, uFrame, uFine;
 uniform vec3 uEvP[51];    // energy arcs from outside: three jagged paths of 17 points each, re-struck by the app like lightning
-uniform vec3 uFil[72];    // filaments rooted on the body: eight threads of nine points each
+uniform vec3 uFil[136];   // filaments rooted on the body: eight threads of seventeen points each
 uniform vec4 uFilC[8];    // each one's colour and strength
 uniform vec4 uEvI[3];     // each arc's brightness, where its bead of light is along it, the flare where it lands, its tint
 uniform vec4 uTouch;     // xyz where the pointer is dragging, w strength
@@ -178,6 +178,11 @@ float bodyL(vec3 pa, vec3 ba, float r0) {
   float gap = r0 * mix(.74, .34, gTr2.x), zc = (fract(z / gap + .5) - .5) * gap, rr = r0 * (.98 - .34 * hh) * (1. + .08 * sin(z * 2.3 / r0));   // ribs: a cage around the cloud, arcs that close as they finish
   float open = (1. - rB) * 1.5, th = r0 * (.028 + .034 * gTr.w) * smoothstep(-.9 + open, .5 + open, cos(phi)) * min(1., rB * 3.);
   d = smin(d, length(vec2(rho - rr, zc)) - th + (th > 1e-4 ? 0. : 1.), r0 * .07);
+  if (rB > .001) {                                                                           // cilia: a fringe of fine hairs on every rib, a row on each flank, beating in a wave that runs along the limb
+    float ci = floor(z / gap + .5), beat = sin(uT * 1.3 - ci * .7 + gTr2.x * 3.), Lh = r0 * (.34 + .2 * gTr.y), rq = clamp(rho - rr, 0., Lh), fr = rq / Lh;
+    float hd = length(vec3(rho - rr - rq, zc - beat * gap * .42 * fr * fr, abs(abs(phi) - 1.45) * rho)) - r0 * .017 * (1. - fr * .8) * min(1., rB * 3.);
+    d = smin(d, hd, r0 * .03);
+  }
   float tw = phi - z * 2.2 / r0, a2 = mod(tw + 1.0472, 2.0944) - 1.0472, rc = r0 * .55 * taper, tc = r0 * .04 * cB;   // cables: three helices
   d = smin(d, length(vec2(rho - rc, a2 * rc)) - tc + (tc > 1e-4 ? 0. : 1.), r0 * .05);
   if (pB > .001) {                                                                           // armour: segmented plates over its back
@@ -363,16 +368,20 @@ void main() {
   for (int k = 0; k < 8; k++) {                // filaments: fine threads that grow out of the limbs' tips and spines, thick at the root, and sway
     float fi = uFilC[k].w; bool sinew = fi > 1.5; if (sinew) fi -= 2.;
     if (fi > 0.) {
-      float dm = 1e9, sm = 0.;
-      for (int i = 0; i < 8; i++) {
-        vec3 A = uFil[k * 9 + i], u = uFil[k * 9 + i + 1] - A, w0 = ro - A;
+      float dm = 1e9, sm = 0., fk = float(k);
+      for (int i = 0; i < 16; i++) {
+        vec3 A = uFil[k * 17 + i], u = uFil[k * 17 + i + 1] - A, w0 = ro - A;
         float a = dot(u, u), b = dot(u, rd), c = dot(u, w0), d = dot(rd, w0), sc = clamp((c - b * d) / max(a - b * b, 1e-5), 0., 1.), tr = sc * b - d;
         vec3 dv = w0 + rd * tr - u * sc; float d2 = tr > 0. ? dot(dv, dv) : 1e9;
-        if (d2 < dm) { dm = d2; sm = (float(i) + sc) / 8.; }
+        if (d2 < dm) { dm = d2; sm = (float(i) + sc) / 16.; }
       }
-      float tp = sinew ? .5 + .5 * abs(1. - 2. * sm) : 1. - sm * .86, wd = .0003 * tp * tp + .000008, pd = (sm - fract(uT * .2 + float(k) * .37) * 1.4) / .07, bead = exp(-pd * pd);
-      float g = wd / (dm + wd) * (.85 + bead * 1.4 + uAud.w * 1.4) * (sinew ? 1. : 1. - sm * .5) + exp(-dm * 170.) * .018 * tp;
-      C += mix(uFilC[k].rgb, vec3(.93, .9, .84), .4) * g * fi * mix(1., T, .8);
+      float tp = sinew ? .5 + .5 * abs(1. - 2. * sm) : 1. - sm * .8;
+      float swell = pow(.5 + .5 * sin(sm * 19. - uT * 1.7 + fk * 2.1), 3.);                       // slow swellings travel along it, like something being swallowed
+      float knot = sinew ? pow(max(0., sin(sm * 47. + fk)), 10.) : smoothstep(.93, 1., sm) * 2.2;   // a sinew is beaded like a wet web; a tendril ends in a small lit bulb
+      float wd = (.00026 * tp * tp + .000008) * (1. + swell * 1.3 + knot * 1.6);
+      float g = wd / (dm + wd) * (.7 + swell * .6 + knot * 1.1 + uAud.w * 1.4) + exp(-dm * 90.) * .03 * tp * (1. + swell);   // and a faint wet sheath around the core
+      vec3 fcol = mix(mix(uFilC[k].rgb, vec3(.93, .9, .84), .25 + .45 * (sinew ? 1. - tp : sm)), vec3(1., .96, .9), min(1., knot * .5));
+      C += fcol * g * fi * mix(1., T, .8);
     }
   }
   for (int k = 0; k < 12; k++) {               // digesting: the tracks it has yet to eat drift around it as motes
@@ -775,7 +784,7 @@ function nebFrame(c, t, mouse) {
     gl.uniform3fv(U.uEvP, ep); gl.uniform4fv(U.uEvI, ei);
     // filaments: threads that belong to the body. Short antennae leave through the limbs' tips, and sinews are strung between two parts of it
     // (a side limb and the spine, or a limb and its mirror), fixed at both ends. More appear as it trains.
-    const fp = new Float32Array(216), fc = new Float32Array(32), NF = Math.min(8, nrings), specs = [];
+    const fp = new Float32Array(408), fc = new Float32Array(32), NF = Math.min(8, nrings), specs = [], fil = fx.fil || (fx.fil = []), startle = L.startle || 0;
     for (let r = 0; r < 3 && specs.length < 8; r++) for (let j = 0; j < K && specs.length < 8; j++) {
       if (r === 0) { specs.push({ a: { j, hh: .5, mx: 1 } }); if (j && n) specs.push({ a: { j, hh: .5, mx: -1 } }); }
       else if (j > 0) specs.push({ a: { j, hh: .8, mx: r === 1 ? 1 : -1 }, b: { j: 0, hh: Math.min(.9, .3 + .14 * j), mx: 1 } });
@@ -783,17 +792,27 @@ function nebFrame(c, t, mouse) {
     }
     specs.slice(0, NF).forEach((sp, k) => {
       const sl = N.slots[sp.a.j]; if (!sl || sl.w < .3) return;
-      const P = land(sp.a), sway = nvec(t * .1, k * 17 + 3);
-      if (sp.b) {                                                                                   // a sinew: fixed at both ends, bowed outward, swaying in the middle
-        const Q = land(sp.b), L = Math.hypot(Q[0] - P[0], Q[1] - P[1], Q[2] - P[2]), mid = [(P[0] + Q[0]) / 2, (P[1] + Q[1]) / 2, (P[2] + Q[2]) / 2], ml = Math.hypot(...mid) || 1, bow = [0, 1, 2].map(c => (mid[c] / ml * .2 + sway[c] * .14 * (1 + lv * 2)) * L);
-        for (let i = 0; i < 9; i++) { const u = i / 8, h = Math.sin(Math.PI * u); fp.set([P[0] + (Q[0] - P[0]) * u + bow[0] * h, P[1] + (Q[1] - P[1]) * u + bow[1] * h, P[2] + (Q[2] - P[2]) * u + bow[2] * h], k * 27 + i * 3); }
-      } else {                                                                                      // an antenna: up the limb's own axis, out through its end, then a short curl
-        const ax = [sl.a[0] * sp.a.mx, sl.a[1], sl.a[2]], rf = Math.abs(ax[1]) < .9 ? [0, 1, 0] : [1, 0, 0], u0 = [ax[1] * rf[2] - ax[2] * rf[1], ax[2] * rf[0] - ax[0] * rf[2], ax[0] * rf[1] - ax[1] * rf[0]], ul = Math.hypot(...u0) || 1, u = u0.map(v => v / ul), v = [ax[1] * u[2] - ax[2] * u[1], ax[2] * u[0] - ax[0] * u[2], ax[0] * u[1] - ax[1] * u[0]];
-        const seg = sl.len * (.07 + .04 * d.growth) * (.8 + .4 * ((k * .618) % 1)), ph = k * 2.4 + t * .06 + sway[0] * 1.5, curl = .2 + .09 * Math.sin(t * .35 + k * 1.7) + sway[1] * .12 + lv * .25;   // it curls like a fern tip, and slowly curls and uncurls
-        fp.set(P, k * 27);
-        for (let i = 1; i < 9; i++) { const th = i === 1 ? 0 : Math.pow(i - 1, 1.3) * curl * .85, sg = i === 1 ? sl.len * .42 : seg * (1.2 - .08 * i), c = Math.cos(th), sn = Math.sin(th), cp = Math.cos(ph), spn = Math.sin(ph);
-          for (let q = 0; q < 3; q++) P[q] += (ax[q] * c + (u[q] * cp + v[q] * spn) * sn) * sg;
-          fp.set(P, k * 27 + i * 3); }
+      const mxs = sp.a.mx, ks = sp.a.j * 7 + (sp.b ? 3 + sp.b.j : 0), P = land(sp.a), sw0 = nvec(t * .1, ks * 17 + 3), sway = [sw0[0] * mxs, sw0[1], sw0[2]], tg = new Float32Array(27);   // a limb and its mirror move as one: same motion, reflected
+      if (sp.b) {                                                                                   // a sinew: fixed at both ends, bowed outward. It breathes, and it twangs when a beat or a touch lands.
+        const Q = land(sp.b), Ln = Math.hypot(Q[0] - P[0], Q[1] - P[1], Q[2] - P[2]), mid = [(P[0] + Q[0]) / 2, (P[1] + Q[1]) / 2, (P[2] + Q[2]) / 2], ml = Math.hypot(...mid) || 1, slack = .17 + .06 * Math.sin(t * .31 + ks * 1.3) - .08 * startle;
+        const bow = [0, 1, 2].map(c => (mid[c] / ml * slack + sway[c] * .15 * (1 + lv * 2)) * Ln), tw = (kick * .07 + startle * .05) * Ln, s20 = nvec(t * .07, ks * 29 + 11), s2 = [s20[0], s20[1] * mxs, s20[2]];
+        for (let i = 0; i < 9; i++) { const u = i / 8, h = Math.sin(Math.PI * u), h2 = Math.sin(2 * Math.PI * u) * (Math.sin(t * 27 + ks) * tw + s2[0] * .05 * Ln), h3 = Math.sin(3 * Math.PI * u) * Math.sin(t * 41 + ks * 2) * tw * .5;
+          tg.set([P[0] + (Q[0] - P[0]) * u + bow[0] * h + s2[1] * h2 + sway[2] * h3, P[1] + (Q[1] - P[1]) * u + bow[1] * h + h2 + h3, P[2] + (Q[2] - P[2]) * u + bow[2] * h + s2[2] * h2], i * 3); }
+      } else {                                                                                      // a tendril: out through the limb's end, then a curl. It reaches out and draws back, and snaps tight when startled.
+        const ax = [sl.a[0], sl.a[1], sl.a[2]], rf = Math.abs(ax[1]) < .9 ? [0, 1, 0] : [1, 0, 0], u0 = [ax[1] * rf[2] - ax[2] * rf[1], ax[2] * rf[0] - ax[0] * rf[2], ax[0] * rf[1] - ax[1] * rf[0]], ul = Math.hypot(...u0) || 1, u = u0.map(v => v / ul), v = [ax[1] * u[2] - ax[2] * u[1], ax[2] * u[0] - ax[0] * u[2], ax[0] * u[1] - ax[1] * u[0]];
+        const reach = .62 + .38 * Math.sin(t * .23 + ks * 2.1) - .3 * startle, seg = sl.len * (.07 + .04 * d.growth) * (.8 + .4 * ((ks * .618) % 1)) * Math.max(.3, reach);
+        const ph = ks * 2.4 + t * .06 + sw0[0] * 1.5, curl = .17 + .1 * Math.sin(t * .35 + ks * 1.7) + sway[1] * .14 + startle * .45 + kick * .12 - lv * .1;
+        tg.set(P, 0);
+        for (let i = 1; i < 9; i++) { const th = i === 1 ? 0 : Math.pow(i - 1, 1.3) * curl * .85, sg = i === 1 ? sl.len * .42 : seg * (1.2 - .08 * i), c = Math.cos(th), sn = Math.sin(th), pw = ph + sway[2] * .25 * i, cp = Math.cos(pw), spn = Math.sin(pw);
+          for (let q = 0; q < 3; q++) P[q] += (ax[q] * c + (u[q] * cp + v[q] * spn) * sn) * sg * (q === 0 ? mxs : 1);
+          tg.set(P, i * 3); }
+      }
+      // it has weight: the root follows the body at once, the rest trails behind and catches up, the far end last
+      let st = fil[k]; if (!st || Math.hypot(st[0] - tg[0], st[1] - tg[1], st[2] - tg[2]) > 1.2) st = fil[k] = tg.slice();
+      for (let i = 0; i < 9; i++) { const far = sp.b ? Math.sin(Math.PI * i / 8) : i / 8, rate = Math.min(1, dt * (16 - 12.5 * far)); for (let q = 0; q < 3; q++) st[i * 3 + q] += (tg[i * 3 + q] - st[i * 3 + q]) * (far < .01 ? 1 : rate); }
+      for (let i = 0; i < 17; i++) {                                                               // drawn as a smooth curve through those nine points
+        const f = i / 2, i1 = Math.min(7, Math.floor(f)), u = f - i1, i0 = Math.max(0, i1 - 1), i2 = i1 + 1, i3 = Math.min(8, i1 + 2);
+        for (let q = 0; q < 3; q++) { const p0 = st[i0 * 3 + q], p1 = st[i1 * 3 + q], p2 = st[i2 * 3 + q], p3 = st[i3 * 3 + q]; fp[k * 51 + i * 3 + q] = .5 * (2 * p1 + (p2 - p0) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u * u + (3 * p1 - p0 - 3 * p2 + p3) * u * u * u); }
       }
       fc.set([sl.col[0], sl.col[1], sl.col[2], Math.min(1, sl.w) * (.8 + sl.ring * .8) * clamp(nrings - k, 0, 1) + (sp.b ? 2 : 0)], k * 4);
     });
