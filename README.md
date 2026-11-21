@@ -189,6 +189,21 @@ estimate before you start, timed on your own Mac after the first epoch. For big 
 *train on at most N tracks* and it picks the most typical tracks of every limb. Stopping keeps the last checkpoint,
 and a paused creature is already usable.
 
+**Training on a second machine.** If a Windows PC with an Nvidia card is on your network, the vivarium can train
+there instead: on an RTX 4080 an epoch takes seconds instead of minutes, and the Mac's GPU stays free for the creature.
+Set it up once:
+
+1. On the PC, turn on OpenSSH Server and add your Mac's public key, so `ssh user@pc` works without a password.
+   Keep it on your home network; do not forward port 22 to the internet.
+2. Copy `scripts/remote/` to the PC and run `powershell -ExecutionPolicy Bypass -File setup.ps1`. It installs uv,
+   ACE-Step 1.5 and the model into `%USERPROFILE%\zvoid` (about 25 GB) and touches nothing else.
+3. On the Mac, create `remote.json` in the project folder (it is not committed):
+   `{"host": "10.0.1.10", "user": "me", "key": "~/.ssh/id_ed25519", "name": "PC · RTX 4080"}`
+
+The training panel then shows **train on: this Mac / PC**. Choosing the PC sends the tracks it does not have yet and
+the creature's newest checkpoint, trains there (in bf16, which Nvidia's attention code requires), streams progress into
+the same readout and living view, and brings the result back when it finishes or when you press stop.
+
 Creatures live in `creatures/<name>/` (food, checkpoints, the final adapter and `creature.json`).
 That folder is not committed, so your music and adapters stay on your machine.
 

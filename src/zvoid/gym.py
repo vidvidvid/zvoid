@@ -401,18 +401,134 @@ def unfeed(slug: str, name: str) -> dict:
     return _view(c)
 
 
+# ---- a second machine: train on a PC with an Nvidia card, over SSH ----------------------------
+# remote.json in the project folder (never committed) says where it is:
+#   {"host": "10.0.1.10", "user": "me", "key": "~/.ssh/zvoid_pc", "dir": "zvoid", "name": "PC · RTX 4080"}
+# The PC needs the folder set up once (uv, ACE-Step, the model); see scripts/remote/.
+REMOTE_FILE = ROOT / "remote.json"
+_remote_seen = {"t": 0.0, "status": None}
+
+
+def remote() -> dict | None:
+    try:
+        r = json.loads(REMOTE_FILE.read_text())
+        return dict(r, dir=r.get("dir") or "zvoid", name=r.get("name") or r["host"], key=str(Path(r.get("key", "~/.ssh/id_ed25519")).expanduser()))
+    except Exception:
+        return None
+
+
+def _ssh_base(r: dict) -> list[str]:
+    return ["ssh", "-i", r["key"], "-o", "BatchMode=yes", "-o", "ConnectTimeout=6", "-o", "LogLevel=ERROR", "-o", "ServerAliveInterval=20", f"{r['user']}@{r['host']}"]
+
+
+def _ps(r: dict, script: str, timeout: float = 60) -> str:
+    """Run one line of PowerShell on the PC and return what it printed."""
+    out = subprocess.run(_ssh_base(r) + ["powershell -NoProfile -Command \"" + script.replace('"', "'") + "\""], capture_output=True, text=True, timeout=timeout)
+    if out.returncode != 0:
+        raise RuntimeError((out.stderr or out.stdout or "the PC did not answer").strip()[-300:])
+    return out.stdout
+
+
+def remote_status(fresh: bool = False) -> dict:
+    r = remote()
+    if not r:
+        return {"configured": False}
+    if not fresh and _remote_seen["status"] and time.time() - _remote_seen["t"] < 25:
+        return _remote_seen["status"]
+    st = {"configured": True, "name": r["name"], "host": r["host"], "reachable": False, "gpu": ""}
+    try:
+        out = subprocess.run(_ssh_base(r) + ["nvidia-smi --query-gpu=name,memory.total --format=csv,noheader"], capture_output=True, text=True, timeout=9)
+        if out.returncode == 0 and out.stdout.strip():
+            st.update(reachable=True, gpu=out.stdout.strip().splitlines()[0])
+    except Exception:
+        pass
+    _remote_seen.update(t=time.time(), status=st)
+    return st
+
+
+def _tar_to(r: dict, local_dir: Path, names: list[str], remote_dir: str):
+    """Send files or folders to the PC (links are followed, so linked tracks arrive as real files)."""
+    a = subprocess.Popen(["tar", "-chf", "-", "-C", str(local_dir), *names], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    b = subprocess.run(_ssh_base(r) + [f"tar -xf - -C {remote_dir}"], stdin=a.stdout, capture_output=True, text=True)
+    a.wait()
+    if a.returncode or b.returncode:
+        raise RuntimeError("could not send files to the PC: " + (b.stderr or "").strip()[-200:])
+
+
+def _remote_prepare(slug: str, run: dict, r: dict, fresh: bool):
+    """Mirror what this session needs onto the PC: the runner, the tracks, the newest checkpoint and the options."""
+    base, d = f"{r['dir']}\\app", _dir(slug)
+    cdir = f"{base}\\creatures\\{slug}"
+    _ps(r, f"New-Item -ItemType Directory -Force -Path {base}\\engines\\ace_step, {cdir}\\food | Out-Null; Remove-Item -Recurse -Force {cdir}\\lora -ErrorAction SilentlyContinue; "
+           f"New-Item -ItemType Directory -Force -Path {cdir}\\lora\\checkpoints | Out-Null")
+    _tar_to(r, ENGINES_DIR / "ace_step", ["gym.py", "breed.py"], f"{base}\\engines\\ace_step")
+    _tar_to(r, ROOT / "scripts" / "remote", ["run_gym.ps1"], base)
+    have = {}
+    for line in _ps(r, f"Get-ChildItem {cdir}\\food | ForEach-Object {{ $_.Name + '|' + $_.Length }}").splitlines():
+        if "|" in line:
+            n, _, sz = line.strip().rpartition("|")
+            have[n] = int(sz or 0)
+    need = [n for n in run["only"] if (d / "food" / n).exists() and have.get(n) != (d / "food" / n).stat().st_size]
+    if need:
+        _train.update(msg=f"sending {len(need)} track{'s' if len(need) != 1 else ''} to {r['name']}…")
+        _tar_to(r, d / "food", need, f"{cdir}\\food")
+    if not fresh:
+        cps = [(int(p.name.split("_")[1]), p) for p in (d / "lora" / "checkpoints").glob("epoch_*") if p.name.split("_")[1].isdigit()]
+        if cps:
+            _train.update(msg=f"sending what it has learned so far to {r['name']}…")
+            _tar_to(r, d / "lora" / "checkpoints", [max(cps)[1].name], f"{cdir}\\lora\\checkpoints")
+    tmp = d / "opt.remote.json"
+    tmp.write_text(json.dumps(run, ensure_ascii=False), encoding="utf-8")
+    _tar_to(r, d, [tmp.name], cdir)
+    _ps(r, f"Move-Item -Force {cdir}\\{tmp.name} {cdir}\\opt.json")
+    tmp.unlink(missing_ok=True)
+
+
+def _remote_fetch(slug: str, r: dict):
+    """Bring back the newest checkpoint and the finished adapter, then leave only that checkpoint on the PC."""
+    cdir, lora = f"{r['dir']}\\app\\creatures\\{slug}", _dir(slug) / "lora"
+    names = [x.strip() for x in _ps(r, f"Get-ChildItem {cdir}\\lora\\checkpoints -Directory | ForEach-Object {{ $_.Name }}").splitlines() if x.strip().startswith("epoch_")]
+    cps = sorted((int(n.split("_")[1]), n) for n in names if n.split("_")[1].isdigit())
+    has_final = "yes" in _ps(r, f"if (Test-Path {cdir}\\lora\\final\\adapter_config.json) {{ 'yes' }}")
+    want = (["final"] if has_final else []) + ([f"checkpoints/{cps[-1][1]}"] if cps else [])
+    if not want:
+        return None
+    (lora / "checkpoints").mkdir(parents=True, exist_ok=True)
+    if has_final and (lora / "final").exists():
+        shutil.rmtree(lora / "final")
+    a = subprocess.Popen(_ssh_base(r) + [f"tar -cf - -C {cdir}\\lora " + " ".join(want)], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    b = subprocess.run(["tar", "-xf", "-", "-C", str(lora)], stdin=a.stdout, capture_output=True, text=True)
+    a.wait()
+    if a.returncode or b.returncode:
+        raise RuntimeError("could not bring the result back from the PC")
+    for _, n in cps[:-1]:
+        _ps(r, f"Remove-Item -Recurse -Force {cdir}\\lora\\checkpoints\\{n}")
+    return cps[-1][0] if cps else None
+
+
+def _remote_kill(r: dict):
+    try:
+        _ps(r, "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'gym.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }", timeout=20)
+    except Exception:
+        pass
+
+
 # ---- training --------------------------------------------------------------
 def train(slug: str, opt: dict, before=None) -> dict:
     c = _load(slug)
     if not c["food"]:
         raise RuntimeError("Feed the creature some audio first.")
     py = ENVS_DIR / "ace_step" / "bin" / "python"
-    if not (ENVS_DIR / "ace_step" / ".zvoid-installed").exists():
+    far = remote() if opt.get("where") == "pc" else None
+    if opt.get("where") == "pc":
+        if not far or not remote_status(True).get("reachable"):
+            raise RuntimeError("The PC is not reachable right now. Check that it is on and on the same network, or train on this Mac.")
+    elif not (ENVS_DIR / "ace_step" / ".zvoid-installed").exists():
         raise RuntimeError("The ACE-Step engine isn't installed yet. Install it from “engines” first.")
     with _lock:
         if _train["state"] == "running":
             raise RuntimeError(f"“{_train['slug']}” is training right now. One creature at a time.")
-        if before:
+        if before and not far:
             before()                                  # free the generation model's memory
         more = max(1, int(opt.get("epochs", 100)))
         fresh = bool(opt.get("fresh"))
@@ -437,21 +553,46 @@ def train(slug: str, opt: dict, before=None) -> dict:
                    only=[f["name"] for f in chosen], captions={f["name"]: auto_caption(c, f) for f in chosen},
                    save_every=max(1, min(int(opt.get("save_every", 5)), more)))
         run.pop("epochs", None)
+        run.pop("where", None)
+        if far:                                        # an Nvidia card trains in half precision; epochs are quick there, so save less often
+            want, end = max(5, more // 4), base + more   # checkpoints land on multiples, so pick one that also lands on the last epoch
+            fits = [d for d in range(max(2, want // 2), want * 2 + 1) if end % d == 0]
+            run.update(precision="bf16", device="cuda", save_every=min(fits, key=lambda d: abs(d - want)) if fits else want)
         c["sessions"] = c.get("sessions", 0) + 1
         c["settings"] = {k: run[k] for k in ("rank", "lr", "dropout", "max_duration") if k in run}
         _save(c)
         log = open(_dir(slug) / "train.log", "a")
-        proc = subprocess.Popen([str(py), "-u", str(ENGINES_DIR / "ace_step" / "gym.py"), str(_dir(slug)), json.dumps(run)],
-                                stdout=subprocess.PIPE, stderr=log, text=True, bufsize=1, cwd=str(ROOT))
-        _train.update(slug=slug, proc=proc, state="running", msg="waking up…", stage="start", epoch=base, max_epochs=base + more,
+        proc = None if far else subprocess.Popen([str(py), "-u", str(ENGINES_DIR / "ace_step" / "gym.py"), str(_dir(slug)), json.dumps(run)],
+                                                 stdout=subprocess.PIPE, stderr=log, text=True, bufsize=1, cwd=str(ROOT))
+        _train.update(slug=slug, proc=proc, state="running", msg=f"reaching {far['name']}…" if far else "waking up…", stage="start", epoch=base, max_epochs=base + more,
+                      remote=far["name"] if far else "",
                       loss=None, step=0, error=None, started=time.time(), audio_secs=audio_secs, tracks=len(chosen), from_epoch=base,
                       epoch_t0=0, epoch_time=0, step0=0, stage_t0=time.time(), first_loss=None,
                       steps_per_epoch=max(1, -(-len(chosen) // (int(run.get("batch_size", 1)) * int(run.get("grad_accum", 4))))))
-    threading.Thread(target=_watch, args=(slug, proc), daemon=True).start()
+    if far:
+        threading.Thread(target=_remote_session, args=(slug, run, far, fresh, log), daemon=True).start()
+    else:
+        threading.Thread(target=_watch, args=(slug, proc), daemon=True).start()
     return get(slug)
 
 
-def _watch(slug: str, proc):
+def _remote_session(slug: str, run: dict, far: dict, fresh: bool, log):
+    """One training session on the PC: send what it needs, run it there, read its progress, bring the result back."""
+    try:
+        _remote_prepare(slug, run, far, fresh)
+        if _train.get("state") == "stopping":
+            _train.update(proc=None, state="idle", error=None, msg="stopped", stage="")
+            return
+        proc = subprocess.Popen(_ssh_base(far) + [f"powershell -NoProfile -ExecutionPolicy Bypass -File {far['dir']}\\app\\run_gym.ps1 -Slug {slug}"],
+                                stdout=subprocess.PIPE, stderr=log, text=True, bufsize=1)
+        _train.update(proc=proc)
+    except Exception as ex:
+        _train.update(proc=None, state="error", error=f"Could not start on the PC: {ex}", msg="failed", stage="")
+        return
+    _watch(slug, proc, far)
+
+
+def _watch(slug: str, proc, far: dict | None = None):
     err = None
     for line in proc.stdout:
         try:
@@ -475,8 +616,8 @@ def _watch(slug: str, proc):
                 c["history"].append([int(m["epoch"]), round(float(m["loss"]), 5)])
                 c["history"] = c["history"][-4000:]
                 if m.get("epoch_time") and _train.get("audio_secs"):   # how fast this Mac really trains, for honest estimates
-                    pace = float(m["epoch_time"]) / _train["audio_secs"]
-                    c["pace"] = round(pace if not c.get("pace") else c["pace"] * .7 + pace * .3, 5)
+                    pace, key = float(m["epoch_time"]) / _train["audio_secs"], "pace_pc" if far else "pace"
+                    c[key] = round(pace if not c.get(key) else c[key] * .7 + pace * .3, 5)
                 _save(c)
                 _train.update(epoch=int(m["epoch"]), loss=m["loss"], epoch_t0=time.time(), step0=_train["step"],
                               epoch_time=float(m.get("epoch_time") or 0) or _train["epoch_time"])
@@ -487,15 +628,30 @@ def _watch(slug: str, proc):
     code = proc.wait()
     stopped = _train.get("state") == "stopping"
     if code != 0 and not stopped and not err:
-        err = "Training stopped unexpectedly. See train.log in the creature's folder."
+        err = "Training stopped unexpectedly. See train.log in the creature's folder." if not far else "Training on the PC stopped unexpectedly (see train_err.log in the creature's folder on the PC)."
+    if far:                                            # whatever happened, bring back what was saved there
+        try:
+            _train.update(msg=f"bringing it back from {far['name']}…")
+            got = _remote_fetch(slug, far)
+            c = _load(slug)
+            if got is not None and (stopped or err):   # an unfinished session counts up to its last saved checkpoint
+                c["epochs"] = got
+                c["history"] = [h for h in c["history"] if h[0] <= got]
+                _save(c)
+        except Exception as ex:
+            err = err or f"Trained on the PC, but could not bring the result back: {ex}"
     _train.update(proc=None, state="idle" if (stopped or not err) else "error", error=None if stopped else err,
                   msg="stopped" if stopped else ("failed" if err else "training complete"), stage="")
 
 
 def stop(slug: str):
-    if _train["slug"] == slug and _train["proc"]:
+    if _train["slug"] == slug and _train["state"] == "running":
         _train["state"] = "stopping"
-        _train["proc"].terminate()
+        far = remote() if _train.get("remote") else None
+        if far:
+            _remote_kill(far)                          # ending the connection alone would leave it running on the PC
+        if _train["proc"]:
+            _train["proc"].terminate()
 
 
 def shutdown():

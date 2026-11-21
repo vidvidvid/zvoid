@@ -323,17 +323,18 @@ function gymRender() {
   st.textContent = tr ? (tr.state === 'error' ? '✖ ' + tr.error : tr.msg) : (c.trained ? 'usable now: pick it in an ace-step module as “creature”.' : c.food.length ? 'fed, not trained yet.' : 'hungry. drop audio on it.');
   st.className = tr && tr.state === 'error' ? 'err' : '';
   const bar = $('#gym-bar i'); if (bar) bar.style.width = running && tr.max_epochs ? clamp((tr.epoch - tr.from_epoch) / Math.max(1, tr.max_epochs - tr.from_epoch) * 100, 2, 100) + '%' : '0';
-  if (running && tr.stage === 'train' && c.pace && tr.audio_secs) st.textContent += ` · about ${dur((tr.max_epochs - tr.epoch) * (c.pace * tr.audio_secs + tr.tracks * .1))} left`;
+  const pace = tr && tr.remote ? c.pace_pc : c.pace;
+  if (running && tr.stage === 'train' && pace && tr.audio_secs) st.textContent += ` · about ${dur((tr.max_epochs - tr.epoch) * (pace * tr.audio_secs + tr.tracks * .1))} left`;
   const sp = $('#gym-spark'); if (sp) spark(sp, c.history.map(h => h[1]));
   const box = $('#gym-train');
   if (box) {
     const on = !!(tr && tr.state === 'running'); box.hidden = !on;
     if (on) {
       const ph = tr.stage === 'train' ? 2 : tr.stage === 'load' ? 1 : 0, total = Math.max(1, tr.max_epochs - tr.from_epoch), done = tr.epoch - tr.from_epoch, el = Math.max(0, (tr.now || 0) - tr.started);
-      const per = tr.epoch_time || (c.pace ? c.pace * tr.audio_secs + tr.tracks * .1 : 0), sessH = c.history.filter(x => x[0] > tr.from_epoch), drop = sessH.length >= 3 ? (sessH[0][1] - sessH[sessH.length - 1][1]) / sessH[0][1] * 100 : null;   // a trend only once there are a few epochs to compare
+      const per = tr.epoch_time || (pace ? pace * tr.audio_secs + tr.tracks * .1 : 0), sessH = c.history.filter(x => x[0] > tr.from_epoch), drop = sessH.length >= 3 ? (sessH[0][1] - sessH[sessH.length - 1][1]) / sessH[0][1] * 100 : null;   // a trend only once there are a few epochs to compare
       const big = ph === 2 ? `epoch ${Math.min(tr.epoch + 1, tr.max_epochs)} / ${tr.max_epochs}` : ph === 1 ? 'waking the model' : 'digesting';
       const sub = ph === 2 ? [`step ${Math.max(0, tr.step - tr.step0)} / ${tr.steps_per_epoch}`, tr.loss != null ? `loss ${tr.loss.toFixed(3)}` + (drop != null && Math.abs(drop) >= .5 ? ` (${drop > 0 ? '↓' : '↑'} ${Math.abs(drop).toFixed(0)}% since this session began)` : '') : null, per ? `about ${dur((total - done) * per)} left` : 'timing the first epoch…'].filter(Boolean).join('  ·  ')
-        : ph === 1 ? 'loading ACE-Step onto the GPU' : (tr.digested || 0) < tr.tracks ? `${tr.digested || 0} / ${tr.tracks} tracks turned into training data` : `all ${tr.tracks} tracks read · encoding them for the model`;
+        : ph === 1 ? (tr.remote ? `loading ACE-Step on ${tr.remote}` : 'loading ACE-Step onto the GPU') : (tr.digested || 0) < tr.tracks ? `${tr.digested || 0} / ${tr.tracks} tracks turned into training data` : `all ${tr.tracks} tracks read · encoding them for the model`;
       box.replaceChildren(
         h('div', { class: 'tr-phases' }, ['digest', 'wake', 'train'].map((p, i) => h('span', { class: i < ph ? 'done' : i === ph ? 'now' : '' }, p))),
         h('div', { class: 'tr-big' }, big), h('div', { class: 'tr-sub' }, sub),
@@ -385,15 +386,21 @@ function gymBuild() {
     const lr = h('select', {}, [['5e-5', 'gentle'], ['1e-4', 'normal'], ['2e-4', 'fast'], ['5e-4', 'reckless']].map(([v, l]) => h('option', { value: v }, `${l} (${v})`))); lr.value = '1e-4';
     const maxd = h('input', { type: 'number', min: 10, max: 600, step: 10, value: 240 });
     const maxT = h('input', { type: 'number', min: 0, max: 5000, step: 5, value: c.food.length > 60 ? 40 : 0 });
+    const far = Gym.remote && Gym.remote.configured ? Gym.remote : null;
+    if (Gym.remote === undefined) { Gym.remote = null; api('/api/gym_remote').then(r => { Gym.remote = r; Gym.key = ''; gymPoll(); }).catch(() => {}); }
+    const where = h('select', {}, [h('option', { value: 'mac' }, 'this Mac'), far ? h('option', { value: 'pc', disabled: !far.reachable }, far.name + (far.reachable ? '' : ' (not reachable)')) : null]);
+    let saved = 'mac'; try { saved = localStorage.getItem('zvoid.trainWhere') || 'mac'; } catch (e) {}
+    where.value = far && far.reachable && saved === 'pc' ? 'pc' : 'mac';
+    where.addEventListener('change', () => { try { localStorage.setItem('zvoid.trainWhere', where.value); } catch (e) {} est(); });
     const estEl = h('div', { class: 'gym-est' });
     const est = () => {
       const budget = +maxT.value || 0, fs = budget && budget < c.food.length ? c.food.slice().sort((a, b) => (a.core || 0) - (b.core || 0)).slice(0, budget) : c.food;
-      const audio = fs.reduce((a, f) => a + Math.min(f.secs || 0, +maxd.value || 240), 0), per = audio * (c.pace || .07) + fs.length * .1, eps = +ep.value || 0;
+      const audio = fs.reduce((a, f) => a + Math.min(f.secs || 0, +maxd.value || 240), 0), pc = where.value === 'pc', pace = pc ? c.pace_pc || .004 : c.pace || .07, per = audio * pace + fs.length * (pc ? .02 : .1), eps = +ep.value || 0;
       estEl.replaceChildren(h('b', {}, `≈ ${dur(per)} per epoch · ≈ ${dur(per * eps)} for ${eps} epochs`), h('br'),
-        `${fs.length} track${fs.length === 1 ? '' : 's'} · ${Math.round(audio / 60)} min of audio per epoch. ` + (c.pace ? 'Timed on this Mac.' : 'A rough guess until the first epoch has been timed.') + ' More tracks or longer tracks = slower epochs.');
+        `${fs.length} track${fs.length === 1 ? '' : 's'} · ${Math.round(audio / 60)} min of audio per epoch. ` + (pc ? (c.pace_pc ? `Timed on ${far.name}.` : `A rough guess for ${far.name} until the first epoch has been timed.`) + ' This Mac stays free for the creature.' : c.pace ? 'Timed on this Mac.' : 'A rough guess until the first epoch has been timed.') + ' More tracks or longer tracks = slower epochs.');
     };
     [ep, maxd, maxT].forEach(i => i.addEventListener('input', est)); est();
-    const go = fresh => { Gym.more = +ep.value || 100; gymDo(() => api(`/api/gym/${c.slug}/train`, { json: { epochs: Gym.more, rank: +rank.value, lr: +lr.value, max_duration: +maxd.value, max_tracks: +maxT.value || 0, fresh } })); };
+    const go = fresh => { Gym.more = +ep.value || 100; gymDo(() => api(`/api/gym/${c.slug}/train`, { json: { epochs: Gym.more, rank: +rank.value, lr: +lr.value, max_duration: +maxd.value, max_tracks: +maxT.value || 0, fresh, where: where.value } })); };
     right.append(
       h('h3', {}, 'food'),
       h('div', { class: 'food' }, c.food.length ? c.food.map(f => {
@@ -414,7 +421,8 @@ function gymBuild() {
         h('label', { title: 'Capacity of the adapter. Higher learns more detail but can memorise.' }, h('span', {}, 'capacity'), rank),
         h('label', { title: 'How big each learning step is.' }, h('span', {}, 'learning rate'), lr),
         h('label', { title: 'Longer tracks are cut to this many seconds.' }, h('span', {}, 'max seconds / track'), maxd),
-        h('label', { style: 'grid-column:1/-1', title: 'Keeps epochs fast on big collections: trains on the most typical tracks of every limb, in proportion. 0 = use every track.' }, h('span', {}, 'train on at most this many tracks (0 = all)'), maxT)),
+        h('label', { style: 'grid-column:1/-1', title: 'Keeps epochs fast on big collections: trains on the most typical tracks of every limb, in proportion. 0 = use every track.' }, h('span', {}, 'train on at most this many tracks (0 = all)'), maxT),
+        far ? h('label', { style: 'grid-column:1/-1', title: 'Where the training runs. On the PC the tracks and what the creature has learned are sent over, it trains there, and the result comes back by itself.' }, h('span', {}, 'train on'), where) : null),
       estEl,
       h('div', { id: 'gym-bar' }, h('i')),
       h('canvas', { id: 'gym-spark' }),

@@ -435,6 +435,10 @@ def create_app():
     def gym_train(slug: str, body: dict):
         return gym_call(gym.train, slug, body, before=lambda: "ace_step" in engines and engines["ace_step"].stop())
 
+    @app.get("/api/gym_remote")
+    def gym_remote(fresh: int = 0):
+        return gym.remote_status(bool(fresh))
+
     @app.post("/api/gym/{slug}/stop")
     def gym_stop(slug: str):
         gym.stop(slug)
