@@ -411,7 +411,7 @@ def create_app():
         return {"ok": True}
 
     def lapse_sound(slug: str, video: Path, e0: float, e1: float, job: dict):
-        """Give a time-lapse its sound: the creature's voice growing up, what it could really make at each stage it passed, and a song at the end."""
+        """Give a time-lapse its sound: the creature's voice growing up, and what it could really make at each stage it passed."""
         say = lambda m, f=None: job.update(msg=m, frac=f)
         c, cdir = gym.get(slug), gym._dir(slug)
         st = cdir / "stages"
@@ -470,14 +470,6 @@ def create_app():
                     if stages[ep].parent == st and wav.exists():
                         shutil.rmtree(stages[ep], ignore_errors=True)        # its sound is kept; the snapshot itself is no longer needed
                 clips = [{"epoch": ep, "path": str(st / f"epoch_{ep}.wav")} for ep in sorted(set(pick) | set(have)) if (st / f"epoch_{ep}.wav").exists()]
-                final = cdir / "lora" / "final"
-                if (final / "adapter_config.json").exists() and e1 >= c.get("epochs", 0) - .5:      # the run reached where it is now: let it sing
-                    wav = st / f"song_{c['epochs']}.wav"
-                    if not wav.exists():
-                        say("asking it to sing…", .65)
-                        gen(final, 10, wav, 777, "its song")
-                    if wav.exists():
-                        song, tail = str(wav), 9.0
             except Exception as ex:
                 job["info"]["note"] = f"made without generated clips: {str(ex)[:160]}"
         say("composing the soundtrack…", .8)
