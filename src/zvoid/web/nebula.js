@@ -551,13 +551,19 @@ function nebInit(cv) {
   NEB.gl = gl; NEB.nz = r;
 }
 /* Three off-screen targets at the render resolution: this frame, and two that take turns holding the running blend. */
-function nebTargets(W, H, CW, CH) {   // this frame at the render resolution; the running blend at the display's resolution, so it survives render-resolution changes
+/* Two sets of targets: the live view's, and a separate one for time-lapse frames, so recording never disturbs what is on screen. */
+function nebUse(rec) {
+  const S = NEB.sets || (NEB.sets = [{ u: 1, ub: 8 }, { u: 10, ub: 13 }]), cur = NEB.setI == null ? null : S[NEB.setI], nx = S[rec ? 1 : 0];
+  if (cur) { cur.tg = NEB.tg; cur.bl = NEB.bl; cur.flip = NEB.flip; cur.fresh = NEB.fresh; }
+  NEB.setI = rec ? 1 : 0; NEB.tg = nx.tg; NEB.bl = nx.bl; NEB.flip = nx.flip || 0; NEB.fresh = nx.fresh !== false && !nx.tg ? true : !!nx.fresh; NEB.u = nx.u; NEB.ub = nx.ub;
+}
+function nebTargets(W, H, CW, CH, rec) {   // this frame at the render resolution; the running blend at the display's resolution, so it survives render-resolution changes
   const gl = NEB.gl;
   NEB.tg = NEB.tg || [0, 1, 2].map(() => ({ tex: gl.createTexture(), fb: gl.createFramebuffer(), w: 0, h: 0 }));
   NEB.tg.forEach((g, i) => {
     const w = i ? CW : W, h = i ? CH : H; if (g.w === w && g.h === h) return;
     g.w = w; g.h = h; if (i) NEB.fresh = true;
-    gl.activeTexture(gl.TEXTURE1 + i); gl.bindTexture(gl.TEXTURE_2D, g.tex);
+    gl.activeTexture(gl.TEXTURE0 + NEB.u + i); gl.bindTexture(gl.TEXTURE_2D, g.tex);
     gl.texImage2D(gl.TEXTURE_2D, 0, NEB.hdr ? gl.RGBA16F : gl.RGBA, w, h, 0, gl.RGBA, NEB.hdr ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -565,10 +571,15 @@ function nebTargets(W, H, CW, CH) {   // this frame at the render resolution; th
   });
   NEB.bl = NEB.bl || [0, 1].map(() => ({ tex: gl.createTexture(), fb: gl.createFramebuffer(), w: 0, h: 0 }));
   NEB.bl.forEach((g, i) => { const w = Math.max(2, CW >> 2), h = Math.max(2, CH >> 2); if (g.w === w && g.h === h) return; g.w = w; g.h = h;
-    gl.activeTexture(gl.TEXTURE8 + i); gl.bindTexture(gl.TEXTURE_2D, g.tex); gl.texImage2D(gl.TEXTURE_2D, 0, NEB.hdr ? gl.RGBA16F : gl.RGBA, w, h, 0, gl.RGBA, NEB.hdr ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+    gl.activeTexture(gl.TEXTURE0 + NEB.ub + i); gl.bindTexture(gl.TEXTURE_2D, g.tex); gl.texImage2D(gl.TEXTURE_2D, 0, NEB.hdr ? gl.RGBA16F : gl.RGBA, w, h, 0, gl.RGBA, NEB.hdr ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.bindFramebuffer(gl.FRAMEBUFFER, g.fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, g.tex, 0); });
-  NEB.tw = W; NEB.th = H; gl.activeTexture(gl.TEXTURE0); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  if (rec) { const o = NEB.recOut || (NEB.recOut = { tex: gl.createTexture(), fb: gl.createFramebuffer(), w: 0, h: 0 });   // where a time-lapse frame is finished, instead of the screen
+    if (o.w !== CW || o.h !== CH) { o.w = CW; o.h = CH; gl.activeTexture(gl.TEXTURE15); gl.bindTexture(gl.TEXTURE_2D, o.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, CW, CH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, o.fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, o.tex, 0); } }
+  else { NEB.tw = W; NEB.th = H; }
+  gl.activeTexture(gl.TEXTURE0); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 }
 function nebCanvas() {                            // one canvas and one GL context for the life of the app
   if (!NEB.canvas) { NEB.canvas = document.createElement('canvas'); NEB.canvas.id = 'gym-canvas'; try { nebInit(NEB.canvas); NEB.ok = true; } catch (e) { NEB.ok = false; console.warn('nebula renderer unavailable, using the 2D one:', e.message); NEB.canvas = document.createElement('canvas'); NEB.canvas.id = 'gym-canvas'; } }
@@ -590,11 +601,13 @@ const nvec = (t, k) => [noise(t + k), noise(t * 1.07 + k + 31.7), noise(t * .93 
 
 /* Save a still far sharper than the screen: time stops, the picture is rendered at up to 3840 px and averaged over many frames, then written to outputs/captures. */
 function nebCapture() { if (!NEB.ok || NEB.shot || !Gym.cur) return; NEB.shot = { t: NEB.last || performance.now() / 1000, n: 0, frames: 36, slug: Gym.cur.slug }; toast('capturing a still…'); }
-function nebFrame(c, t, mouse) {
-  if (NEB.shot) { t = NEB.shot.t; if (NEB.shot.c) c = NEB.shot.c; }   // a time-lapse frame is drawn from its own copy of the creature, on its own clock
+function nebFrame(c, t, mouse, onScreen) {
+  const SHOT = onScreen && NEB.shot && NEB.shot.rec ? null : NEB.shot, REC = !!(SHOT && SHOT.rec);   // a time-lapse frame is drawn off-screen, in its own targets; the live view carries on beside it
+  nebUse(REC);
+  if (SHOT) { t = SHOT.t; if (SHOT.c) c = SHOT.c; }   // a time-lapse frame is drawn from its own copy of the creature, on its own clock
   const GL = NEB.gl, gl = NEB.shim, cv = NEB.canvas, U = NEB.U, d = dna(c), fx = fxOf(c.slug), n = d.n, sd = d.seed * 100;
   // resolution: as sharp as this machine can hold at full frame rate
-  if (NEB.last && !NEB.shot) {
+  if (NEB.last && !SHOT) {
     const fdt = Math.min(.1, t - NEB.last); NEB.acc += fdt; NEB.fast = (NEB.fast || 0) + fdt; NEB.fastN = (NEB.fastN || 0) + 1;
     if (fdt < .012) NEB.short = (NEB.short || 0) + 1;                          // many short frames means a fast display, where real headroom is visible
     const drop = ms => { NEB.cap = NEB.q; NEB.capT = t; NEB.q = Math.max(.35, NEB.q * Math.max(.6, Math.min(.9, Math.sqrt(16.7 / ms)))); NEB.acc = 0; NEB.frames = 0; NEB.fast = 0; NEB.fastN = 0; };
@@ -602,22 +615,22 @@ function nebFrame(c, t, mouse) {
     if (++NEB.frames >= 40) { const ms = NEB.acc / NEB.frames * 1000; NEB.ms = ms; const room = NEB.short > 12 ? 14.2 : 17.4; NEB.short = 0;   // on a fast display we can see real headroom, so keep some for when it is touched
       if (ms > 18.5) drop(ms); else if (ms < room) { if (NEB.cap && t - NEB.capT > 25) NEB.cap = 0; NEB.q = Math.min(1, NEB.cap ? NEB.cap * .9 : 1, NEB.q * 1.06); }
       NEB.acc = 0; NEB.frames = 0; } }
-  NEB.last = t;
+  if (!REC) NEB.last = t;
   if (NEB.frames === 0 && NEB.hud !== false) { const hud = document.getElementById('gym-fps'); if (hud && Gym.sing) hud.textContent = Gym.sing.msg; else if (hud && NEB.ms) hud.textContent = (Gym.rec ? `● rec ${Gym.rec.i} · ` : '') + `${Math.round(1000 / NEB.ms)} fps · ${NEB.tw || 0}×${NEB.th || 0}`; }
   if ((fx.waves && fx.waves.some(w => t - w.t0 < 1.6)) || NEB.drag.on || (fx.ev && fx.ev.length)) NEB.busyT = t;   // while it is being touched or struck, each frame costs more:
   const busy = NEB.busyT != null && t - NEB.busyT < 1.2;                                                              // render a little smaller for that moment so it never stutters. The frame blend hides the step.
   let dpr = devicePixelRatio || 1, cw = cv.clientWidth, ch = cv.clientHeight, sc = dpr * NEB.q * (busy ? .8 : 1), W = Math.max(2, Math.round(cw * sc)), H = Math.max(2, Math.round(ch * sc));
   let CW = Math.max(2, Math.round(cw * dpr)), CH = Math.max(2, Math.round(ch * dpr));
-  if (NEB.shot) { const k = Math.min(NEB.shot.size || 3840, GL.getParameter(GL.MAX_TEXTURE_SIZE)) / Math.max(cw, ch); sc = k; W = CW = Math.round(cw * k); H = CH = Math.round(ch * k); }   // the canvas itself is always at the display's full resolution
-  if (cv.width !== CW || cv.height !== CH) { cv.width = CW; cv.height = CH; }
-  nebTargets(W, H, CW, CH);
+  if (SHOT) { const k = Math.min(SHOT.size || 3840, GL.getParameter(GL.MAX_TEXTURE_SIZE)) / Math.max(cw, ch); sc = k; W = CW = Math.round(cw * k); H = CH = Math.round(ch * k); }   // the canvas itself is always at the display's full resolution
+  if (!REC && (cv.width !== CW || cv.height !== CH)) { cv.width = CW; cv.height = CH; }
+  nebTargets(W, H, CW, CH, REC);
   NEB.calls.length = 0;
   NEB.nf = (NEB.nf || 0) + 1; if (NEB.nf % 90 === 5 && !c.slug.includes('#')) grainWarm(c); if ((NEB.nf === 2 || NEB.nf === 200) && typeof _clog === 'function') _clog(`info: entity renderer ${NEB.vol ? 'volume' : 'single-pass' + (NEB.volErr ? ' (' + NEB.volErr.slice(0, 160) + ')' : '')}, frame ${NEB.nf}, ${NEB.ms ? NEB.ms.toFixed(1) + ' ms' : 'timing…'}, ${NEB.tw}x${NEB.th}`);   // one line in the app log saying which renderer is in use
   const fr = (NEB.fr || 0) + 1, hal = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
   const jx = hal(fr % 16 + 1, 2) - .5, jy = hal(fr % 16 + 1, 3) - .5;   // a different spot inside the pixel every frame
 
   const au = audioLevels(), lv = au ? au.level : 0, S = Math.min(cw, ch), cx0 = cw / 2, cy0 = ch / 2 * .94;
-  const L = live(fx, d, t, mouse, cx0, cy0, S, au), kick = Math.exp(-(t - L.beat) * 7), dt = NEB.shot ? (NEB.shot.rec && NEB.shot.n === 0 ? NEB.shot.step : 0) : (L.dt || .016), ease = Math.min(1, dt * 1.7);   // during a capture, time stands completely still
+  const L = live(fx, d, t, mouse, cx0, cy0, S, au), kick = Math.exp(-(t - L.beat) * 7), dt = SHOT ? (SHOT.rec && SHOT.n === 0 ? SHOT.step : 0) : (L.dt || .016), ease = Math.min(1, dt * 1.7);   // during a capture, time stands completely still
   const cx = cx0 + L.dx, cy = cy0 + L.dy;
   // nothing switches on or off: training fades in and out, and every state-driven value glides
   const trOn = !!(c.training && c.training.state === 'running'); fx.trn = (fx.trn || 0) + ((trOn ? 1 : 0) - (fx.trn || 0)) * Math.min(1, dt * .8); const trn = fx.trn;
@@ -775,7 +788,7 @@ function nebFrame(c, t, mouse) {
       if (!first && kd.re < .5) return;                                   // a slow tendril only drifts: it does not strike again
       fx.waves.push({ t0: t, o: A, taps: first ? [[0, 1], [.22, .4]] : [[0, .4]], speed: 2.6, width: 2.8, amp: first ? .7 : .16, life: first ? 1.6 : .8 });   // the body feels every strike
       const sl = N.slots[e.j]; if (sl) sl.ring = 1; if (first && fx.life) fx.life.beat = t;
-      try { const a = ac(); if (a.state === 'running' && !NEB.shot) { const lb = limbs && limbs[e.j] ? limbs[e.j].mean.bright : (d.bright ?? .3), f0 = noteOf(lb), pure = clamp(.25 * d.growth + .75 * d.learned, 0, 1);   // and it is heard: a crack, then the struck limb rings in its own note
+      try { const a = ac(); if (a.state === 'running' && !SHOT) { const lb = limbs && limbs[e.j] ? limbs[e.j].mean.bright : (d.bright ?? .3), f0 = noteOf(lb), pure = clamp(.25 * d.growth + .75 * d.learned, 0, 1);   // and it is heard: a crack, then the struck limb rings in its own note
         if (first && kd.soft) tone(f0 * (rnd() < .5 ? 1 : 1.5), { dur: 2.5 + d.growth * 3, gain: .09, attack: .5, partials: 1 + Math.round(d.growth * 3), detune: (1 - pure) * .03 });   // a tendril hums as it takes hold
         else if (first) { tone(2200 + rnd() * 2400, { dur: .07, gain: .06, bend: -.9, noise: .7, noiseAt: 1 }); if (!kd.dry) tone(f0 / 2, { when: .02, dur: 1.1 + d.growth * 2.4, gain: .15, attack: .004, partials: 2 + Math.round(d.growth * 3), detune: (1 - pure) * .04, bend: -.12, noise: .35, noiseAt: 5 }); }
         else tone(f0 * ALIEN_SCALE[Math.floor(rnd() * 7)] * (rnd() < .3 ? 2 : 1), { dur: .1 + rnd() * .25, gain: .045, bend: rnd() < .5 ? .25 : -.3, noise: .25, noiseAt: 6 }); } } catch (_) {}
@@ -845,16 +858,21 @@ function nebFrame(c, t, mouse) {
   nebScene(W, H);
   const fl = NEB.flip = 1 - (NEB.flip || 0), R = NEB.res, O = NEB.out;                 // blend into the running image
   GL.useProgram(R.p); GL.bindFramebuffer(GL.FRAMEBUFFER, NEB.tg[1 + fl].fb);
-  GL.uniform1i(R.u.uCur, 1); GL.uniform1i(R.u.uHist, 3 - fl); GL.viewport(0, 0, CW, CH); GL.uniform2f(R.u.uPx, 1 / CW, 1 / CH); GL.uniform2f(R.u.uTx, 1 / W, 1 / H); GL.uniform2f(R.u.uJit, jx / W, jy / H); GL.uniform1f(R.u.uMix, NEB.fresh ? 1 : NEB.shot ? -1 / (NEB.shot.n + 1) : .085); NEB.fresh = false;
+  GL.uniform1i(R.u.uCur, NEB.u); GL.uniform1i(R.u.uHist, NEB.u + 2 - fl); GL.viewport(0, 0, CW, CH); GL.uniform2f(R.u.uPx, 1 / CW, 1 / CH); GL.uniform2f(R.u.uTx, 1 / W, 1 / H); GL.uniform2f(R.u.uJit, jx / W, jy / H); GL.uniform1f(R.u.uMix, NEB.fresh ? 1 : SHOT ? -1 / (SHOT.n + 1) : .085); NEB.fresh = false;
   GL.drawArrays(GL.TRIANGLES, 0, 3);
   { const Bm = NEB.blm, b0 = NEB.bl[0], b1 = NEB.bl[1]; GL.useProgram(Bm.p); GL.viewport(0, 0, b0.w, b0.h); GL.uniform2f(Bm.u.uPx, 1 / b0.w, 1 / b0.h);   // bloom
-    GL.bindFramebuffer(GL.FRAMEBUFFER, b0.fb); GL.uniform1i(Bm.u.uTex, 2 + fl); GL.uniform2f(Bm.u.uDir, 1.7 / b0.w, 0); GL.uniform1f(Bm.u.uThr, .42); GL.drawArrays(GL.TRIANGLES, 0, 3);
-    GL.bindFramebuffer(GL.FRAMEBUFFER, b1.fb); GL.uniform1i(Bm.u.uTex, 8); GL.uniform2f(Bm.u.uDir, 0, 1.7 / b0.h); GL.uniform1f(Bm.u.uThr, 0); GL.drawArrays(GL.TRIANGLES, 0, 3); }
-  GL.useProgram(O.p); GL.bindFramebuffer(GL.FRAMEBUFFER, null); GL.viewport(0, 0, CW, CH);   // and show it at full resolution
-  GL.uniform1i(O.u.uTex, 2 + fl); GL.uniform1i(O.u.uNoise, 0); GL.uniform2f(O.u.uPx, 1 / CW, 1 / CH); GL.uniform2f(O.u.uTx, 1 / CW, 1 / CH); GL.uniform1f(O.u.uSharp, .15); GL.uniform1i(O.u.uBloom, 9); GL.uniform1f(O.u.uBloomK, NEB.bloom == null ? .5 : NEB.bloom);
+    GL.bindFramebuffer(GL.FRAMEBUFFER, b0.fb); GL.uniform1i(Bm.u.uTex, NEB.u + 1 + fl); GL.uniform2f(Bm.u.uDir, 1.7 / b0.w, 0); GL.uniform1f(Bm.u.uThr, .42); GL.drawArrays(GL.TRIANGLES, 0, 3);
+    GL.bindFramebuffer(GL.FRAMEBUFFER, b1.fb); GL.uniform1i(Bm.u.uTex, NEB.ub); GL.uniform2f(Bm.u.uDir, 0, 1.7 / b0.h); GL.uniform1f(Bm.u.uThr, 0); GL.drawArrays(GL.TRIANGLES, 0, 3); }
+  GL.useProgram(O.p); GL.bindFramebuffer(GL.FRAMEBUFFER, REC ? NEB.recOut.fb : null); GL.viewport(0, 0, CW, CH);   // and show it at full resolution
+  GL.uniform1i(O.u.uTex, NEB.u + 1 + fl); GL.uniform1i(O.u.uNoise, 0); GL.uniform2f(O.u.uPx, 1 / CW, 1 / CH); GL.uniform2f(O.u.uTx, 1 / CW, 1 / CH); GL.uniform1f(O.u.uSharp, .15); GL.uniform1i(O.u.uBloom, NEB.ub + 1); GL.uniform1f(O.u.uBloomK, NEB.bloom == null ? .5 : NEB.bloom);
   GL.drawArrays(GL.TRIANGLES, 0, 3);
-  if (NEB.shot) { const sh = NEB.shot, hud = document.getElementById('gym-fps'); sh.n++; if (hud && !sh.rec) hud.textContent = `capturing ${sh.n}/${sh.frames} · ${CW}×${CH}`;
-    if (sh.n >= sh.frames) { NEB.shot = null; NEB.last = 0; NEB.frames = 0; NEB.acc = 0;
+  if (SHOT) { const sh = SHOT, hud = document.getElementById('gym-fps'); sh.n++; if (hud && !sh.rec) hud.textContent = `capturing ${sh.n}/${sh.frames} · ${CW}×${CH}`;
+    if (sh.n >= sh.frames && sh.rec) { NEB.shot = null;                                   // read the finished frame back, turn it upright, and hand it over as a JPEG
+      const px = new Uint8ClampedArray(CW * CH * 4); GL.bindFramebuffer(GL.FRAMEBUFFER, NEB.recOut.fb); GL.readPixels(0, 0, CW, CH, GL.RGBA, GL.UNSIGNED_BYTE, px); GL.bindFramebuffer(GL.FRAMEBUFFER, null);
+      const c2 = NEB.rc2 || (NEB.rc2 = document.createElement('canvas')); if (c2.width !== CW || c2.height !== CH) { c2.width = CW; c2.height = CH; }
+      const g2 = c2.getContext('2d'), row = CW * 4, tmp = new Uint8ClampedArray(row); for (let y = 0; y < CH >> 1; y++) { const a0 = y * row, b0 = (CH - 1 - y) * row; tmp.set(px.subarray(a0, a0 + row)); px.copyWithin(a0, b0, b0 + row); px.set(tmp, b0); }
+      g2.putImageData(new ImageData(px, CW, CH), 0, 0); c2.toBlob(b => sh.done(b), 'image/jpeg', .93); }
+    else if (sh.n >= sh.frames) { NEB.shot = null; NEB.last = 0; NEB.frames = 0; NEB.acc = 0;
       cv.toBlob(b => { if (sh.rec) return sh.done(b); if (!b) return toast('capture failed', true); fetch(`/api/gym/${sh.slug}/capture`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: b }).then(r => r.json()).then(r => toast(r.name ? 'saved ' + r.name : 'capture failed', !r.name)).catch(e => toast('capture failed: ' + e.message, true)); }, sh.rec ? 'image/jpeg' : 'image/png', .93); } }
 
   // where things are on screen, for touch
