@@ -200,6 +200,8 @@ def create_app():
                 if not any(run_dir.iterdir()):
                     run_dir.rmdir()
                 job.update(state="cancelled" if job["cancel"] else "error", error=str(ex), msg="stopped" if job["cancel"] else "failed")
+                if not job["cancel"]:
+                    print(f"[job] {e.id} failed: " + str(ex).strip()[-1500:], flush=True)      # so a failed module can be diagnosed from the log
                 return
             secs = round(time.time() - t0, 1)
             library.write_meta(run_dir, {
