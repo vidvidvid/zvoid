@@ -367,7 +367,7 @@ function gymBuild() {
     h('p', { class: 'gym-note' }, 'A creature is a small adapter for ACE-Step that learns your sound. Feed it your tracks, train it, then pick it inside any ace-step module.'),
     h('div', { class: 'gym-list' }, Gym.list.map(x => h('button', { class: 'creature-row' + (c && x.slug === c.slug ? ' cur' : ''), onclick: () => { Gym.cur = x; Gym.key = ''; gymRender(); } },
       h('canvas', { class: 'mini-creature', data: { slug: x.slug } }), h('span', {}, h('b', {}, x.name), h('small', {}, `${stageName(x)} · ${x.food.length} tracks · ${x.epochs} ep`)),
-      h('span', { class: 'row-del', data: { label: '×' }, title: 'Delete this creature', onclick: e => { e.stopPropagation(); gymDelete(e.currentTarget, x); } }, '×')))),
+      h('span', { class: 'row-del', data: { label: '×', confirm: 'delete?' }, title: 'Delete this creature (click twice)', onclick: e => { e.stopPropagation(); gymDelete(e.currentTarget, x); } }, '×')))),
     h('div', { class: 'gym-new' }, nameIn, hatchB));
 
   const stage = h('div', { id: 'gym-stage' }, nebCanvas(), h('div', { id: 'gym-fps' }), h('div', { id: 'gym-tools' }, h('button', { id: 'gym-shot', title: 'Save a still of it, far sharper than the screen (up to 3840 px), to outputs/captures', onclick: () => nebCapture() }, '◉ still'), h('button', { id: 'gym-rec', title: 'Record a time-lapse: frames are taken at intervals and joined into a video in outputs/recordings. Start it, then start training, and it stops by itself when training ends. Keep the vivarium open.', onclick: () => gymRecToggle() }, Gym.rec ? '■ stop time-lapse' : '● time-lapse'), h('button', { id: 'gym-tape', title: 'Record the sound: everything you hear from it (touches, drags, strikes, songs, tracks you play) is saved as a WAV in outputs/recordings.', onclick: () => tapeToggle() }, TAPE.on ? '■ stop sound' : '● sound'), h('button', { id: 'gym-film', title: 'Film it: records the picture at normal speed together with the sound, as one video in outputs/recordings. Use it to record yourself playing the creature.', onclick: () => filmToggle() }, FILM.on ? '■ stop filming' : '● film')), h('div', { id: 'gym-train', hidden: true }),
@@ -434,7 +434,7 @@ function gymBuild() {
 /* delete with a second click instead of a system dialog */
 function gymDelete(btn, c) {
   if (btn.dataset.armed) return gymDo(async () => { await api('/api/gym/' + c.slug, { method: 'DELETE' }); if (Gym.cur && Gym.cur.slug === c.slug) Gym.cur = null; delete Gym.fx[c.slug]; });
-  btn.dataset.armed = '1'; btn.textContent = 'click again to delete'; btn.classList.add('armed');
+  btn.dataset.armed = '1'; btn.textContent = btn.dataset.confirm || 'click again to delete'; btn.classList.add('armed');
   setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = btn.dataset.label; btn.classList.remove('armed'); } }, 3500);
 }
 
