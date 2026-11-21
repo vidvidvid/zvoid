@@ -7,11 +7,37 @@ from slutil import load_audio, out, save_audio, seed_everything
 _cache = {}
 
 
+class _StepNoise:
+    """Fresh, seeded noise for every step of the sampler.
+
+    diffusers draws this noise from a Brownian tree (torchsde). On this setup that tree recurses without end on the last
+    step and the run dies with a RecursionError. For a sampler that never revisits a step, independent unit noise per
+    step is the same thing statistically, so this stands in for it."""
+
+    def __init__(self, x, sigma_min=None, sigma_max=None, seed=None, **_):
+        self.shape, self.device, self.dtype = x.shape, x.device, x.dtype
+        s = seed[0] if isinstance(seed, (list, tuple)) else seed
+        self.gen = torch.Generator("cpu").manual_seed(int(s) if s is not None else int(torch.randint(0, 2**31 - 1, (1,)).item()))
+
+    def __call__(self, sigma, sigma_next):
+        return torch.randn(self.shape, generator=self.gen, dtype=torch.float32).to(self.device, self.dtype)
+
+
+def _patch_noise():
+    try:
+        import diffusers.schedulers.scheduling_cosine_dpmsolver_multistep as m
+        m.BrownianTreeNoiseSampler = _StepNoise
+    except Exception:
+        pass
+
+
 def _pipe(model_id, device):
     key = (model_id, device)
     if key not in _cache:
         _cache.clear()
         from diffusers import StableAudioPipeline
+
+        _patch_noise()
 
         try:
             pipe = StableAudioPipeline.from_pretrained(model_id, torch_dtype=torch.float32)
