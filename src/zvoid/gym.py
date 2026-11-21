@@ -117,6 +117,54 @@ def update(slug: str, patch: dict) -> dict:
     return _view(c)
 
 
+def breed(a: str, b: str, name: str) -> dict:
+    """Breed two trained creatures. The child's adapter is the exact average of its parents' (see engines/ace_step/breed.py),
+    it inherits links to all of their food, and it can be trained further like any other creature."""
+    pa, pb = adapter_path(a), adapter_path(b)
+    if a == b:
+        raise ValueError("a creature cannot breed with itself")
+    if pa is None or pb is None:
+        raise ValueError("both parents must have trained first: an untrained creature has nothing to pass on")
+    ca, cb = _load(a), _load(b)
+    child = hatch(name or f"{ca['name']} × {cb['name']}")
+    slug, d = child["slug"], _dir(child["slug"])
+    try:
+        py = ENVS_DIR / "ace_step" / "bin" / "python"
+        r = subprocess.run([str(py), str(ENGINES_DIR / "ace_step" / "breed.py"), str(pa), str(pb), str(d / "lora" / "final")],
+                           capture_output=True, text=True, cwd=str(ROOT))
+        last = (r.stdout or "").strip().splitlines()[-1:] or ["{}"]
+        try:
+            res = json.loads(last[0])
+        except ValueError:
+            res = {"ok": False, "error": (r.stderr or r.stdout or "the merge failed").strip()[-300:]}
+        if not res.get("ok"):
+            raise RuntimeError(res.get("error") or "the merge failed")
+        c = _load(slug)
+        seen = set()
+        for parent, pc in ((a, ca), (b, cb)):
+            for f in pc["food"]:
+                src = (_dir(parent) / "food" / f["name"]).resolve()
+                if str(src) in seen or not src.exists():
+                    continue
+                seen.add(str(src))
+                dst = d / "food" / f["name"]
+                i = 2
+                while dst.exists() or dst.is_symlink():
+                    dst = d / "food" / f"{Path(f['name']).stem}-{i}{Path(f['name']).suffix}"
+                    i += 1
+                dst.symlink_to(src)
+                c["food"].append(dict(f, name=dst.name, src=str(src), caption=""))
+        c.update(epochs=round((ca.get("epochs", 0) + cb.get("epochs", 0)) / 2), parents=[ca["name"], cb["name"]],
+                 style=", ".join(x for x in (ca.get("style"), cb.get("style")) if x)[:300],
+                 settings=dict(ca.get("settings") or {}, rank=res.get("rank")))
+        regroup(c)
+        _save(c)
+        return _view(c)
+    except Exception:
+        shutil.rmtree(d, ignore_errors=True)
+        raise
+
+
 def release(slug: str):
     if _train["slug"] == slug and _train["state"] == "running":
         stop(slug)

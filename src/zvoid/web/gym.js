@@ -420,6 +420,7 @@ function gymBuild() {
         running ? h('button', { class: 'stop', onclick: () => api(`/api/gym/${c.slug}/stop`, { method: 'POST' }).then(gymPoll) }, '■ stop')
           : h('button', { class: 'hot', disabled: !c.food.length, onclick: () => go(false) }, c.epochs ? 'train more ▸' : 'train ▸'),
         !running && c.epochs ? h('button', { title: 'Forget everything it learned and train again from zero', onclick: () => { if (confirm(`Erase what “${c.name}” has learned and start over? Its food stays.`)) go(true); } }, 'start over') : null,
+        !running && c.trained && Gym.list.some(x => x.slug !== c.slug && x.trained) ? h('button', { title: 'Breed it with another trained creature. The child sounds like the average of both, inherits links to all their food, and can be trained further.', onclick: e => gymBreed(c, e) }, 'breed…') : null,
         !running ? h('button', { class: 'danger', data: { label: 'delete creature' }, title: 'Deletes what it learned and its list of tracks. Your original audio files are not touched.', onclick: e => gymDelete(e.currentTarget, c) }, 'delete creature') : null),
       h('p', { class: 'gym-note' }, 'Training uses the Apple GPU and pauses the ace-step module. Stopping keeps the last checkpoint (saved every 5 epochs).'));
   }
@@ -435,6 +436,15 @@ function gymDelete(btn, c) {
 }
 
 /* play one of its tracks: the sound goes through the analyser, so the entity reacts, and that track's string lights up */
+/* Breed two trained creatures into a third: pick the partner and a name right in the panel. */
+function gymBreed(c, e) {
+  const host = e.currentTarget.parentNode, old = host.querySelector('.breed-form'); if (old) return old.remove();
+  const others = Gym.list.filter(x => x.slug !== c.slug && x.trained), sel = h('select', {}, others.map(o => h('option', { value: o.slug }, 'with ' + o.name)));
+  const nm = h('input', { type: 'text', placeholder: 'name the child', value: `${c.name.split(' ')[0]}-${others[0].name.split(' ')[0]}` });
+  const go = h('button', { class: 'hot', onclick: () => { const name = nm.value.trim(); if (!name) return nm.focus(); go.disabled = true; toast('breeding…');
+    gymDo(() => api('/api/gym_breed', { json: { a: c.slug, b: sel.value, name } })).then(() => toast(`“${name}” is born`)); } }, 'breed');
+  host.append(h('div', { class: 'breed-form', style: 'display:flex;gap:6px;margin-top:8px;flex-basis:100%' }, sel, nm, go));
+}
 /* Ask a limb to sing: ACE-Step makes a short new clip in that limb's style (through the creature's adapter if it has trained),
    and the creature performs it. Until it has trained, you hear what the plain model makes of that limb's description. */
 async function gymSing(c, limbId) {

@@ -139,6 +139,21 @@ soft clumps of its own dust and are drawn in to where the spine is being built. 
 to tip once per epoch, and two broken arcs grow in its orbit: the outer one is the whole session, the inner one the
 current epoch. Every training step sends a pulse and every finished epoch a shock front.
 
+**Its voice is its food.** Touch a limb and it answers with grains of the very track that lives where you touched; drag along a
+limb to scrub through its memory of that track. Untrained, the grains are short, scattered and detuned; training makes them
+longer and truer. (The app keeps a 12-second mono excerpt of each fed track in `creatures/<name>/grains/` for this.)
+
+**Ask it to sing.** Press ♪ on a limb in the list, or double-click the limb itself. ACE-Step makes a short new clip in that limb's
+style, through the creature's adapter once it has trained, and the creature performs it. The clip is saved to the library.
+It cannot sing while it trains.
+
+**Capture.** *◉ capture* stops time and saves a still far sharper than the screen (up to 3840 px, averaged over 36 frames) to
+`outputs/captures/`.
+
+**Breed.** Two trained creatures can have a child (*breed…*). Its adapter is the exact average of its parents' (their low-rank
+matrices are stacked, so nothing is retrained), it inherits links to all of their food, and it can be trained further.
+Both parents need the same capacity settings.
+
 **The sound shapes the body.** Each limb takes its form from how its own tracks sound, so differently fed creatures grow into different bodies:
 
 | In the sound | In the body |

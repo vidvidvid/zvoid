@@ -255,6 +255,10 @@ def create_app():
     def gym_hatch(body: dict):
         return gym_call(gym.hatch, str(body.get("name", "")))
 
+    @app.post("/api/gym_breed")
+    def gym_breed(body: dict):
+        return gym_call(gym.breed, str(body.get("a", "")), str(body.get("b", "")), str(body.get("name", "")))
+
     @app.get("/api/gym/{slug}")
     def gym_get(slug: str):
         return gym_call(gym.get, slug)
