@@ -613,7 +613,7 @@ function nebFrame(c, t, mouse, onScreen) {
     const drop = ms => { NEB.cap = NEB.q; NEB.capT = t; NEB.q = Math.max(.35, NEB.q * Math.max(.6, Math.min(.9, Math.sqrt(16.7 / ms)))); NEB.acc = 0; NEB.frames = 0; NEB.fast = 0; NEB.fastN = 0; };
     if (NEB.fastN >= 8) { const ms = NEB.fast / NEB.fastN * 1000; NEB.fast = 0; NEB.fastN = 0; if (ms > 20 && NEB.frames >= 0) drop(ms); }   // falling behind (a touch, a wave): give up resolution at once
     if (++NEB.frames >= 40) { const ms = NEB.acc / NEB.frames * 1000; NEB.ms = ms; const room = NEB.short > 12 ? 14.2 : 17.4; NEB.short = 0;   // on a fast display we can see real headroom, so keep some for when it is touched
-      if (ms > 18.5) drop(ms); else if (ms < room) { if (NEB.cap && t - NEB.capT > 25) NEB.cap = 0; NEB.q = Math.min(1, NEB.cap ? NEB.cap * .9 : 1, NEB.q * 1.06); }
+      if (ms > 18.5) drop(ms); else if (ms < room) { if (NEB.cap && t - NEB.capT > 25) NEB.cap = 0; NEB.q = Math.min(NEB.qMax || 1, NEB.cap ? NEB.cap * .9 : 1, NEB.q * 1.06); }
       NEB.acc = 0; NEB.frames = 0; } }
   if (!REC) NEB.last = t;
   if (NEB.frames === 0 && NEB.hud !== false) { const hud = document.getElementById('gym-fps'); if (hud && Gym.sing) hud.textContent = Gym.sing.msg; else if (hud && NEB.ms) hud.textContent = (Gym.rec ? `● rec ${Gym.rec.i} · ` : '') + `${Math.round(1000 / NEB.ms)} fps · ${NEB.tw || 0}×${NEB.th || 0}`; }
