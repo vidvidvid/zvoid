@@ -203,17 +203,18 @@ void main() {
     float dn = dot(rd, uDiscN), tq = abs(dn) > 1e-3 ? -dot(ro, uDiscN) / dn : -1.;
     if (tq > 0.) {
       vec3 pl = ro + rd * tq; float r = length(pl);
-      if (r > uDisc.x && r < uDisc.y) {
+      if (r > uDisc.x * .6 && r < uDisc.y * 1.4) {
         float ang = atan(dot(pl, uDiscU), dot(pl, uDiscV)), dd = 0., hm = 0.;
         for (int j = 0; j < 8; j++) {
           float rw = uRing[j].y;
-          if (rw > 0.) { float dr = (r - uRing[j].x) / .022, e = exp(-dr * dr) * smoothstep(-.15, .25, sin(ang * uRing[j].z + uT * uRing[j].w + float(j) * 2.4) - (1. - rw * 1.2)) * rw; dd += e; hm += e * fract(float(j) * .37 + .2); }
+          if (rw > 0.) { float fj = float(j), wj = 1. + .17 * sin(ang * 2. + fj * 1.9 + uT * .07) + .1 * sin(ang * 3. - fj * 2.7 - uT * .05) + .05 * sin(ang * 7. + fj * 5.1 + uT * .11);   // each loop is its own uneven, slowly writhing thread, never a true circle
+            float dr = (r - uRing[j].x * wj) / (.009 + .024 * pow(.5 + .5 * sin(ang * 3. + fj * 4.3 + uT * .2), 2.)), e = exp(-dr * dr) * smoothstep(-.15, .25, sin(ang * uRing[j].z + uT * uRing[j].w + float(j) * 2.4) - (1. - rw * 1.2)) * rw; dd += e; hm += e * fract(float(j) * .37 + .2); }
         }
         if (dd > .003) { ringA = 1. - exp(-dd * min(3.5, 1. / abs(dn)) * 1.1); ringC = mix(mix(uAmb, uKey, clamp(hm / dd, 0., 1.)), vec3(.9, .92, 1.), .45) * (.85 + uAud.w * 1.5 + uLife.w) * ringA; tP = tq; }
         if (uProg.z > 0.) {                     // training: two broken arcs in its orbit grow. Outer = the whole session, inner = this epoch.
           float a01 = fract(ang / 6.2831853 + .5), tau = a01 * 6.2831853;
           float seg1 = smoothstep(-.75, -.55, sin(tau * 29.) + .5 * sin(tau * 11. + 1.3)), seg2 = smoothstep(-.6, -.4, sin(tau * 41. + 2.) + .6 * sin(tau * 13.));   // irregular marks, like its script
-          float d1 = (r - 1.66) / .02, d2 = (r - 1.52) / .013, h1 = min(abs(a01 - uProg.x), 1. - abs(a01 - uProg.x)) * 50., h2 = min(abs(a01 - uProg.y), 1. - abs(a01 - uProg.y)) * 50.;
+          float rp = r / (1. + .07 * sin(ang * 3. + uT * .1) + .045 * sin(ang * 5. - uT * .07) + .025 * sin(ang * 11. + uT * .16)), d1 = (rp - 1.66) / .02, d2 = (rp - 1.52) / .013, h1 = min(abs(a01 - uProg.x), 1. - abs(a01 - uProg.x)) * 50., h2 = min(abs(a01 - uProg.y), 1. - abs(a01 - uProg.y)) * 50.;
           float g1 = exp(-d1 * d1) * (.05 + step(a01, uProg.x) * seg1 * .95) + exp(-h1 * h1 - d1 * d1 * .1) * (1.1 + uProg.w), g2 = exp(-d2 * d2) * (.035 + step(a01, uProg.y) * seg2 * .75) + exp(-h2 * h2 - d2 * d2 * .08) * (.9 + uProg.w);
           g1 *= uProg.z; g2 *= uProg.z;
           if (g1 + g2 > .01) { ringC += mix(vec3(1.), uKey, .3) * g1 + mix(vec3(1.), uAmb, .5) * g2; ringA = max(ringA, min(1., g1 + g2)); tP = tq; }
@@ -355,7 +356,7 @@ void main() {
   av /= 9.;
   vec3 h = clamp(texture2D(uHist, uv).rgb, mn - .015, mx + .015);
   float mv = clamp(length(av - h) * 6., 0., 1.);             // where the picture really changed, follow it faster
-  gl_FragColor = vec4(mix(h, c, clamp(uMix + mv * .25, 0., 1.)), 1.);
+  gl_FragColor = vec4(mix(h, c, clamp(uMix + mv * .1, 0., 1.)), 1.);
 }`;
 /* Draw the blended image on the screen at the display's full resolution, with a little sharpening. */
 const NEB_PRESENT = `precision highp float;
@@ -428,7 +429,14 @@ const nvec = (t, k) => [noise(t + k), noise(t * 1.07 + k + 31.7), noise(t * .93 
 function nebFrame(c, t, mouse) {
   const gl = NEB.gl, cv = NEB.canvas, U = NEB.U, d = dna(c), fx = fxOf(c.slug), n = d.n, sd = d.seed * 100;
   // resolution: as sharp as this machine can hold at full frame rate
-  if (NEB.last) { NEB.acc += Math.min(.1, t - NEB.last); if (++NEB.frames >= 40) { const ms = NEB.acc / NEB.frames * 1000; NEB.ms = ms; if (ms > 19) { NEB.cap = NEB.q; NEB.capT = t; NEB.q = Math.max(.35, NEB.q * .86); } else if (ms < 17.4) { if (NEB.cap && t - NEB.capT > 25) NEB.cap = 0; NEB.q = Math.min(1, NEB.cap ? NEB.cap * .9 : 1, NEB.q * 1.07); } NEB.acc = 0; NEB.frames = 0; } }
+  if (NEB.last) {
+    const fdt = Math.min(.1, t - NEB.last); NEB.acc += fdt; NEB.fast = (NEB.fast || 0) + fdt; NEB.fastN = (NEB.fastN || 0) + 1;
+    if (fdt > .004) NEB.minDt = Math.min(NEB.minDt || 1, fdt);                 // the shortest frame seen tells us the display's refresh rate
+    const drop = ms => { NEB.cap = NEB.q; NEB.capT = t; NEB.q = Math.max(.35, NEB.q * Math.max(.6, Math.min(.9, Math.sqrt(16.7 / ms)))); NEB.acc = 0; NEB.frames = 0; NEB.fast = 0; NEB.fastN = 0; };
+    if (NEB.fastN >= 8) { const ms = NEB.fast / NEB.fastN * 1000; NEB.fast = 0; NEB.fastN = 0; if (ms > 20 && NEB.frames >= 0) drop(ms); }   // falling behind (a touch, a wave): give up resolution at once
+    if (++NEB.frames >= 40) { const ms = NEB.acc / NEB.frames * 1000; NEB.ms = ms; const room = NEB.minDt < .012 ? 14.2 : 17.4;   // on a fast display we can see real headroom, so keep some for when it is touched
+      if (ms > 18.5) drop(ms); else if (ms < room) { if (NEB.cap && t - NEB.capT > 25) NEB.cap = 0; NEB.q = Math.min(1, NEB.cap ? NEB.cap * .9 : 1, NEB.q * 1.06); }
+      NEB.acc = 0; NEB.frames = 0; } }
   NEB.last = t;
   if (NEB.frames === 0 && NEB.hud !== false) { const hud = document.getElementById('gym-fps'); if (hud && NEB.ms) hud.textContent = `${Math.round(1000 / NEB.ms)} fps · ${NEB.tw || 0}×${NEB.th || 0}`; }
   const dpr = devicePixelRatio || 1, cw = cv.clientWidth, ch = cv.clientHeight, sc = dpr * NEB.q, W = Math.max(2, Math.round(cw * sc)), H = Math.max(2, Math.round(ch * sc));
