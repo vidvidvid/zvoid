@@ -591,7 +591,7 @@ function nebFrame(c, t, mouse) {
   if (cv.width !== CW || cv.height !== CH) { cv.width = CW; cv.height = CH; }
   nebTargets(W, H, CW, CH);
   NEB.calls.length = 0;
-  NEB.nf = (NEB.nf || 0) + 1; if ((NEB.nf === 2 || NEB.nf === 200) && typeof _clog === 'function') _clog(`info: entity renderer ${NEB.vol ? 'volume' : 'single-pass' + (NEB.volErr ? ' (' + NEB.volErr.slice(0, 160) + ')' : '')}, frame ${NEB.nf}, ${NEB.ms ? NEB.ms.toFixed(1) + ' ms' : 'timing…'}, ${NEB.tw}x${NEB.th}`);   // one line in the app log saying which renderer is in use
+  NEB.nf = (NEB.nf || 0) + 1; if (NEB.nf % 90 === 5) grainWarm(c); if ((NEB.nf === 2 || NEB.nf === 200) && typeof _clog === 'function') _clog(`info: entity renderer ${NEB.vol ? 'volume' : 'single-pass' + (NEB.volErr ? ' (' + NEB.volErr.slice(0, 160) + ')' : '')}, frame ${NEB.nf}, ${NEB.ms ? NEB.ms.toFixed(1) + ' ms' : 'timing…'}, ${NEB.tw}x${NEB.th}`);   // one line in the app log saying which renderer is in use
   const fr = (NEB.fr || 0) + 1, hal = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
   const jx = hal(fr % 16 + 1, 2) - .5, jy = hal(fr % 16 + 1, 3) - .5;   // a different spot inside the pixel every frame
 
@@ -844,7 +844,7 @@ function nebRespond(fx, hit, base) {
   const E = voiceOut();                               // the room it answers in changes too: short and tight, or long and smeared
   E.dl.delayTime.setTargetAtTime({ taps: .31, gallop: .11, rise: .19, fall: .23, shimmer: .52, swarm: .07, reverse: .4, still: .6 }[v], a.currentTime, .04);
   E.fb.gain.setTargetAtTime({ taps: .3, gallop: .2, rise: .25, fall: .25, shimmer: .5, swarm: .35, reverse: .15, still: .08 }[v], a.currentTime, .04);
-  const say = (dly, mult, gk, extra) => tone(f0 * mult, Object.assign({}, base, { when: dly, gain: (base.gain || .16) * gk }, extra || {}));
+  const say = (dly, mult, gk, extra) => tone(f0 * mult, Object.assign({}, base, { when: dly, gain: (base.gain || .16) * gk * (base.gainK || 1) }, extra || {}));
   const step = i => ALIEN_SCALE[i % 7] * Math.pow(2, Math.floor(i / 7)), up = [0, 1, 0], rv = () => { const x = [rnd() - .5, rnd() - .5, rnd() - .5], l = Math.hypot(...x) || 1; return x.map(c => c / l); };
   if (v === 'taps') { say(0, 1, 1); [.33, .66, 1].forEach((d, i) => say(d, 1, .5 / (i + 1), { noise: 0 })); fx.waves.push({ t0: t, o: p, taps: [[0, 1], [.33, .5], [.66, .3], [1, .18]] }); }
   else if (v === 'gallop') { const ds = [0, .11, .22, .52, .63, .74]; ds.forEach((d, i) => say(d, 1, 1 / (1 + i * .5), { dur: (base.dur || 1) * .45 })); fx.waves.push({ t0: t, o: p, taps: ds.map((d, i) => [d, 1 / (1 + i * .5)]), speed: 3.6, width: 4 }); }
@@ -866,8 +866,10 @@ function nebTouch(x, y) {
   const c = Gym.cur; if (!c) return; const fx = fxOf(c.slug), G = fx.ngeom, L = fx.life; if (!G || !L) return;
   ac().resume(); const gr = G.growth, pure = clamp(.25 * gr + .75 * G.learned, 0, 1), hit = nebUnder(c, G, x, y);
   if (hit.kind === 'void') { hit.freq /= 2; L.startle = 1; nebRespond(fx, hit, { dur: 1.6 + gr * 3, attack: .12, gain: .22, partials: 1 + Math.round(gr * 5), detune: (1 - pure) * .05, bend: -.12 * (1 - pure), noise: (1 - pure) * .25, noiseAt: 1.5 }); }
-  else if (hit.kind === 'pillar') { hit.o.slot.ring = 1; nebRespond(fx, hit, { dur: .45 + gr * 2.6, gain: .2, type: pure > .5 ? 'sine' : 'triangle', partials: 1 + Math.round(gr * 4), detune: (1 - pure) * .045, bend: -(1 - pure) * .07, noise: (1 - pure) * .4 + .03, noiseAt: 3 }); }
-  else if (hit.kind === 'haze') { hit.freq = 320 + Math.random() * 900; nebRespond(fx, hit, { dur: .9 + gr * 2.2, gain: .12, ratios: [1, 2.76, 5.4, 8.93].slice(0, 2 + Math.round(gr * 2)), detune: (1 - pure) * .03, noise: (1 - pure) * .18, noiseAt: 4 }); }
+  else if (hit.kind === 'pillar') { hit.o.slot.ring = 1; const mem = hit.track && grainCloud(c.slug, hit.track, { pure, pos: hit.u, n: 6 + Math.round(gr * 5), gain: .34, long: 1 + gr });   // it answers with scraps of the very track that lives where you touched
+    nebRespond(fx, hit, { gainK: mem ? .45 : 1, dur: .45 + gr * 2.6, gain: .2, type: pure > .5 ? 'sine' : 'triangle', partials: 1 + Math.round(gr * 4), detune: (1 - pure) * .045, bend: -(1 - pure) * .07, noise: (1 - pure) * .4 + .03, noiseAt: 3 }); }
+  else if (hit.kind === 'haze') { hit.freq = 320 + Math.random() * 900; if (c.food.length) grainCloud(c.slug, c.food[Math.floor(Math.random() * c.food.length)].name, { pure, n: 4, gain: .16, rate: 2, gap: .05 });   // the haze holds faint, sped-up echoes of anything it ate
+    nebRespond(fx, hit, { dur: .9 + gr * 2.2, gain: .12, ratios: [1, 2.76, 5.4, 8.93].slice(0, 2 + Math.round(gr * 2)), detune: (1 - pure) * .03, noise: (1 - pure) * .18, noiseAt: 4 }); }
   else { hit.freq = 700 + Math.random() * 1400; nebRespond(fx, hit, { dur: .22 + gr * .3, gain: .07, bend: Math.random() > .5 ? 1.2 : -.6 }); L.sx = x; L.sy = y; }
 }
 
@@ -892,7 +894,7 @@ function nebUnder(c, G, x, y) {
   if (best && best.dd < 1.15 && c.food.length) {
     const o = best.o, mem = c.food.filter((f, i) => (c.limbs && c.limbs.length > 1 ? (f.limb || 0) % G.K : i % G.K) === o.j).sort((a, b) => (a.core || 0) - (b.core || 0));
     const f = mem.length ? mem[Math.min(mem.length - 1, Math.floor(best.u * mem.length))] : c.food[0];
-    return { kind: 'pillar', o, u: best.u, p: o.a3.map((a, k) => a + (o.b3[k] - a) * best.u), freq: noteOf(f.bright ?? .3) };
+    return { kind: 'pillar', o, u: best.u, p: o.a3.map((a, k) => a + (o.b3[k] - a) * best.u), freq: noteOf(f.bright ?? .3), track: f.name };
   }
   if (best && best.dd < 3.2) return { kind: 'haze', p: G.unproj(x, y, best.o.a[2]), freq: noteOf(.35 + .6 * clamp(1 - y / (NEB.canvas.clientHeight || 1), 0, 1)) * 2 };
   return { kind: 'space', p: G.unproj(x, y, G.dist), freq: noteOf(.5 + .5 * clamp(1 - y / (NEB.canvas.clientHeight || 1), 0, 1)) * 4 };
@@ -909,6 +911,8 @@ function nebDrag(x, y, speed) {
   D.v.o1.frequency.setTargetAtTime(hit.freq * wob, now, .05); D.v.o2.frequency.setTargetAtTime(hit.freq * (hit.kind === 'void' ? .5 : ALIEN_SCALE[4]) * (1 + (1 - pure) * .012), now, .05);
   D.v.lp.frequency.setTargetAtTime(500 + speed * 1.6 + pure * 1800, now, .08); D.v.g.gain.setTargetAtTime(lvl, now, .06);
   if (hit.kind === 'pillar') hit.o.slot.ring = Math.max(hit.o.slot.ring, .6);
+  if (hit.kind === 'pillar' && hit.track && (!D.lastGrain || t - D.lastGrain > .075)) { const b = grainBuf(c.slug, hit.track);   // dragging along a limb scrubs through its memory of that track
+    if (b) { D.lastGrain = t; grainOne(b, { pos: hit.u, dur: .16 + pure * .3, gain: clamp(speed / 900, .08, .32), rate: 1 + (1 - pure) * (Math.random() - .5) * .08, attack: .03 }); D.v.g.gain.setTargetAtTime(lvl * .35, now, .06); } }
   if (!D.lastWave || t - D.lastWave > (hit.kind === 'space' ? .5 : .22)) { D.lastWave = t; fx.waves.push({ t0: t, o: hit.p, soft: true, mode: Math.random() > .5 ? 2 : 0, n: [Math.random() - .5, Math.random() - .5, Math.random() - .5].map((c, i, v) => c / (Math.hypot(...v) || 1)), taps: [[0, 1], [.4, .4]], speed: 1.8 }); if (fx.waves.length > 18) fx.waves.shift(); }
 }
 function nebDragEnd() {

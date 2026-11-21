@@ -85,7 +85,7 @@ def _creature(dit, p, ctx):
     want = None
     if slug:
         if not found:
-            raise ValueError(f"Creature “{slug}” hasn't been trained yet. Train it in the gym first.")
+            raise ValueError(f"Creature “{slug}” hasn't been trained yet. Train it in the vivarium first.")
         want = (str(final), (final / "adapter_model.safetensors").stat().st_mtime, id(dit))
     if _state.get("lora") != want:
         if _state.get("lora") and _state["lora"][2] == id(dit):

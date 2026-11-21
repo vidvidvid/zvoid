@@ -301,6 +301,10 @@ def create_app():
             raise HTTPException(404, "that track is gone (was the original moved?)")
         return FileResponse(f.resolve())
 
+    @app.get("/api/gym/{slug}/grain/{name}")
+    def gym_grain_file(slug: str, name: str):
+        return FileResponse(gym_call(gym.grain, slug, name), media_type="audio/wav")
+
     @app.delete("/api/gym/{slug}/food/{name}")
     def gym_unfeed(slug: str, name: str):
         return gym_call(gym.unfeed, slug, name)

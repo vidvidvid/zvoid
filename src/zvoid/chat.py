@@ -77,7 +77,7 @@ def _catalogue(engines) -> str:
             if p.get("type") == "creature":
                 from . import gym
                 d["choices"] = [""] + gym.trained_slugs()
-                d["help"] = "A creature (adapter trained on the user's own music in the gym). Empty = none."
+                d["help"] = "A creature (adapter trained on the user's own music in the vivarium). Empty = none."
             if p.get("custom"):
                 d["any_value_allowed"] = True
             params.append(d)

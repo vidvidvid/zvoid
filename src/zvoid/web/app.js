@@ -129,7 +129,7 @@ function player(nodeId, path, col) {
   if (players.has(key)) return players.get(key).el;
   const cv = h('canvas'), pp = h('button', { class: 'pp', title: 'Play / stop' }, '▶');
   const loopB = h('button', { title: 'Loop' }, '∞'), rev = h('button', { title: 'Show in Finder' }, '↗');
-  const feedB = h('button', { title: 'Feed this to a creature in the gym', onclick: e => feedChooser(path, e) }, '◍');
+  const feedB = h('button', { title: 'Feed this to a creature in the vivarium', onclick: e => feedChooser(path, e) }, '◍');
   const el = h('div', { class: 'player' }, pp, cv, h('div', { class: 'tools' }, loopB, feedB, rev));
   const P = { el, buf: null, src: null, t0: 0, off: 0, loop: false, peaks: null, raf: 0 };
   players.set(key, P);
@@ -302,7 +302,7 @@ function control(n, p) {
   else if (p.type === 'creature') {
     const opts = (p.choices || ['']).slice(); if (v && !opts.includes(v)) opts.push(v);
     const sel = h('select', {}, opts.map(c => h('option', { value: c }, c || 'none'))); sel.value = v || ''; sel.onchange = () => set(sel.value);
-    input = h('div', { class: 'seed' }, sel, h('button', { title: 'Open the gym', onclick: e => { e.preventDefault(); openGym(sel.value || undefined); } }, 'gym'));
+    input = h('div', { class: 'seed' }, sel, h('button', { title: 'Open the vivarium', onclick: e => { e.preventDefault(); openGym(sel.value || undefined); } }, 'vivarium'));
   }
   else if (p.type === 'bool') { input = h('input', { type: 'checkbox', class: 'toggle' }); input.checked = !!v; input.onchange = () => set(input.checked); inline = true; }
   else { input = h('input', { type: 'text', spellcheck: 'false' }); input.value = v ?? ''; input.oninput = () => set(input.value); }

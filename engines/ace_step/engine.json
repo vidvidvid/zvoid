@@ -44,7 +44,7 @@
       "name": "creature",
       "type": "creature",
       "default": "",
-      "help": "A creature you raised in the gym on your own music. It bends everything this module makes toward that sound."
+      "help": "A creature you raised in the vivarium on your own music. It bends everything this module makes toward that sound."
     },
     {
       "name": "creature_strength",

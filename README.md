@@ -60,19 +60,19 @@ Stable Audio Open is gated: accept the license on its
 | Scroll / pinch, `F` | Pan / zoom, fit everything |
 | Drop audio files on the canvas or on a module | Bring in your own music |
 
-## The gym: raise a creature on your own music
+## The vivarium: raise a creature on your own music
 
-Press **◍ gym**. A creature is a LoRA adapter for ACE-Step, trained on audio you feed it.
+Press **◍ vivarium**. A creature is a LoRA adapter for ACE-Step, trained on audio you feed it.
 
 1. **Hatch** one by giving it a name.
-2. **Feed** it (audio or video files; only the sound is used): drop your tracks on the gym screen, press `◍` on any result on the canvas, or use
+2. **Feed** it (audio or video files; only the sound is used): drop your tracks on the vivarium screen, press `◍` on any result on the canvas, or use
    **feed a folder** to scan a whole folder and tick the tracks you want (they are linked, not copied).
    10–30 tracks in one style is a good start. Describe its sound in tags, since good captions matter a lot.
 3. **Train** it. Training runs on the Apple GPU with ACE-Step's own trainer, saves a checkpoint every
    10 epochs, and can be stopped and continued any time.
 4. **Use** it: pick it as *creature* in any ace-step module and set *creature strength*.
 
-To delete a creature, press the × on its row or *delete creature* in the gym (click twice to confirm). Your original audio is never touched.
+To delete a creature, press the × on its row or *delete creature* in the vivarium (click twice to confirm). Your original audio is never touched.
 
 **What you see** is the entity: a nebula made of the sound it ate, rendered on the GPU as real 3D dust and gas
 (a ray-marched volume, so there are no lines or particles).
@@ -157,7 +157,7 @@ Where the limbs sit comes from the sound of all its food together. During traini
 grow together as one limb. Each limb gets a description and its own trigger word, which goes into the training
 captions, so a single creature can hold several sub-styles and you can call one by putting its word in a caption.
 
-**Time.** Every track is one training step per epoch, so more or longer tracks mean slower epochs. The gym shows an
+**Time.** Every track is one training step per epoch, so more or longer tracks mean slower epochs. The vivarium shows an
 estimate before you start, timed on your own Mac after the first epoch. For big collections, set
 *train on at most N tracks* and it picks the most typical tracks of every limb. Stopping keeps the last checkpoint,
 and a paused creature is already usable.
@@ -188,7 +188,7 @@ Zvoid works offline once the models are downloaded. Set `ZVOID_CLAUDE_MODEL` to 
 |---|---|
 | `outputs/` | Everything you generate, one folder per run with a `meta.json` |
 | `patches/` | Saved wiring |
-| `creatures/` | Gym creatures: the audio you fed them and their trained adapters |
+| `creatures/` | Vivarium creatures: the audio you fed them and their trained adapters |
 | `engines/<id>/` | One folder per engine: `engine.json` (ports and knobs) and `engine.py` (the code) |
 | `.envs/<id>/` | Each engine's own Python environment |
 | `src/zvoid/` | The app: a small local server (`server.py`) and the canvas (`web/`) |

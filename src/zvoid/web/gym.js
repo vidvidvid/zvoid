@@ -196,6 +196,36 @@ function voiceOut() {
     inp.connect(bus()); inp.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(bus()); ECHO = inp; ECHO.dl = dl; ECHO.fb = fb; }
   return ECHO;
 }
+/* ---------- its memory ----------
+   Its real voice is made of what it ate: short excerpts of its own tracks, played back as overlapping grains.
+   Untrained, it only manages short, scattered, detuned scraps. Training makes the grains longer and truer. */
+const GRAIN = { bufs: new Map(), busy: new Set() };
+function grainBuf(slug, name) {
+  const k = slug + '/' + name, b = GRAIN.bufs.get(k); if (b) return b;
+  if (!GRAIN.busy.has(k) && GRAIN.busy.size < 3) { GRAIN.busy.add(k);
+    fetch(`/api/gym/${slug}/grain/${encodeURIComponent(name)}`).then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status)).then(a => new Promise((res, rej) => ac().decodeAudioData(a, res, rej)))
+      .then(buf => { GRAIN.bufs.set(k, buf); if (GRAIN.bufs.size > 40) GRAIN.bufs.delete(GRAIN.bufs.keys().next().value); }).catch(() => {}).finally(() => GRAIN.busy.delete(k)); }
+  return null;
+}
+function grainWarm(c) {                            // keep the three most typical tracks of every limb in memory; called now and then, it works through them a few at a time
+  if (!c || !c.food || !c.food.length) return; const per = {};
+  for (const f of [...c.food].sort((a, b) => (a.core || 0) - (b.core || 0))) { const lk = f.limb || 0; per[lk] = (per[lk] || 0) + 1; if (per[lk] <= 3) grainBuf(c.slug, f.name); }
+}
+/* one grain: a slice of a track, faded in and out. pos is 0..1 through the excerpt. */
+function grainOne(buf, o = {}) {
+  const a = ac(), t0 = a.currentTime + (o.when || 0), dur = Math.min(o.dur || .25, buf.duration * .9), src = a.createBufferSource(), g = a.createGain(), rate = o.rate || 1;
+  src.buffer = buf; src.playbackRate.value = rate; const off = clamp((o.pos ?? Math.random()) * buf.duration, 0, Math.max(0, buf.duration - dur * rate - .01)), at = Math.min(dur * .4, o.attack || .03);
+  g.gain.setValueAtTime(.0001, t0); g.gain.exponentialRampToValueAtTime(o.gain || .3, t0 + at); g.gain.setValueAtTime(o.gain || .3, t0 + dur * .55); g.gain.exponentialRampToValueAtTime(.0001, t0 + dur);
+  src.connect(g); g.connect(voiceOut()); src.start(t0, off, dur * rate + .05); src.stop(t0 + dur + .1);
+}
+/* a cloud of grains from one track. pure 0..1 = how well it remembers. Returns false if that track is not in memory yet. */
+function grainCloud(slug, name, o = {}) {
+  const buf = grainBuf(slug, name); if (!buf) return false;
+  const pure = o.pure || 0, n = o.n || 7, pos = o.pos ?? Math.random(), rnd = Math.random;
+  for (let i = 0; i < n; i++) grainOne(buf, { when: (o.when || 0) + i * (o.gap ?? .09) * (.6 + rnd() * .8), dur: (.09 + pure * .5) * (.7 + rnd() * .8) * (o.long || 1), pos: clamp(pos + (rnd() - .5) * (.3 - .24 * pure), 0, 1),
+    rate: (o.rate || 1) * (rnd() < .2 * (1 - pure) ? (rnd() < .5 ? .5 : 2) : 1) * (1 + (rnd() - .5) * .06 * (1 - pure)), gain: (o.gain || .3) * (.6 + rnd() * .5) / Math.sqrt(n / 5), attack: .012 + pure * .05 });
+  return true;
+}
 const ALIEN_SCALE = [1, 1.0802, 1.1905, 1.3333, 1.4815, 1.6071, 1.8];        // steps of an unfamiliar tuning
 const noteOf = v => 98 * Math.pow(2, Math.floor(clamp(v, 0, .999) * 21 / 7)) * ALIEN_SCALE[Math.floor(clamp(v, 0, .999) * 21) % 7];
 function tone(freq, o = {}) {
@@ -240,7 +270,7 @@ const gymEl = () => $('#gym');
 async function openGym(slug) {
   Gym.open = true; gymEl().hidden = false; openDrawer(null);
   if (Gym.list.length) { Gym.key = ''; gymRender(); cancelAnimationFrame(Gym.raf); gymFrame(); }               // show what we already know at once
-  else if (!gymEl().children.length) gymEl().replaceChildren(h('div', { style: 'grid-column:1/-1;display:grid;place-items:center;font:11px var(--mono);letter-spacing:.3em;color:var(--muted)' }, 'ENTERING THE GYM…'));
+  else if (!gymEl().children.length) gymEl().replaceChildren(h('div', { style: 'grid-column:1/-1;display:grid;place-items:center;font:11px var(--mono);letter-spacing:.3em;color:var(--muted)' }, 'ENTERING THE vivarium…'));
   await gymLoad(slug); clearInterval(Gym.timer); Gym.timer = setInterval(gymPoll, 1000);
   cancelAnimationFrame(Gym.raf); gymFrame();
 }
@@ -330,7 +360,7 @@ function gymBuild() {
   const nameIn = h('input', { placeholder: 'name a new creature', spellcheck: 'false', onkeydown: e => { if (e.key === 'Enter') hatchB.click(); e.stopPropagation(); } });
   const hatchB = h('button', { class: 'hot', onclick: () => { const v = nameIn.value.trim(); if (v) gymDo(() => api('/api/gym', { json: { name: v } })); } }, 'hatch');
   const left = h('div', { id: 'gym-left' },
-    h('div', { class: 'drawer-head' }, h('span', {}, 'gym'), h('button', { onclick: closeGym, title: 'Back to the canvas (esc)' }, '← canvas')),
+    h('div', { class: 'drawer-head' }, h('span', {}, 'vivarium'), h('button', { onclick: closeGym, title: 'Back to the canvas (esc)' }, '← canvas')),
     h('p', { class: 'gym-note' }, 'A creature is a small adapter for ACE-Step that learns your sound. Feed it your tracks, train it, then pick it inside any ace-step module.'),
     h('div', { class: 'gym-list' }, Gym.list.map(x => h('button', { class: 'creature-row' + (c && x.slug === c.slug ? ' cur' : ''), onclick: () => { Gym.cur = x; Gym.key = ''; gymRender(); } },
       h('canvas', { class: 'mini-creature', data: { slug: x.slug } }), h('span', {}, h('b', {}, x.name), h('small', {}, `${stageName(x)} · ${x.food.length} tracks · ${x.epochs} ep`)),
@@ -466,7 +496,7 @@ function gymFolderPicker(res) {
 /* feed a result from the canvas straight to a creature */
 async function feedChooser(path, ev) {
   const list = await api('/api/gym'), p = $('#palette');
-  if (!list.length) { toast('no creatures yet — open the gym and hatch one'); return; }
+  if (!list.length) { toast('no creatures yet — open the vivarium and hatch one'); return; }
   p.replaceChildren(h('div', { style: 'font:10px var(--mono);color:var(--muted);padding:4px 8px;letter-spacing:.12em' }, 'FEED TO…'), ...list.map(c => h('button', { style: `--c:hsl(${hueOf(dna(c).bright)},90%,60%)`, onclick: async () => {
     closePalette(); try { await api(`/api/gym/${c.slug}/feed?path=` + encodeURIComponent(path), { method: 'POST' }); toast(`“${c.name}” ate it`); } catch (e) { toast(String(e.message || e), true); } } }, h('i'), c.name, h('small', {}, c.food.length + ' tracks'))));
   p.style.left = Math.min(ev.clientX, innerWidth - 270) + 'px'; p.style.top = Math.min(ev.clientY, innerHeight - 300) + 'px'; p.hidden = false;
