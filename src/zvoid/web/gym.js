@@ -176,8 +176,8 @@ function drawCreature(g, W, H, c, t, mouse, mini) {
 }
 
 /* notice what changed since the last look, so new tracks stream in and epochs ripple through it */
-function gymFx(c) {
-  const fx = fxOf(c.slug), now = performance.now() / 1000;
+function gymFx(c, at) {
+  const fx = fxOf(c.slug), now = at ?? performance.now() / 1000;
   if (fx.names) { let k = 0; for (const f of c.food) if (!fx.names.has(f.name)) { fx.births[f.name] = now + k * .16; fx.waves.push({ t0: now + k * .16, pole: f.limb || k }); k++; } }
   fx.names = new Set(c.food.map(f => f.name));
   if (fx.epochs != null && c.epochs > fx.epochs) { fx.waves.push({ t0: now, pole: c.epochs }); if (fx.life) fx.life.beat = now; }      // an epoch lands: a full shock front
@@ -290,7 +290,7 @@ async function gymPoll() {
 }
 function gymFrame() {
   if (!Gym.open) return;
-  const t = performance.now() / 1000;
+  const t = performance.now() / 1000; Gym.rafAt = t; gymRecTick(t);
   const cv = $('#gym-canvas');
   if (cv && NEB.ok) {                                    // GPU nebula
     if (Gym.cur) nebFrame(Gym.cur, t, Gym.mouse);
@@ -367,7 +367,7 @@ function gymBuild() {
       h('span', { class: 'row-del', data: { label: '×' }, title: 'Delete this creature', onclick: e => { e.stopPropagation(); gymDelete(e.currentTarget, x); } }, '×')))),
     h('div', { class: 'gym-new' }, nameIn, hatchB));
 
-  const stage = h('div', { id: 'gym-stage' }, nebCanvas(), h('div', { id: 'gym-fps' }), h('button', { id: 'gym-shot', title: 'Save a still of it, far sharper than the screen (up to 3840 px), to outputs/captures', onclick: () => nebCapture() }, '◉ capture'), h('div', { id: 'gym-train', hidden: true }),
+  const stage = h('div', { id: 'gym-stage' }, nebCanvas(), h('div', { id: 'gym-fps' }), h('button', { id: 'gym-shot', title: 'Save a still of it, far sharper than the screen (up to 3840 px), to outputs/captures', onclick: () => nebCapture() }, '◉ capture'), h('button', { id: 'gym-rec', title: 'Record a time-lapse: frames are taken at intervals and joined into a video in outputs/recordings. Start it, then start training, and it stops by itself when training ends. Keep the vivarium open.', onclick: () => gymRecToggle() }, Gym.rec ? '■ stop recording' : '● record'), h('div', { id: 'gym-train', hidden: true }),
     c ? h('div', { id: 'gym-caption' }, h('h1', {}, c.name), h('div', { id: 'gym-stats' })) : h('div', { id: 'gym-caption' }, h('h1', {}, 'no creatures yet'), h('div', {}, 'name one on the left and press hatch')));
   stage.addEventListener('mousemove', e => { const r = stage.getBoundingClientRect(); Gym.mouse = { x: e.clientX - r.left, y: e.clientY - r.top }; });
   stage.addEventListener('mouseleave', () => { Gym.mouse = null; });
@@ -445,6 +445,41 @@ function gymBreed(c, e) {
     gymDo(() => api('/api/gym_breed', { json: { a: c.slug, b: sel.value, name } })).then(() => toast(`“${name}” is born`)); } }, 'breed');
   host.append(h('div', { class: 'breed-form', style: 'display:flex;gap:6px;margin-top:8px;flex-basis:100%' }, sel, nm, go));
 }
+/* ---------- time-lapse ----------
+   While it is on, a frame is taken at intervals and the frames are joined into a video. Each frame is drawn from a separate
+   copy of the creature on a clock that advances one video frame at a time, so in the video it moves at its natural pace
+   while its growth is sped up. Recording through a training run gives about a minute of video. */
+async function gymRecToggle() {
+  if (Gym.rec) return gymRecStop();
+  const c = Gym.cur; if (!c || !NEB.ok) return;
+  try { const r = await api(`/api/gym/${c.slug}/rec/start`, { method: 'POST' });
+    Gym.rec = { slug: c.slug, id: r.id, i: 0, sent: 0, every: 0, next: 0, vt: performance.now() / 1000, seen: false, tail: -1, busy: false };
+    toast('recording. Start training whenever you like; it stops by itself when training ends.'); gymRecLabel(); } catch (e) { toast('could not start recording: ' + e.message, true); }
+}
+function gymRecLabel() { const b = $('#gym-rec'); if (b) b.textContent = Gym.rec ? '■ stop recording' : '● record'; }
+async function gymRecStop() {
+  const r = Gym.rec; if (!r) return; Gym.rec = null; gymRecLabel();
+  if (!r.i) { toast('nothing was recorded'); return; }
+  toast(`joining ${r.i} frames into a video…`);
+  for (let k = 0; k < 40 && r.sent < r.i; k++) await sleep(150);                        // let the last uploads land
+  try { const res = await api(`/api/gym/${r.slug}/rec/${r.id}/finish`, { method: 'POST' }); toast(`saved ${res.name} (${res.seconds}s)`); } catch (e) { toast('could not make the video: ' + e.message, true); }
+}
+function gymRecTick(now) {
+  const r = Gym.rec; if (!r || r.busy || NEB.shot || now < r.next) return;
+  const c = (Gym.cur && Gym.cur.slug === r.slug ? Gym.cur : Gym.list.find(x => x.slug === r.slug)); if (!c) return gymRecStop();
+  const tr = c.training && c.training.state === 'running' ? c.training : null;
+  if (tr) { r.seen = true; if (tr.stage === 'train' && c.pace && tr.audio_secs && !r.fixed) { r.fixed = true; r.every = clamp((tr.max_epochs - tr.epoch) * (c.pace * tr.audio_secs + tr.tracks * .1) / 1600, 1, 30); } }   // spread about 1600 frames over what is left
+  else if (r.seen) { if (r.tail < 0) { r.tail = 60; r.every = .04; } else if (--r.tail <= 0) return gymRecStop(); }   // training has ended: hold on the result for two seconds, then finish
+  r.next = now + (r.every || (tr ? 3 : .5)); r.busy = true; r.vt += 1 / 30;
+  const rc = Object.assign({}, c, { slug: r.slug + '#rec' }); gymFx(rc, r.vt);
+  NEB.shot = { t: r.vt, n: 0, frames: 5, slug: r.slug, rec: true, step: 1 / 30, size: 1920, c: rc, done: b => { const i = r.i++; r.busy = false;
+    if (b) fetch(`/api/gym/${r.slug}/rec/${r.id}/frame/${i}`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: b }).catch(() => {}).finally(() => { r.sent++; }); else r.sent++; } };
+}
+setInterval(() => {                                                                      // if the window is hidden the normal frame loop stops: keep the time-lapse going from a timer
+  const now = performance.now() / 1000; if (!Gym.rec || !Gym.open || !NEB.ok || now - (Gym.rafAt || 0) < 1.2) return;
+  gymRecTick(now); for (let k = 0; k < 8 && NEB.shot && NEB.shot.rec && Gym.cur; k++) nebFrame(Gym.cur, now, null);
+}, 700);
+
 /* Ask a limb to sing: ACE-Step makes a short new clip in that limb's style (through the creature's adapter if it has trained),
    and the creature performs it. Until it has trained, you hear what the plain model makes of that limb's description. */
 async function gymSing(c, limbId) {

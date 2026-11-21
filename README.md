@@ -150,6 +150,12 @@ It cannot sing while it trains.
 **Capture.** *◉ capture* stops time and saves a still far sharper than the screen (up to 3840 px, averaged over 36 frames) to
 `outputs/captures/`.
 
+**Record a time-lapse.** *● record* takes a frame at intervals and joins them into a video in `outputs/recordings/`. Start it, then
+start training: it spreads about 1600 frames over the run (roughly a minute of video), holds on the result for two seconds
+when training ends, and finishes by itself. Each frame is drawn from a separate copy of the creature on its own clock, so in
+the video it moves at its natural pace while its growth is sped up. Keep the vivarium open while it records. There is no
+sound in the video.
+
 **Breed.** Two trained creatures can have a child (*breed…*). Its adapter is the exact average of its parents' (their low-rank
 matrices are stacked, so nothing is retrained), it inherits links to all of their food, and it can be trained further.
 Both parents need the same capacity settings.

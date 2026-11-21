@@ -6,6 +6,7 @@ import json
 import random
 import re
 import socket
+import shutil
 import subprocess
 import threading
 import time
@@ -320,6 +321,43 @@ def create_app():
         f.write_bytes(data)
         subprocess.run(["open", "-R", str(f)])
         return {"path": str(f), "name": f.name}
+
+    def _rec_dir(slug: str, rid: str) -> Path:
+        if not re.fullmatch(r"\d{8}-\d{6}", rid):
+            raise HTTPException(400, "bad recording id")
+        return OUTPUTS_DIR / "recordings" / f"{gym.slugify(slug)}-{rid}"
+
+    @app.post("/api/gym/{slug}/rec/start")
+    def gym_rec_start(slug: str):
+        rid = time.strftime("%Y%m%d-%H%M%S")
+        _rec_dir(slug, rid).mkdir(parents=True, exist_ok=True)
+        return {"id": rid}
+
+    @app.post("/api/gym/{slug}/rec/{rid}/frame/{i}")
+    async def gym_rec_frame(slug: str, rid: str, i: int, request: Request):
+        d = _rec_dir(slug, rid)
+        data = await request.body()
+        if not d.is_dir() or not data.startswith(b"\xff\xd8") or len(data) > 20_000_000:
+            raise HTTPException(400, "not a frame")
+        (d / f"f_{i:06d}.jpg").write_bytes(data)
+        return {"ok": True}
+
+    @app.post("/api/gym/{slug}/rec/{rid}/finish")
+    def gym_rec_finish(slug: str, rid: str):
+        d = _rec_dir(slug, rid)
+        frames = sorted(d.glob("f_*.jpg")) if d.is_dir() else []
+        if not frames:
+            raise HTTPException(400, "no frames were recorded")
+        for k, f in enumerate(frames):                       # close any gaps so ffmpeg sees one unbroken sequence
+            f.rename(d / f"g_{k:06d}.jpg")
+        out = d.with_suffix(".mp4")
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-framerate", "30", "-i", str(d / "g_%06d.jpg"), "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "17", "-movflags", "+faststart", str(out)], capture_output=True, text=True)
+        if r.returncode or not out.exists():
+            raise HTTPException(400, "ffmpeg could not join the frames: " + (r.stderr or "").strip()[-200:])
+        shutil.rmtree(d, ignore_errors=True)
+        subprocess.run(["open", "-R", str(out)])
+        return {"path": str(out), "name": out.name, "frames": len(frames), "seconds": round(len(frames) / 30, 1)}
 
     @app.delete("/api/gym/{slug}/food/{name}")
     def gym_unfeed(slug: str, name: str):
