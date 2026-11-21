@@ -45,10 +45,12 @@ function live(fx, d, t, mouse, cx0, cy0, S, au) { // its inner life: none of thi
   const sd = d.seed * 100, L = fx.life || (fx.life = { t, yaw: d.seed * 6, startle: 0, sx: cx0, sy: cy0, beat: -9, bassAvg: 0, phase: 0 });
   const dt = clamp(t - L.t, 0, .1); L.t = t; L.dt = dt;
   if (mouse) { L.sx += (mouse.x - L.sx) * Math.min(1, dt * 2.2); L.sy += (mouse.y - L.sy) * Math.min(1, dt * 2.2); }   // it follows a calm, delayed idea of where you are
+  if (mouse && dt > 0) { const sp = L.mx == null ? 0 : Math.hypot(mouse.x - L.mx, mouse.y - L.my) / Math.max(dt, .004); L.mx = mouse.x; L.my = mouse.y; L.msp = (L.msp || 0) * .75 + sp * .25;   // a sudden fast movement near it makes it flinch
+    if (L.msp > S * 6 && t - (L.flT || -9) > 4) { L.flT = t; L.startle = Math.max(L.startle, .3); } } else if (!mouse) { L.mx = null; L.msp = 0; }
   L.curious = mouse ? clamp(.4 + noise(t * .05 + sd) * .9, 0, 1) : 0;
   L.startle *= Math.exp(-dt * 1.4);
   const drive = au ? au.level : 0;
-  L.yaw += ((.07 + noise(t * .06 + sd + 5) * .32 + (d.training ? .3 : 0)) * (1 + L.startle * 3) + drive * .6 * (noise(t * .02 + sd) > -.2 ? 1 : -1)) * dt;
+  L.yaw += ((.07 + noise(t * .06 + sd + 5) * .32 + (d.training ? .3 : 0)) * (1 + L.startle * .8) + drive * .35 * (noise(t * .02 + sd) > -.2 ? 1 : -1)) * dt;
   L.pitch = .35 + noise(t * .045 + sd + 9) * .65; L.roll = noise(t * .035 + sd + 13) * .7;
   L.phase += dt * (1.0 + noise(t * .09 + sd + 2) * .75 + (d.training ? .8 : 0));
   L.breath = clamp((.5 + .5 * Math.sin(L.phase)) * (1 + Math.max(0, noise(t * .03 + sd + 30) - .55) * 2.6), 0, 2);
@@ -550,7 +552,7 @@ async function gymSing(c, limbId) {
   Gym.sing = { slug: c.slug, limb: limbId == null ? 0 : limbId, t0: performance.now(), msg: 'composing…' }; toast(c.trained ? 'it is composing…' : 'it has not trained yet: this is the plain model\'s guess at that limb');
   try {
     const { id } = await api('/api/run', { json: { engine: 'ace_step', params } });
-    for (;;) { await sleep(500); const j = await api('/api/jobs/' + id); Gym.sing.msg = (j.msg || 'composing…') + (j.frac != null ? ` · ${Math.round(j.frac * 100)}%` : '');
+    for (;;) { await sleep(500); const j = await api('/api/jobs/' + id); Gym.sing.id = id; Gym.sing.frac = j.frac || 0; Gym.sing.msg = (j.msg || 'composing…') + (j.frac != null ? ` · ${Math.round(j.frac * 100)}%` : '');
       if (j.state === 'done') { const out = (j.outputs || [])[0]; if (!out) throw new Error('nothing came back'); gymPlayPath(out.path); toast('it sings (saved to the library)'); break; }
       if (j.state === 'error' || j.state === 'cancelled') throw new Error((j.error || j.msg || 'failed').split('\n')[0]); }
   } catch (e) { toast('it could not sing: ' + (e.message || e), true); }
