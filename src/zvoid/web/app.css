@@ -334,3 +334,9 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 .tr-foot { font: 9.5px var(--mono); color: var(--muted); letter-spacing: .08em; }
 
 #gym-train { white-space: nowrap; }
+
+/* training readout: legible over anything */
+#gym-train { padding: 12px 46px 16px; background: radial-gradient(closest-side, #04040bd9 55%, transparent); }
+.tr-foot { font-size: 11px; color: #c9c6e2; letter-spacing: .1em; }
+.tr-phases { color: #6f6c8c; } .tr-phases .done { color: #a9a6c4; }
+.tr-sub { text-shadow: 0 0 10px #000; }

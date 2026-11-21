@@ -43,7 +43,9 @@ uniform vec3 uDiscN, uDiscU, uDiscV;
 uniform vec4 uDisc;      // inner radius, outer radius, half thickness, on
 uniform vec4 uRing[8];   // radius, weight, arcs around, angular speed
 uniform vec4 uProg;      // training: whole-session fraction, current-epoch fraction, on, head pulse
-uniform vec4 uSweep;     // training: height of the scanning sheet, its strength
+uniform vec4 uSweep;     // training: how far light has risen through the pillars (0 base .. 1 tip), its strength
+uniform vec4 uFood[12];  // digesting: tracks waiting to be eaten, as motes (xyz, brightness)
+float gH;                // how far along its pillar the last sampled point was
 const int STEPS = 80;
 
 float n3(vec3 x) {
@@ -59,7 +61,7 @@ float fbm(vec3 p) {                         // four octaves; the third doubles a
 float fbm2(vec3 p) { return .62 * n3(p) + .31 * n3(p * 2.03 + vec3(1.7, 9.2, 3.1)); }
 
 float shapes(vec3 q, out vec3 tint, out float halo) {
-  float d = 0.; tint = vec3(0.); halo = 0.;
+  float d = 0.; tint = vec3(0.); halo = 0.; gH = 0.;
   for (int i = 0; i < 6; i++) {
     float w = uCol[i].w;
     if (w > 0.) {
@@ -67,9 +69,10 @@ float shapes(vec3 q, out vec3 tint, out float halo) {
       float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.), r0 = uPole[i].w;
       float sd = length(pa - ba * h) - r0 * (1. - .5 * h);
       float di = smoothstep(.9, -.6, sd / r0) * w, hl = smoothstep(2.6, -.4, sd / r0) * w;
-      d += di; halo += hl * hl; tint += uCol[i].rgb * (di + hl * .25);
+      d += di; halo += hl * hl; tint += uCol[i].rgb * (di + hl * .25); gH += h * (di + hl * .25);
     }
   }
+  gH /= max(d + halo * .25, 1e-3);
   tint /= max(d + halo * .25, 1e-3);
   return min(d, 1.5);
 }
@@ -138,6 +141,13 @@ void main() {
           if (rw > 0.) { float dr = (r - uRing[j].x) / .022, e = exp(-dr * dr) * smoothstep(-.15, .25, sin(ang * uRing[j].z + uT * uRing[j].w + float(j) * 2.4) - (1. - rw * 1.2)) * rw; dd += e; hm += e * fract(float(j) * .37 + .2); }
         }
         if (dd > .003) { ringA = 1. - exp(-dd * min(3.5, 1. / abs(dn)) * 1.1); ringC = mix(mix(uAmb, uKey, clamp(hm / dd, 0., 1.)), vec3(.9, .92, 1.), .45) * (.85 + uAud.w * 1.5 + uLife.w) * ringA; tP = tq; }
+        if (uProg.z > 0.) {                     // training: two broken arcs in its orbit grow. Outer = the whole session, inner = this epoch.
+          float a01 = fract(ang / 6.2831853 + .5), tau = a01 * 6.2831853;
+          float seg1 = smoothstep(-.75, -.55, sin(tau * 29.) + .5 * sin(tau * 11. + 1.3)), seg2 = smoothstep(-.6, -.4, sin(tau * 41. + 2.) + .6 * sin(tau * 13.));   // irregular marks, like its script
+          float d1 = (r - 1.66) / .02, d2 = (r - 1.52) / .013, h1 = min(abs(a01 - uProg.x), 1. - abs(a01 - uProg.x)) * 50., h2 = min(abs(a01 - uProg.y), 1. - abs(a01 - uProg.y)) * 50.;
+          float g1 = exp(-d1 * d1) * (.05 + step(a01, uProg.x) * seg1 * .95) + exp(-h1 * h1 - d1 * d1 * .1) * (1.1 + uProg.w), g2 = exp(-d2 * d2) * (.035 + step(a01, uProg.y) * seg2 * .75) + exp(-h2 * h2 - d2 * d2 * .08) * (.9 + uProg.w);
+          if (g1 + g2 > .01) { ringC += mix(vec3(1.), uKey, .3) * g1 + mix(vec3(1.), uAmb, .5) * g2; ringA = max(ringA, min(1., g1 + g2)); tP = tq; }
+        }
       }
     }
   }
@@ -168,13 +178,13 @@ void main() {
         }
       }
       if (uTouch.w > 0.) { vec3 e2 = q - uTouch.xyz; float tg = exp(-dot(e2, e2) * 2.6) * uTouch.w; q += normalize(e2 + 1e-4) * tg * .4; ring += tg * .7; }   // your finger in the dust
-      vec3 tint; float halo; float sh = shapes(q, tint, halo);
+      vec3 tint; float halo; float sh = shapes(q, tint, halo); float hAlong = gH;
       if (halo + sh < .012) continue;
       float cv = carve(q);
       float rip = ripples(q) * uReson.x;
       float haze = n3(q * .7 + vec3(0., uT * .02, 3.)), wisp = w.x / turb + .5;
-      float swp = (q.y - uSweep.x) * 4.2, sweep = exp(-swp * swp) * uSweep.y;   // training: a sheet of light climbs through it once per epoch
-      ring += sweep;
+      float sapD = (hAlong - uSweep.x) / .04, sap = uSweep.y * (smoothstep(uSweep.x + .05, uSweep.x - .03, hAlong) * .3 + exp(-sapD * sapD) * 1.5);   // training: light rises through each pillar, base to tip, once per epoch
+      ring += sap;
       float gas = (halo * .55 + sh * .25) * haze * haze * (.45 + wisp) * cv * max(0., 1. + rip * 2.4);
       C += T * mix(uAmb, tint, .45 + .4 * clamp(sh, 0., 1.)) * gas * dt * (.62 + ring * 2.5 + uAud.w * .6);
       if (sh > .02) {
@@ -210,14 +220,11 @@ void main() {
     float sb = uStar[k].w;
     if (sb > 0.) { vec3 so = uStar[k].xyz - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; C += vec3(1., .93, .86) * sb * (.0022 / (dot(dv, dv) + .0005)) * mix(1., T, .55) * step(0., tc); }
   }
-  C += bg * T;
-  if (uProg.z > 0.) {                           // training: two rings that always face you. Outer = the whole session, inner = this epoch.
-    float pr = length(uv), a01 = fract(atan(uv.x, uv.y) / 6.2831853), d1 = (pr - .79) / .0045, d2 = (pr - .76) / .003;
-    float h1 = min(abs(a01 - uProg.x), 1. - abs(a01 - uProg.x)) * 60., h2 = min(abs(a01 - uProg.y), 1. - abs(a01 - uProg.y)) * 60.;
-    float g1 = exp(-d1 * d1) * (.07 + step(a01, uProg.x) * .8) + exp(-h1 * h1 - d1 * d1 * .05) * (.5 + uProg.w * .5);
-    float g2 = exp(-d2 * d2) * (.05 + step(a01, uProg.y) * .6) + exp(-h2 * h2 - d2 * d2 * .04) * (.4 + uProg.w * .4);
-    C += mix(vec3(1.), uKey, .25) * g1 + mix(vec3(1.), uAmb, .45) * g2;
+  for (int k = 0; k < 12; k++) {               // digesting: the tracks it has yet to eat drift around it as motes
+    float fb = uFood[k].w;
+    if (fb > 0.) { vec3 so = uFood[k].xyz - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; float d2 = dot(dv, dv); C += mix(uAmb, vec3(1.), .55) * fb * (.0035 / (d2 + .0012) + exp(-d2 * 70.) * .6) * mix(1., T, .5) * step(0., tc); }
   }
+  C += bg * T;
   C *= 1. + uLife.w * .35;
   C = 1. - exp(-C * 1.35);
   C = pow(C, vec3(.92));
@@ -246,7 +253,7 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN']) NEB.U[n] = gl.getUniformLocation(pr, n);
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood']) NEB.U[n] = gl.getUniformLocation(pr, n);
   gl.uniform1i(NEB.U.uNoise, 0);
   NEB.gl = gl;
 }
@@ -356,7 +363,7 @@ function nebFrame(c, t, mouse) {
   for (let j = 0; j < nrings; j++) { const limb = limbs && limbs[j % limbs.length], bpm = (limb && limb.mean.bpm) || d.bpm || 100, share = limb ? limb.count / n : .5;
     rings.set([1.95 + j * .25 + .04 * noise(t * .1 + j * 5 + sd), clamp(.35 + share * 1.2 + (au ? au.mid * .4 : 0), .3, .95), 1 + ((j * 2 + Math.round(bpm / 40)) % 5), bpm / 60 * .28 * (j % 2 ? 1 : -1)], j * 4); }
   const dn0 = nvec(t * .03, sd + 300), dnv = [dn0[0] * .7, 1, dn0[2] * .7 + .35], dnl = Math.hypot(...dnv), DN = dnv.map(v => v / dnl);
-  let DU = [DN[1], -DN[0], 0]; const dul = Math.hypot(...DU) || 1; DU = DU.map(v => v / dul); const DV = [DN[1] * DU[2] - DN[2] * DU[1], DN[2] * DU[0] - DN[0] * DU[2], DN[0] * DU[1] - DN[1] * DU[0]];
+  let DU = [DN[1], -DN[0], 0]; const dul = Math.hypot(...DU) || 1; DU = DU.map(v => v / dul); let DV = [DN[1] * DU[2] - DN[2] * DU[1], DN[2] * DU[0] - DN[0] * DU[2], DN[0] * DU[1] - DN[1] * DU[0]];
   gl.uniform1f(U.uForm, form); gl.uniform4f(U.uGy, 5.2 + d.bright * 4.5 + (au ? au.high * 1.5 : 0), .05 + lv * .25, .5 + .5 * noise(t * .03 + sd + 60), .26 + .1 * noise(t * .07 + sd));
   // training progress, made visible
   const tr = c.training && c.training.state === 'running' ? c.training : null, pg = fx.pg || (fx.pg = { i: 0, s: 0 });
@@ -372,9 +379,27 @@ function nebFrame(c, t, mouse) {
   }
   pg.i = inner < pg.i - .3 ? inner : pg.i + (inner - pg.i) * Math.min(1, dt * 3); pg.s += (sess - pg.s) * Math.min(1, dt * 3);
   gl.uniform4f(U.uProg, pg.s, pg.i, tr ? 1 : 0, tr ? .5 + .5 * Math.sin(t * (tr.stage === 'train' ? 5 : 9)) : 0);
-  gl.uniform3fv(U.uDiscN, DN); gl.uniform3fv(U.uDiscU, DU); gl.uniform3fv(U.uDiscV, DV); gl.uniform4f(U.uDisc, 1.8, 2.1 + nrings * .25, .13, nrings ? 1 : 0); gl.uniform4fv(U.uRing, rings);
+  if (tr) {                                        // while it trains, its orbit turns to face you enough to be read
+    const cf = rot([0, 0, 1]), mixN = [DN[0] * .45 + cf[0] * .55, DN[1] * .45 + cf[1] * .55, DN[2] * .45 + cf[2] * .55], ml = Math.hypot(...mixN) || 1; for (let k = 0; k < 3; k++) DN[k] = mixN[k] / ml;
+    DU = [DN[1], -DN[0], 0]; const l2 = Math.hypot(...DU) || 1; DU = DU.map(v => v / l2); DV[0] = DN[1] * DU[2] - DN[2] * DU[1]; DV[1] = DN[2] * DU[0] - DN[0] * DU[2]; DV[2] = DN[0] * DU[1] - DN[1] * DU[0];
+  }
+  gl.uniform3fv(U.uDiscN, DN); gl.uniform3fv(U.uDiscU, DU); gl.uniform3fv(U.uDiscV, DV); gl.uniform4f(U.uDisc, tr ? 1.42 : 1.8, Math.max(tr ? 1.78 : 0, 2.1 + nrings * .25), .13, nrings || tr ? 1 : 0); gl.uniform4fv(U.uRing, rings);
+  // food motes: one per track (or per group of tracks) while it digests; each is drawn in and absorbed as it is eaten
+  const food = new Float32Array(48), FS = fx.foodS || (fx.foodS = []);
+  if (tr && (tr.stage === 'digest' || tr.stage === 'start')) {
+    const Mn = Math.min(12, tr.tracks || 0), frac = (tr.digested || 0) / Math.max(1, tr.tracks);
+    for (let k = 0; k < Mn; k++) {
+      const st = FS[k] || (FS[k] = { e: 0 }), eaten = (k + 1) / Mn <= frac + 1e-6, sl = N.slots[k % K];
+      if (eaten && st.e === 0) fx.waves.push({ t0: t + .9, o: [sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len], soft: true, taps: [[0, 1]], speed: 2.6, width: 3 });
+      if (eaten) st.e = Math.min(1, st.e + dt / 1.4);
+      const a = k * 2.39996 + t * (.22 + (k % 3) * .05), orbR = 2.25 + .35 * noise(t * .2 + k * 7), out = [Math.cos(a) * orbR, Math.sin(t * .31 + k * 1.9) * .9, Math.sin(a) * orbR];
+      const tip = [sl.p[0] + sl.a[0] * sl.len * .9, sl.p[1] + sl.a[1] * sl.len * .9, sl.p[2] + sl.a[2] * sl.len * .9], e = st.e * st.e * (3 - 2 * st.e);
+      food.set([out[0] + (tip[0] - out[0]) * e, out[1] + (tip[1] - out[1]) * e, out[2] + (tip[2] - out[2]) * e, st.e >= 1 ? 0 : (.55 + .25 * Math.sin(t * 3 + k)) * (1 + e * 1.5)], k * 4);
+    }
+  } else if (FS.length) fx.foodS = [];
+  gl.uniform4fv(U.uFood, food);
   let ext = 1.5; N.slots.forEach(sl => { if (sl.w > .01) ext = Math.max(ext, Math.hypot(sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 3.4, Math.hypot(...sl.p) + sl.rad * 3.4); });
-  gl.uniform4f(U.uSweep, tr && tr.stage === 'train' ? -ext * .75 + pg.i * ext * 1.5 : Math.sin(t * 1.3) * ext * .6, sweepA, 0, 0);
+  gl.uniform4f(U.uSweep, pg.i, tr ? (tr.stage === 'train' ? 1 : .6) : 0, 0, 0);
   gl.uniform1f(U.uB, Math.min(6, ext + .8)); gl.uniform1f(U.uFrame, (NEB.fr = (NEB.fr || 0) + 1) % 1024);
   const D = NEB.drag; D.s += ((D.on ? 1 : 0) - D.s) * Math.min(1, dt * (D.on ? 9 : 2.2)); gl.uniform4f(U.uTouch, D.p[0], D.p[1], D.p[2], D.s < .01 ? 0 : D.s);
   gl.uniform3fv(U.uLight, light); gl.uniform3fv(U.uKey, key); gl.uniform3fv(U.uAmb, amb);
