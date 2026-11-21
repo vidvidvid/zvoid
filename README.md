@@ -83,9 +83,11 @@ To delete a creature, press the × on its row or *delete creature* in the gym (c
 - **Stars:** one ignites inside the dust every 25 epochs and lights the cloud around it. Voids are cavities carved out of it.
 - **It hears.** Press ▶ on a track in the food list, or play anything on the canvas: the pillars swell with the bass,
   the dust churns with the level, and the rims sparkle with the treble.
-- **It gains form.** Structure appears only with training. The dust crystallises from its densest cores outward into a
-  lattice of thin sheets that light up as waves pass. The voids turn from round holes into faceted cavities. Arcs begin
-  to orbit it, one ring per limb, circling at that limb's tempo. Fog becomes cloud, and cloud becomes structure.
+- **It gains a body.** Structure appears only with training, growing inside the dust in this order: a spine of stacked
+  vertebrae along each pillar, then open ribs, then cables wound around the spine. The body is dark and glossy, its
+  seams glow and carry the sound, and it is mirrored across a midline (one central spine, the other limbs in pairs), so it
+  reads as one organism. The dust thins to a shroud around it, crystallising into a lattice of thin sheets. The voids turn
+  from round holes into faceted cavities, and arcs begin to orbit it, one ring per limb, circling at that limb's tempo.
 - **It reverberates.** Every pillar emits waves at its limb's tempo. They cross and interfere, so the dust shows moving
   standing patterns. Beats, touches and feeding send shock fronts that echo three times, and it rings on after sound stops.
 - **It behaves.** It drifts, breathes unevenly, and leans toward your pointer when it is curious.
@@ -101,7 +103,7 @@ The renderer picks the highest resolution that holds full frame rate on your mac
 
 **Watching it train.** A readout above the entity shows the phase (digest, wake, train), the epoch and step, the loss
 and its trend, and the time left. The entity shows the rest itself. While it digests, the tracks drift around it as
-glowing motes and are drawn in one by one as they are eaten. While it trains, light rises through the pillars from base
+small spores (a lobed membrane, a nucleus, a crown of cilia) and are drawn in one by one as they are eaten. While it trains, light rises through the pillars from base
 to tip once per epoch, and two broken arcs grow in its orbit: the outer one is the whole session, the inner one the
 current epoch. Every training step sends a pulse and every finished epoch a shock front.
 

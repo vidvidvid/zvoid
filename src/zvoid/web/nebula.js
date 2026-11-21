@@ -46,7 +46,10 @@ uniform vec4 uProg;      // training: whole-session fraction, current-epoch frac
 uniform vec4 uSweep;     // training: how far light has risen through the pillars (0 base .. 1 tip), its strength
 uniform vec4 uFood[12];  // digesting: tracks waiting to be eaten, as motes (xyz, brightness)
 float gH;                // how far along its pillar the last sampled point was
-const int STEPS = 80;
+uniform float uSym;      // 1 = the body is mirrored across its midline
+const int STEPS = 96;
+vec3 gPa, gBa; float gR0, gBest;   // the pillar nearest the last sampled point, in its own frame
+float gSeam;             // how deep in a groove of the body the last sampled point was
 
 float n3(vec3 x) {
   vec3 p = floor(x), f = fract(x); f = f * f * (3. - 2. * f);
@@ -61,13 +64,14 @@ float fbm(vec3 p) {                         // four octaves; the third doubles a
 float fbm2(vec3 p) { return .62 * n3(p) + .31 * n3(p * 2.03 + vec3(1.7, 9.2, 3.1)); }
 
 float shapes(vec3 q, out vec3 tint, out float halo) {
-  float d = 0.; tint = vec3(0.); halo = 0.; gH = 0.;
+  float d = 0.; tint = vec3(0.); halo = 0.; gH = 0.; gBest = 1e3;
   for (int i = 0; i < 6; i++) {
     float w = uCol[i].w;
     if (w > 0.) {
       vec3 ba = uAxis[i].xyz * uAxis[i].w, pa = q - uPole[i].xyz;
       float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.), r0 = uPole[i].w;
       float sd = length(pa - ba * h) - r0 * (1. - .5 * h);
+      if (w > .5 && sd / r0 < gBest) { gBest = sd / r0; gPa = pa; gBa = ba; gR0 = r0; }
       float di = smoothstep(.9, -.6, sd / r0) * w, hl = smoothstep(2.6, -.4, sd / r0) * w;
       d += di; halo += hl * hl; tint += uCol[i].rgb * (di + hl * .25); gH += h * (di + hl * .25);
     }
@@ -77,7 +81,7 @@ float shapes(vec3 q, out vec3 tint, out float halo) {
   return min(d, 1.5);
 }
 float nearest(vec3 p) {                      // distance to the outer edge of anything visible; lets rays leap over empty space
-  float m = 1e3;
+  float m = 1e3; p.x = mix(p.x, abs(p.x), uSym);
   for (int i = 0; i < 6; i++) {
     if (uCol[i].w > 0.) { vec3 ba = uAxis[i].xyz * uAxis[i].w, pa = p - uPole[i].xyz; float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.); m = min(m, length(pa - ba * h) - uPole[i].w * 2.7 - .75); }
   }
@@ -108,7 +112,27 @@ float carve(vec3 q) {                         // voids: round holes that become 
   }
   return c;
 }
+float smin(float a, float b, float k) { float h = clamp(.5 + .5 * (b - a) / k, 0., 1.); return mix(b, a, h) - k * h * (1. - h); }
+/* the body: a biomechanical armature along each pillar. Stacked vertebrae, open ribs, cables wound around the spine.
+   It only exists once the creature has trained, and it grows in that order. Returns a signed distance. */
+float bodyL(vec3 pa, vec3 ba, float r0) {
+  float hh = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.);
+  gSeam = 0.;
+  float L = length(ba); vec3 ax = ba / L; float z = dot(pa, ax); vec3 rv = pa - ax * z; float rho = length(rv);
+  vec3 u = normalize(cross(ax, vec3(.31, .95, .07))), v = cross(ax, u); float phi = atan(dot(rv, v), dot(rv, u));
+  float taper = 1. - .45 * hh, f = uForm;
+  float seg = r0 * .36, sv = abs(sin(z * 3.14159 / seg));                                   // spine: stacked vertebrae
+  float d = rho - r0 * .21 * taper * (.6 + .4 * sqrt(sv)) * smoothstep(.04, .3, f);
+  gSeam = smoothstep(.3, 0., sv);
+  float gap = r0 * .52, zc = (fract(z / gap + .5) - .5) * gap, rr = r0 * (.74 - .3 * hh) * (1. + .1 * sin(z * 2.3 / r0));   // ribs: open arcs
+  float th = r0 * .05 * smoothstep(-.9, .5, cos(phi)) * smoothstep(.28, .6, f);
+  d = smin(d, length(vec2(rho - rr, zc)) - th + (th > 1e-4 ? 0. : 1.), r0 * .07);
+  float tw = phi - z * 2.2 / r0, a2 = mod(tw + 1.0472, 2.0944) - 1.0472, rc = r0 * .41 * taper, tc = r0 * .046 * smoothstep(.55, .9, f);   // cables: three helices
+  d = smin(d, length(vec2(rho - rc, a2 * rc)) - tc + (tc > 1e-4 ? 0. : 1.), r0 * .05);
+  return max(d, max(-z, z - L) - r0 * .04);
+}
 float dustLo(vec3 q) {                       // cheap density, for shadows
+  q.x = mix(q.x, abs(q.x), uSym);
   vec3 tt; float hl; float sh = shapes(q, tt, hl);
   if (sh < .02) return 0.;
   return smoothstep(-.3, .3, sh + (fbm2(q * 1.6 + vec3(0., -uT * .03, uT * .015) + uSeed) - .47) * 1.6 - .8) * carve(q);
@@ -178,6 +202,8 @@ void main() {
         }
       }
       if (uTouch.w > 0.) { vec3 e2 = q - uTouch.xyz; float tg = exp(-dot(e2, e2) * 2.6) * uTouch.w; q += normalize(e2 + 1e-4) * tg * .4; ring += tg * .7; }   // your finger in the dust
+      float sx = uSym > .5 && q.x < 0. ? -1. : 1.; q.x = mix(q.x, abs(q.x), uSym);                 // mirror symmetry: one side is the reflection of the other
+      vec3 lF = normalize(uLight - p); lF.x *= sx; vec3 rdF = vec3(rd.x * sx, rd.yz);
       vec3 tint; float halo; float sh = shapes(q, tint, halo); float hAlong = gH;
       if (halo + sh < .012) continue;
       float cv = carve(q);
@@ -185,8 +211,24 @@ void main() {
       float haze = n3(q * .7 + vec3(0., uT * .02, 3.)), wisp = w.x / turb + .5;
       float sapD = (hAlong - uSweep.x) / .04, sap = uSweep.y * (smoothstep(uSweep.x + .05, uSweep.x - .03, hAlong) * .3 + exp(-sapD * sapD) * 1.5);   // training: light rises through each pillar, base to tip, once per epoch
       ring += sap;
+      float ds = dt, shv = -1.;                  // shv: shadow toward the light, worked out once and shared by body and dust
+      if (uForm > .05 && sh > .1) {              // the body inside the dust
+        vec3 bpa = gPa, bba = gBa; float br0 = gR0, bd = bodyL(bpa, bba, br0), seam = gSeam;
+        if (bd < dt * .7) { ds = clamp(bd * .75, dt * .24, dt); t += ds - dt; }       // slow down near its surface so it stays crisp
+        if (bd < .022) {
+          float ab = smoothstep(.022, -.008, bd) * cv;
+          if (ab > .01) {
+            float e = .035, nl = clamp((bodyL(bpa + lF * e, bba, br0) - bd) / e, 0., 1.), nv = clamp((bodyL(bpa - rdF * e, bba, br0) - bd) / e, 0., 1.); shv = dustLo(q + lF * .32); float shB = exp(-shv * 5.);
+            vec3 alb = mix(vec3(.15, .14, .17), tint, .2);                      // dark, glossy, like wet bone
+            vec3 lb = alb * (uKey * nl * shB * 1.9 + uAmb * .1) + pow(1. - nv, 3.) * (uAmb * .55 + uKey * .3) * (.3 + shB * .6)
+                    + tint * seam * (.22 + max(0., rip) * 2.6 + ring * 2.2 + uAud.w * .9);          // its seams glow, and carry the sound
+            C += T * ab * lb; T *= 1. - ab;
+            if (T < .02) break;
+          }
+        }
+      }
       float gas = (halo * .55 + sh * .25) * haze * haze * (.45 + wisp) * cv * max(0., 1. + rip * 2.4);
-      C += T * mix(uAmb, tint, .45 + .4 * clamp(sh, 0., 1.)) * gas * dt * (.62 + ring * 2.5 + uAud.w * .6);
+      C += T * mix(uAmb, tint, .45 + .4 * clamp(sh, 0., 1.)) * gas * ds * (.62 + ring * 2.5 + uAud.w * .6);
       if (sh > .02) {
         vec3 fq = q * 1.6 + vec3(0., -uT * .03, uT * .015) + uSeed;
         float f = fbm(fq);
@@ -202,13 +244,13 @@ void main() {
         }
         if (dust > .01) {
           vec3 l = normalize(uLight - p);
-          float shd = exp(-dustLo(q + l * .34) * 8.5);
+          if (shv < 0.) shv = dustLo(q + lF * .32); float shd = exp(-shv * 8.5);
           vec3 alb = mix(tint, vec3(.62, .46, .36), .4);                       // dusty, a little warm
           vec3 lit = alb * (uKey * shd * 1.45 + uAmb * .07) + tint * (1. - dust) * .26;   // thin edges glow in their own colour
           for (int k = 0; k < 8; k++) { float sb = uStar[k].w; if (sb > 0.) { vec3 ds = uStar[k].xyz - p; lit += alb * vec3(1., .9, .8) * sb * .5 / (dot(ds, ds) * 6. + .15); } }
           lit *= 1. + uAud.z * 1.6 * n3(q * 7. + uT * 2.) * (1. - dust) + ring * 1.5 + max(0., rip) * 1.1;
           lit += (tint * .65 + vec3(.38)) * lat * (.5 + max(0., rip) * 2.8 + ring * 2. + uAud.w * .8);   // the sheets carry the sound: they light up as waves pass
-          float a = 1. - exp(-dust * dt * 9.);
+          float a = 1. - exp(-dust * (1. - uForm * .5) * ds * 9.);                 // the dust thins to a shroud as the body forms
           C += T * a * lit; T *= 1. - a;
           if (T < .02) break;
         }
@@ -222,7 +264,16 @@ void main() {
   }
   for (int k = 0; k < 12; k++) {               // digesting: the tracks it has yet to eat drift around it as motes
     float fb = uFood[k].w;
-    if (fb > 0.) { vec3 so = uFood[k].xyz - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; float d2 = dot(dv, dv); C += mix(uAmb, vec3(1.), .55) * fb * (.0035 / (d2 + .0012) + exp(-d2 * 70.) * .6) * mix(1., T, .5) * step(0., tc); }
+    if (fb > 0.) {                               // each is a small spore: a lobed membrane, a nucleus, a crown of cilia
+      vec3 so = uFood[k].xyz - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; float d2 = dot(dv, dv);
+      if (tc > 0. && d2 < .09) {
+        float fk = float(k), rr = sqrt(d2), an = atan(dot(dv, uCam[1]), dot(dv, uCam[0])), nl = 3. + mod(fk, 3.);
+        float lobe = .5 + .5 * cos(an * nl + uT * (1.2 + fk * .3) + fk * 1.7), mem = (rr - .06 * (1. + .45 * lobe)) / .008;
+        float cil = (rr - .115) / .045, hairs = pow(.5 + .5 * cos(an * (9. + nl) - uT * 2.5 + fk), 7.);
+        float sp = exp(-mem * mem) * .95 + exp(-d2 * 1400.) * 1.3 + exp(-cil * cil) * hairs * .55 + exp(-d2 * 260.) * .12 * lobe;
+        C += mix(uAmb, vec3(1.), .5) * fb * sp * mix(1., T, .5);
+      }
+    }
   }
   C += bg * T;
   C *= 1. + uLife.w * .35;
@@ -253,7 +304,7 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood']) NEB.U[n] = gl.getUniformLocation(pr, n);
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym']) NEB.U[n] = gl.getUniformLocation(pr, n);
   gl.uniform1i(NEB.U.uNoise, 0);
   NEB.gl = gl;
 }
@@ -306,6 +357,8 @@ function nebFrame(c, t, mouse) {
     const wn = nvec(t * .045, j * 13 + sd), an = nvec(t * .038, j * 29 + sd + 50), spread = n ? .75 + .45 * d.growth : 0;
     const tp = [base[0] * spread + wn[0] * .45, base[1] * spread + wn[1] * .45 - .5, base[2] * spread + wn[2] * .45];
     let ta = [base[0] * .9 + an[0] * 1.1, base[1] * .9 + an[1] * 1.1 + .55, base[2] * .9 + an[2] * 1.1];
+    if (j === 0) { tp[0] = wn[0] * .1; ta[0] = an[0] * .2; ta[1] += .9; }                       // the first limb is the spine, on the midline
+    else { tp[0] = Math.abs(tp[0]) + .28; ta[0] = Math.abs(ta[0]) + .2; }                          // the others come in mirrored pairs
     if (pointer && L.curious > .05) for (let k = 0; k < 3; k++) ta[k] += (pointer[k] - tp[k]) * .12 * L.curious;      // it leans toward you when curious
     const al = Math.hypot(ta[0], ta[1], ta[2]) || 1; ta = ta.map(v => v / al);
     const tl = n ? (1.1 + 2.0 * d.growth + .5 * clamp(d.minutes / 30, 0, 1)) * (.55 + .9 * Math.sqrt(share)) * (1 + .06 * (L.breath - .5)) : .5;
@@ -343,7 +396,7 @@ function nebFrame(c, t, mouse) {
   // stars: one ignites every 25 epochs
   const ns = Math.min(8, Math.floor(d.epochs / 25) + (d.training ? 1 : 0)), star = new Float32Array(32);
   for (let k = 0; k < ns; k++) { const s = N.slots[k % K], hh = hash(c.slug + 'star' + k), u = .55 + hh * .5, o = nvec(t * .03, k * 17 + sd), newest = d.training && k === ns - 1;
-    star.set([s.p[0] + s.a[0] * s.len * u + o[0] * .25, s.p[1] + s.a[1] * s.len * u + o[1] * .25, s.p[2] + s.a[2] * s.len * u + o[2] * .25,
+    star.set([(s.p[0] + s.a[0] * s.len * u + o[0] * .25) * (k % 2 ? -1 : 1), s.p[1] + s.a[1] * s.len * u + o[1] * .25, s.p[2] + s.a[2] * s.len * u + o[2] * .25,
       (.55 + .3 * hh + .2 * noise(t * 1.3 + k * 9) + (au ? au.high * .8 : 0)) * (newest ? .25 + .75 * Math.abs(noise(t * 7)) : 1)], k * 4); }
 
   const hue = hueOf(d.bright) + noise(t * .02 + sd) * 16 + (au ? (au.high - au.bass) * 40 : 0), lw = nvec(t * .05, sd + 200);
@@ -397,7 +450,7 @@ function nebFrame(c, t, mouse) {
       food.set([out[0] + (tip[0] - out[0]) * e, out[1] + (tip[1] - out[1]) * e, out[2] + (tip[2] - out[2]) * e, st.e >= 1 ? 0 : (.55 + .25 * Math.sin(t * 3 + k)) * (1 + e * 1.5)], k * 4);
     }
   } else if (FS.length) fx.foodS = [];
-  gl.uniform4fv(U.uFood, food);
+  gl.uniform4fv(U.uFood, food); gl.uniform1f(U.uSym, n ? 1 : 0);
   let ext = 1.5; N.slots.forEach(sl => { if (sl.w > .01) ext = Math.max(ext, Math.hypot(sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 3.4, Math.hypot(...sl.p) + sl.rad * 3.4); });
   gl.uniform4f(U.uSweep, pg.i, tr ? (tr.stage === 'train' ? 1 : .6) : 0, 0, 0);
   gl.uniform1f(U.uB, Math.min(6, ext + .8)); gl.uniform1f(U.uFrame, (NEB.fr = (NEB.fr || 0) + 1) % 1024);
@@ -407,8 +460,8 @@ function nebFrame(c, t, mouse) {
 
   // where things are on screen, for touch
   fx.ngeom = { K, proj, unproj, dist, growth: d.growth, learned: d.learned,
-    lobes: N.slots.slice(0, K).map((s, j) => { const a = proj(s.p), b3 = [s.p[0] + s.a[0] * s.len, s.p[1] + s.a[1] * s.len, s.p[2] + s.a[2] * s.len], b = proj(b3); return { j, a, b, a3: s.p.slice(), b3, r: s.rad / (a[2] * tan) * S / 2, slot: s }; }),
-    voids: vlist.map(v => { const p = proj(v.p); return { x: p[0], y: p[1], r: v.r / (p[2] * tan) * S / 2 * 1.1, p: v.p, depth: p[2] }; }) };
+    lobes: N.slots.slice(0, K).flatMap((s, j) => (j && n ? [1, -1] : [1]).map(mx => { const a3 = [s.p[0] * mx, s.p[1], s.p[2]], a = proj(a3), b3 = [(s.p[0] + s.a[0] * s.len) * mx, s.p[1] + s.a[1] * s.len, s.p[2] + s.a[2] * s.len], b = proj(b3); return { j, a, b, a3, b3, r: s.rad / (a[2] * tan) * S / 2, slot: s }; })),
+    voids: vlist.flatMap(v => (n ? [1, -1] : [1]).map(mx => { const p3 = [Math.abs(v.p[0]) * mx, v.p[1], v.p[2]], p = proj(p3); return { x: p[0], y: p[1], r: v.r / (p[2] * tan) * S / 2 * 1.1, p: p3, depth: p[2] }; })) };
 }
 
 /* touch: what you touched sets the pitch and timbre; HOW it answers is one of several gestures, never the same twice running */
