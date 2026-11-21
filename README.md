@@ -109,6 +109,14 @@ frames are blended, so edges are smooth and there is no grain. It is shown at yo
 picks the highest internal resolution that holds full frame rate on your machine (shown small in the top right).
 The dust has a grain that runs along each limb, like fibre, and faint veins that pulse outward from the base.
 
+- **It is fed from outside.** Now and then a thread of energy reaches in from far outside the frame, sometimes forked, lands on
+  a limb and sends pulses into it. Each pulse that arrives is felt: the dust there dissolves, regrows and lights up. They
+  come more often while it trains or hears sound.
+- **The space it lives in** is made of slow folded clouds in the creature's own colours, with dark lanes, two depths of stars,
+  and a faint web of threads that brightens with sound and training.
+- **Touch changes its matter.** A touch sends a front that dissolves the dust as it passes; the dust grows back thicker
+  behind it, the veins fire as the front crosses them, and the touched spot stays lit for a moment.
+
 **Watching it train.** A readout above the entity shows the phase (digest, wake, train), the epoch and step, the loss
 and its trend, and the time left. The entity shows the rest itself. While it digests, the tracks drift around it as
 soft clumps of its own dust and are drawn in to where the spine is being built. While it trains, light rises through the pillars from base

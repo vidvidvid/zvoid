@@ -36,6 +36,8 @@ uniform vec4 uAud;       // bass, mid, high, level
 uniform vec4 uLife;      // learned, growth, turbulence, kick
 uniform vec3 uLight, uKey, uAmb;
 uniform float uB, uFrame, uFine;
+uniform vec4 uEvO[4];     // energy veins reaching in from outside: where each starts, and how strong it is
+uniform vec4 uEvA[4];     // where each lands on the body, and where its pulse is along it (0 = outside, 1 = the body)
 uniform vec4 uTouch;     // xyz where the pointer is dragging, w strength
 uniform float uForm;     // 0 = cloud, 1 = fully formed (grows with training)
 uniform vec4 uGy;        // lattice: scale, drift speed, morph between two minimal surfaces, sheet thickness
@@ -188,13 +190,21 @@ void main() {
   vec3 rd = normalize(uCam * vec3(uv * uTan, -1.)), ro = uCam * vec3(0., 0., uDist);
 
   // deep space behind it
-  vec3 sd3 = rd * 3.;
-  float cloud = n3(sd3 + uSeed) * n3(sd3 * 2.3 + 7.);
-  vec3 bg = vec3(.006, .006, .016) + uAmb * .05 * cloud + uKey * .012 * n3(sd3 * 1.3 - 4.);
+  // the space it lives in: slow folded clouds in its own colours, dark lanes through them, and a faint web of threads that wakes with sound and training
+  vec3 sd3 = rd * 2.2 + uSeed;
+  vec3 wp = sd3 + (vec3(n3(sd3 * 1.3 + vec3(0., uT * .006, 0.)), n3(sd3 * 1.3 + 11.), n3(sd3 * 1.3 + 23.)) - .5) * 1.5;
+  float c1 = n3(wp), c2 = n3(wp * 2.1 + 5.), c3 = n3(wp * 4.3 - 9.), c4 = n3(wp * 9.1 + 3.);
+  float neb = smoothstep(.38, .95, c1 * .58 + c2 * .28 + c3 * .14 + c4 * .07);
+  float lane = smoothstep(.56, .32, n3(wp * 1.7 + 31.));
+  float web = pow(1. - abs(2. * n3(wp * 3.1 + vec3(0., 0., uT * .008)) - 1.), 16.) * (.35 + c1);
+  vec3 bg = vec3(.005, .005, .013) + (mix(uAmb, uKey, c2) * .085 * neb + uKey * .03 * c3 * neb + vec3(.05, .02, .035) * c4 * neb) * (1. - lane * .75)
+          + mix(uAmb, vec3(.6, .72, 1.), .5) * web * .03 * (1. + uAud.w * 2.5 + uProg.z * 1.2);
   vec3 gd = rd * 110., cell = floor(gd);
   float hs = fract(sin(dot(cell, vec3(127.1, 311.7, 74.7))) * 43758.5453);
   float tw = .7 + .3 * sin(uT * (1. + hs * 3.) + hs * 40.);
-  bg += vec3(.9, .95, 1.) * step(.9972, hs) * smoothstep(.45, 0., length(fract(gd) - .5)) * tw * (.5 + fract(hs * 57.) * .9);
+  bg += mix(vec3(1., .82, .7), vec3(.75, .86, 1.), fract(hs * 91.)) * step(.9972, hs) * smoothstep(.45, 0., length(fract(gd) - .5)) * tw * (.5 + fract(hs * 57.) * .9);
+  vec3 gf = rd * 260., cf = floor(gf); float hf = fract(sin(dot(cf, vec3(12.9, 78.2, 37.7))) * 43758.5453);   // a second, far finer layer of faint stars for depth
+  bg += vec3(.8, .86, 1.) * step(.992, hf) * smoothstep(.42, 0., length(fract(gf) - .5)) * (.12 + fract(hf * 33.) * .28) * (1. - neb * .5);
 
   vec3 C = vec3(0.); float T = 1.;
   // orbiting arcs: one ring per limb, broken into arcs that circle at its tempo. A thin plane, intersected exactly.
@@ -307,6 +317,7 @@ void main() {
           for (int k = 0; k < 8; k++) { float sb = uStar[k].w; if (sb > 0.) { vec3 ds = uStar[k].xyz - p; lit += alb * vec3(1., .9, .8) * sb * .5 / (dot(ds, ds) * 6. + .15); } }
           lit *= 1. + uAud.z * 1.6 * n3(q * 7. + uT * 2.) * (1. - dust) + ring * 1.5 + max(0., rip) * 1.1;
           lit += (tint * .7 + vec3(.5, .3, .26)) * bloom * .9;
+          { vec3 fa2 = gBa / (length(gBa) + 1e-4), fm = fq - fa2 * dot(fq, fa2) * .85; lit *= .8 + .42 * n3(fm * 19. + 2.) * (.6 + .8 * n3(fm * 43. - 7.)); }   // surface detail finer than the dust itself: it only changes how it is lit, so it adds no noise
           float va = n3(q * 2.7 + uSeed + vec3(0., uT * .012, 0.)), vb = n3(q * 2.7 + 19.7 - uSeed);               // veins: lines where two folded sheets cross
           float vein = smoothstep(.075, 0., abs(va - .5)) * smoothstep(.075, 0., abs(vb - .5));
           lit += (tint * .9 + vec3(.3, .14, .12)) * vein * (.3 + 1.5 * pow(.5 + .5 * sin(hAlong * 9. - uT * 1.6 + va * 5.), 4.)) * (1. + uAud.x * 2. + ring * 6. + bloom * 5.);   // a pulse runs out along them from the base; a touch fires them like nerves
@@ -322,6 +333,18 @@ void main() {
   for (int k = 0; k < 8; k++) {                // the stars themselves
     float sb = uStar[k].w;
     if (sb > 0.) { vec3 so = uStar[k].xyz - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; C += vec3(1., .93, .86) * sb * (.0022 / (dot(dv, dv) + .0005)) * mix(1., T, .55) * step(0., tc); }
+  }
+  for (int k = 0; k < 4; k++) {                // energy veins: threads that reach in from far outside, pulse into the body, and let go
+    float ei = uEvO[k].w;
+    if (ei > 0.) {
+      vec3 O = uEvO[k].xyz, ab = uEvA[k].xyz - O, w0 = ro - O; float fk = float(k) * 7.3;
+      float a1 = dot(ab, ab), b1 = dot(ab, rd), sA = clamp((dot(ab, w0) - b1 * dot(rd, w0)) / max(a1 - b1 * b1, 1e-4), 0., 1.);
+      vec3 n1 = normalize(cross(ab, vec3(.3, 1., .2))), n2 = normalize(cross(ab, n1)); float env = sin(3.14159 * sA) * (1. - sA * .5);
+      vec3 P = O + ab * sA + (n1 * (sin(sA * 9. + fk + uT * .7) + .5 * sin(sA * 23. - uT * 1.3 + fk * 2.) + .2 * sin(sA * 61. + uT * 3.)) + n2 * (sin(sA * 7. - fk + uT * .5) + .5 * sin(sA * 19. + uT * 1.1) + .2 * sin(sA * 53. - uT * 2.6))) * .17 * env;
+      vec3 so = P - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; float d2 = dot(dv, dv), pd = (sA - uEvA[k].w) / .06, pulse = exp(-pd * pd);
+      float wd = .00009 * (1. + pulse * 5.), g = wd / (d2 + wd) * (.35 + pulse * 2.6) + exp(-d2 * 110.) * .05 * (1. + pulse * 4.);
+      if (tc > 0.) C += mix(mix(uKey, uAmb, fract(fk * .37)), vec3(.82, .95, 1.), .55) * g * ei * (.8 + .2 * sin(uT * 37. + fk)) * mix(1., T, .75);
+    }
   }
   for (int k = 0; k < 12; k++) {               // digesting: the tracks it has yet to eat drift around it as motes
     float fb = uFood[k].w;
@@ -394,7 +417,7 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine']) NEB.U[n] = gl.getUniformLocation(pr, n);
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine', 'uEvO', 'uEvA']) NEB.U[n] = gl.getUniformLocation(pr, n);
   gl.uniform1i(NEB.U.uNoise, 0);
   NEB.gl = gl;
 }
@@ -434,10 +457,10 @@ function nebFrame(c, t, mouse) {
   // resolution: as sharp as this machine can hold at full frame rate
   if (NEB.last) {
     const fdt = Math.min(.1, t - NEB.last); NEB.acc += fdt; NEB.fast = (NEB.fast || 0) + fdt; NEB.fastN = (NEB.fastN || 0) + 1;
-    if (fdt > .004) NEB.minDt = Math.min(NEB.minDt || 1, fdt);                 // the shortest frame seen tells us the display's refresh rate
+    if (fdt < .012) NEB.short = (NEB.short || 0) + 1;                          // many short frames means a fast display, where real headroom is visible
     const drop = ms => { NEB.cap = NEB.q; NEB.capT = t; NEB.q = Math.max(.35, NEB.q * Math.max(.6, Math.min(.9, Math.sqrt(16.7 / ms)))); NEB.acc = 0; NEB.frames = 0; NEB.fast = 0; NEB.fastN = 0; };
     if (NEB.fastN >= 8) { const ms = NEB.fast / NEB.fastN * 1000; NEB.fast = 0; NEB.fastN = 0; if (ms > 20 && NEB.frames >= 0) drop(ms); }   // falling behind (a touch, a wave): give up resolution at once
-    if (++NEB.frames >= 40) { const ms = NEB.acc / NEB.frames * 1000; NEB.ms = ms; const room = NEB.minDt < .012 ? 14.2 : 17.4;   // on a fast display we can see real headroom, so keep some for when it is touched
+    if (++NEB.frames >= 40) { const ms = NEB.acc / NEB.frames * 1000; NEB.ms = ms; const room = NEB.short > 12 ? 14.2 : 17.4; NEB.short = 0;   // on a fast display we can see real headroom, so keep some for when it is touched
       if (ms > 18.5) drop(ms); else if (ms < room) { if (NEB.cap && t - NEB.capT > 25) NEB.cap = 0; NEB.q = Math.min(1, NEB.cap ? NEB.cap * .9 : 1, NEB.q * 1.06); }
       NEB.acc = 0; NEB.frames = 0; } }
   NEB.last = t;
@@ -584,6 +607,24 @@ function nebFrame(c, t, mouse) {
   let ext = 1.5; N.slots.forEach(sl => { if (sl.w > .01) ext = Math.max(ext, Math.hypot(sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 3.4, Math.hypot(...sl.p) + sl.rad * 3.4); });
   gl.uniform4f(U.uSweep, pg.i, trn * (tr && tr.stage !== 'train' ? .6 : 1), 0, 0);
   gl.uniform1f(U.uB, Math.min(6, ext + .8)); gl.uniform1f(U.uFrame, (NEB.fr = (NEB.fr || 0) + 1) % 1024);
+  { // energy veins: now and then a thread reaches in from far outside, sends pulses into a limb, and lets go
+    const ev = fx.ev || (fx.ev = []), rnd = Math.random, R = Math.max(3.8, ext * 2.1), act = 1 + trn * 1.5 + lv * 2.5;
+    if (fx.evNext == null) fx.evNext = t + 2 + rnd() * 3;
+    if (t > fx.evNext && ev.length < 3 && N.slots.length) {
+      const th = rnd() * 6.283, z = rnd() * 1.6 - .8, r = Math.sqrt(1 - z * z), dir = [r * Math.cos(th), z, r * Math.sin(th)], mk = () => ({ t0: t, life: 2.8 + rnd() * 3.2, dir, j: Math.floor(rnd() * Math.min(K, N.slots.length)), hh: .25 + rnd() * .75, mx: rnd() < .5 ? -1 : 1, hits: 0, rate: .75 + rnd() * .5 });
+      ev.push(mk()); if (rnd() < .45 && ev.length < 4) ev.push(mk());                // sometimes it forks: two threads from one place
+      fx.evNext = t + (3 + rnd() * 7) / act;
+    }
+    for (let i = ev.length - 1; i >= 0; i--) if (t - ev[i].t0 > ev[i].life) ev.splice(i, 1);
+    const eo = new Float32Array(16), ea = new Float32Array(16);
+    ev.slice(0, 4).forEach((e, i) => {
+      const sl = N.slots[e.j] || N.slots[0], mx = e.j && n ? e.mx : 1, A = [(sl.p[0] + sl.a[0] * sl.len * e.hh) * mx, sl.p[1] + sl.a[1] * sl.len * e.hh, sl.p[2] + sl.a[2] * sl.len * e.hh];
+      const age = t - e.t0, cyc = age * e.rate / 1.25, ph = (cyc % 1) * 1.25, inten = Math.min(1, age / .5) * Math.min(1, (e.life - age) / .8);
+      if (Math.floor(cyc + .2) > e.hits) { e.hits = Math.floor(cyc + .2); if (age > .6) fx.waves.push({ t0: t, o: A, taps: [[0, .45]], speed: 2.2, width: 3.2, amp: .5, life: 1.4 }); }   // each pulse that arrives is felt by the body
+      eo.set([e.dir[0] * R, e.dir[1] * R, e.dir[2] * R, inten], i * 4); ea.set([A[0], A[1], A[2], ph], i * 4);
+    });
+    gl.uniform4fv(U.uEvO, eo); gl.uniform4fv(U.uEvA, ea);
+  }
   const D = NEB.drag; D.s += ((D.on ? 1 : 0) - D.s) * Math.min(1, dt * (D.on ? 9 : 2.2)); gl.uniform4f(U.uTouch, D.p[0], D.p[1], D.p[2], D.s < .01 ? 0 : D.s);
   gl.uniform1f(U.uFine, NEB.fine == null ? .42 : NEB.fine); gl.uniform3fv(U.uLight, light); gl.uniform3fv(U.uKey, key); gl.uniform3fv(U.uAmb, amb);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -592,7 +633,7 @@ function nebFrame(c, t, mouse) {
   gl.uniform1i(R.u.uCur, 1); gl.uniform1i(R.u.uHist, 3 - fl); gl.viewport(0, 0, CW, CH); gl.uniform2f(R.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(R.u.uTx, 1 / W, 1 / H); gl.uniform2f(R.u.uJit, jx / W, jy / H); gl.uniform1f(R.u.uMix, NEB.fresh ? 1 : .05); NEB.fresh = false;
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.useProgram(O.p); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, CW, CH);   // and show it at full resolution
-  gl.uniform1i(O.u.uTex, 2 + fl); gl.uniform1i(O.u.uNoise, 0); gl.uniform2f(O.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(O.u.uTx, 1 / CW, 1 / CH); gl.uniform1f(O.u.uSharp, .1);
+  gl.uniform1i(O.u.uTex, 2 + fl); gl.uniform1i(O.u.uNoise, 0); gl.uniform2f(O.u.uPx, 1 / CW, 1 / CH); gl.uniform2f(O.u.uTx, 1 / CW, 1 / CH); gl.uniform1f(O.u.uSharp, .14);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 
   // where things are on screen, for touch
