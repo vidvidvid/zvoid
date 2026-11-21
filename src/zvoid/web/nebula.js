@@ -1027,15 +1027,15 @@ function drawMini(g, W, H, c, t) {
 }
 
 /* what is under a point: a void, a pillar (and how far along), the haze near one, or nothing */
-function nebUnder(c, G, x, y) {
-  const vi = G.voids.findIndex(o => Math.hypot(o.x - x, o.y - y) < o.r);
+function nebUnder(c, G, x, y, noVoid) {
+  const vi = noVoid ? -1 : G.voids.findIndex(o => Math.hypot(o.x - x, o.y - y) < o.r);
   if (vi >= 0) return { kind: 'void', vi, p: G.voids[vi].p, freq: 41 * ALIEN_SCALE[vi * 2 % 7] * 2 };
   let best = null;
   for (const o of G.lobes) { const ex = o.b[0] - o.a[0], ey = o.b[1] - o.a[1], u = clamp(((x - o.a[0]) * ex + (y - o.a[1]) * ey) / (ex * ex + ey * ey || 1), 0, 1), dd = Math.hypot(x - o.a[0] - ex * u, y - o.a[1] - ey * u) / (o.r * (1 - .5 * u) || 1); if (!best || dd < best.dd) best = { o, u, dd }; }
   if (best && best.dd < 1.15 && c.food.length) {
     const o = best.o, mem = c.food.filter((f, i) => (c.limbs && c.limbs.length > 1 ? (f.limb || 0) % G.K : i % G.K) === o.j).sort((a, b) => (a.core || 0) - (b.core || 0));
-    const f = mem.length ? mem[Math.min(mem.length - 1, Math.floor(best.u * mem.length))] : c.food[0];
-    return { kind: 'pillar', o, u: best.u, p: o.a3.map((a, k) => a + (o.b3[k] - a) * best.u), freq: noteOf(f.bright ?? .3), track: f.name };
+    const mem5 = mem.slice(0, 5), f = mem5.length ? mem5[Math.min(mem5.length - 1, Math.floor(best.u * mem5.length))] : c.food[0];   // the tracks it holds in memory for this limb
+    return { kind: 'pillar', o, u: best.u, dd: best.dd, p: o.a3.map((a, k) => a + (o.b3[k] - a) * best.u), freq: noteOf(f.bright ?? .3), track: f.name };
   }
   if (best && best.dd < 3.2) return { kind: 'haze', p: G.unproj(x, y, best.o.a[2]), freq: noteOf(.35 + .6 * clamp(1 - y / (NEB.canvas.clientHeight || 1), 0, 1)) * 2 };
   return { kind: 'space', p: G.unproj(x, y, G.dist), freq: noteOf(.5 + .5 * clamp(1 - y / (NEB.canvas.clientHeight || 1), 0, 1)) * 4 };
@@ -1044,24 +1044,37 @@ function nebUnder(c, G, x, y) {
 /* drag: your pointer pushes through the dust and bows it. The pitch follows whatever you are passing over. */
 function nebDrag(x, y, speed) {
   const c = Gym.cur; if (!c) return; const fx = fxOf(c.slug), G = fx.ngeom; if (!G) return;
-  const a = ac(), D = NEB.drag, now = a.currentTime, t = performance.now() / 1000, gr = G.growth, pure = clamp(.25 * gr + .75 * G.learned, 0, 1), hit = nebUnder(c, G, x, y);
+  const a = ac(), D = NEB.drag, now = a.currentTime, t = performance.now() / 1000, gr = G.growth, pure = clamp(.25 * gr + .75 * G.learned, 0, 1), hit = nebUnder(c, G, x, y, !!NEB.drag.track);   // once you are playing a limb, the voids inside it do not interrupt
   a.resume(); D.on = true; D.p = hit.p;
   if (!D.v) { const g = a.createGain(), g2 = a.createGain(), lp = a.createBiquadFilter(), o1 = a.createOscillator(), o2 = a.createOscillator(); g.gain.value = 0; lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 4;
     o1.type = 'sawtooth'; o2.type = 'sine'; g2.gain.value = .5; o1.connect(lp); o2.connect(g2); g2.connect(lp); lp.connect(g); g.connect(voiceOut()); o1.start(); o2.start(); D.v = { g, lp, o1, o2 }; }
   const wob = 1 + (1 - pure) * .03 * Math.sin(t * 23), lvl = clamp(speed / 1400, .025, .16) * (hit.kind === 'space' ? .35 : hit.kind === 'haze' ? .7 : 1);
   D.v.o1.frequency.setTargetAtTime(hit.freq * wob, now, .05); D.v.o2.frequency.setTargetAtTime(hit.freq * (hit.kind === 'void' ? .5 : ALIEN_SCALE[4]) * (1 + (1 - pure) * .012), now, .05);
-  D.v.lp.frequency.setTargetAtTime(500 + speed * 1.6 + pure * 1800, now, .08); D.v.g.gain.setTargetAtTime(lvl, now, .06);
-  if (hit.kind === 'pillar') hit.o.slot.ring = Math.max(hit.o.slot.ring, .6);
-  if (hit.kind === 'pillar' && hit.track) {                                               // dragging along a limb plays through its memory of the track under your hand
-    const b = grainBuf(c.slug, hit.track), gap = clamp(.11 - speed / 22000, .045, .11);   // the faster you move, the denser the grains
-    if (D.track !== hit.track) { D.track = hit.track; D.head = hit.u; }                   // a new track: start where you touched it
-    if (b && (!D.lastGrain || t - D.lastGrain > gap)) { const since = D.lastGrain ? Math.min(.3, t - D.lastGrain) : gap; D.lastGrain = t;
-      D.head = (D.head + since * (.25 + speed / 1500) / b.duration) % 1;                  // the playhead moves on as you drag, faster with your hand, so it never repeats one spot
-      grainOne(b, { pos: D.head, dur: .2 + pure * .3, gain: clamp(speed / 900, .1, .34), rate: (1 + clamp(speed / 5000, 0, .35)) * (1 + (1 - pure) * (Math.random() - .5) * .08), attack: .035 });
-      D.v.g.gain.setTargetAtTime(lvl * .2, now, .06); } }
+  D.v.lp.frequency.setTargetAtTime(500 + speed * 1.6 + pure * 1800, now, .08);
+  D.speed = Math.max(D.speed || 0, speed); D.pure = pure; D.slug = c.slug; D.limb = null;
+  if (hit.kind === 'pillar') { hit.o.slot.ring = Math.max(hit.o.slot.ring, .6);
+    // A limb is an instrument made of its own tracks. Where you first touch it picks the track; from there, moving toward the tip plays forward through it,
+    // moving back toward the base rewinds, and holding still freezes on that moment. Its middle plays clean; toward its edge the sound is shredded.
+    const lk = hit.o.j + (hit.o.a3[0] < 0 ? 'm' : ''); if (D.lobe !== lk || !D.track) { D.lobe = lk; D.track = hit.track; D.head = null; D.lastU = hit.u; }
+    const b = grainBuf(c.slug, D.track);
+    if (b) { if (D.head == null) D.head = .1 + .8 * hit.u; D.head = clamp(D.head + (hit.u - D.lastU) * 22 / b.duration, 0, 1); }   // the whole length of the limb is about 22 seconds of the track
+    D.lastU = hit.u; D.edge = clamp(((hit.dd || 0) - .3) / .75, 0, 1); D.limb = hit.o.slot.tr; D.buf = b;
+  }
+  D.v.g.gain.setTargetAtTime(D.limb && D.buf ? 0 : lvl * (D.limb ? .6 : 1), now, .06);              // on a limb you hear its tracks, not the drone; the drone is for voids, haze and empty space
+  if (!D.tick) D.tick = setInterval(nebDragTick, 30);
   if (!D.lastWave || t - D.lastWave > (hit.kind === 'space' ? .5 : .22)) { D.lastWave = t; fx.waves.push({ t0: t, o: hit.p, soft: true, mode: Math.random() > .5 ? 2 : 0, n: [Math.random() - .5, Math.random() - .5, Math.random() - .5].map((c, i, v) => c / (Math.hypot(...v) || 1)), taps: [[0, 1], [.4, .4]], speed: 1.8 }); if (fx.waves.length > 18) fx.waves.shift(); }
 }
+function nebDragTick() {                                 // the grains keep coming while you hold, whether or not your hand moves
+  const D = NEB.drag, t = performance.now() / 1000; if (!D.on) { clearInterval(D.tick); D.tick = 0; return; }
+  D.speed = (D.speed || 0) * .86; const tr = D.limb, b = D.buf; if (!tr || !b) return;
+  const sp = D.speed, e = D.edge || 0, pure = D.pure || 0, rnd = Math.random, gap = clamp(.085 - .04 * tr[4] - sp / 30000, .035, .09) * (1 - .35 * e);   // a fast-tempo limb speaks in denser grains, and so does a fast hand
+  if (D.lastGrain && t - D.lastGrain < gap) return; D.lastGrain = t;
+  const stut = tr[0] > .45 && rnd() < tr[0] * .3 ? Math.floor(rnd() * 3) * .06 : 0;                                                          // a noisy limb stutters
+  const jit = ((rnd() - .5) * (.05 + 1.6 * e * e + .35 * tr[0] + .5 * (1 - pure)) - stut) / b.duration;                                    // toward the edge, the grains scatter in time
+  const rate = (1 - .38 * tr[3] + .28 * tr[2]) * (rnd() < e * .32 ? (rnd() < .5 ? .5 : 2) : 1) * (1 + (1 - pure) * (rnd() - .5) * .05);     // a bassy limb sings low and slow, a bright one high; the edge throws octaves
+  grainOne(b, { pos: clamp(D.head + jit, 0, 1), dur: (.26 + .2 * tr[3] + pure * .12) * (1 - .78 * e) * (.8 + rnd() * .4), gain: clamp(.16 + sp / 2600, .16, .36) * (1 - .3 * e), rate, attack: .03 * (1 - .7 * e) + .004 });
+}
 function nebDragEnd() {
-  const D = NEB.drag; D.on = false;
+  const D = NEB.drag; D.on = false; D.track = null; D.lobe = null; D.limb = null; D.buf = null; D.speed = 0;
   if (D.v) { const a = ac(), v = D.v; D.v = null; v.g.gain.setTargetAtTime(0, a.currentTime, .3); setTimeout(() => { try { v.o1.stop(); v.o2.stop(); } catch {} }, 2500); }
 }

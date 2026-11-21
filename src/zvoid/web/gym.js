@@ -206,12 +206,12 @@ function grainBuf(slug, name) {
   const k = slug + '/' + name, b = GRAIN.bufs.get(k); if (b) return b;
   if (!GRAIN.busy.has(k) && GRAIN.busy.size < 3) { GRAIN.busy.add(k);
     fetch(`/api/gym/${slug}/grain/${encodeURIComponent(name)}`).then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status)).then(a => new Promise((res, rej) => ac().decodeAudioData(a, res, rej)))
-      .then(buf => { GRAIN.bufs.set(k, buf); if (GRAIN.bufs.size > 40) GRAIN.bufs.delete(GRAIN.bufs.keys().next().value); }).catch(() => {}).finally(() => GRAIN.busy.delete(k)); }
+      .then(buf => { GRAIN.bufs.set(k, buf); if (GRAIN.bufs.size > 30) GRAIN.bufs.delete(GRAIN.bufs.keys().next().value); }).catch(() => {}).finally(() => GRAIN.busy.delete(k)); }
   return null;
 }
-function grainWarm(c) {                            // keep the three most typical tracks of every limb in memory; called now and then, it works through them a few at a time
+function grainWarm(c) {                            // keep the most typical tracks of every limb in memory (up to five each); called now and then, it works through them a few at a time
   if (!c || !c.food || !c.food.length) return; const per = {};
-  for (const f of [...c.food].sort((a, b) => (a.core || 0) - (b.core || 0))) { const lk = f.limb || 0; per[lk] = (per[lk] || 0) + 1; if (per[lk] <= 3) grainBuf(c.slug, f.name); }
+  for (const f of [...c.food].sort((a, b) => (a.core || 0) - (b.core || 0))) { const lk = f.limb || 0; per[lk] = (per[lk] || 0) + 1; if (per[lk] <= 5) grainBuf(c.slug, f.name); }
 }
 /* one grain: a slice of a track, faded in and out. pos is 0..1 through the excerpt. */
 function grainOne(buf, o = {}) {

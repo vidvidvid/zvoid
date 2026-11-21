@@ -374,19 +374,19 @@ def feed_links(slug: str, paths: list[str]) -> dict:
 
 
 def grain(slug: str, name: str) -> Path:
-    """A small mono excerpt of a fed track (six 2 s slices spread across it). The creature's own voice is made of these."""
+    """A mono excerpt of a fed track: up to a minute of it, unbroken, from a fifth of the way in. The creature's own voice
+    is made of these, and dragging along a limb scrubs through one, so it has to be continuous."""
     d = _dir(slug)
     src = d / "food" / Path(name).name
     if not src.exists():
         raise FileNotFoundError("that track is gone (was the original moved?)")
-    out = d / "grains" / (src.stem + ".wav")
+    out = d / "grains" / (src.stem + ".m60.wav")
     if out.exists() and out.stat().st_size > 1000:
         return out
     out.parent.mkdir(exist_ok=True)
     secs = next((f.get("secs") for f in _load(slug).get("food", []) if f.get("name") == src.name), None) or _probe_secs(src) or 60
-    span = min(2.0, max(.3, secs / 7))
-    sel = "+".join(f"between(t,{secs * (i + .5) / 6:.2f},{secs * (i + .5) / 6 + span:.2f})" for i in range(6))
-    r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vn", "-af", f"aselect='{sel}',asetpts=N/SR/TB", "-ac", "1", "-ar", "22050", str(out)],
+    start = 0 if secs < 75 else secs * .2
+    r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{start:.2f}", "-t", "60", "-i", str(src), "-vn", "-ac", "1", "-ar", "22050", str(out)],
                        capture_output=True, text=True)
     if r.returncode or not out.exists():
         raise RuntimeError("could not read that track: " + (r.stderr or "").strip()[-200:])
