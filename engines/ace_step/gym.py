@@ -39,6 +39,9 @@ def main():
     food, tensors, out = cdir / "food", cdir / "tensors", cdir / "lora"
     variant = opt.get("variant", "turbo")
     files = sorted(f for f in food.iterdir() if f.suffix.lower() in AUDIO and f.exists())  # skips links whose original moved
+    if opt.get("only"):
+        keep = set(opt["only"])
+        files = [f for f in files if f.name in keep]
     if not files:
         raise RuntimeError("This creature has not been fed yet. Drop some audio on it first.")
 
@@ -99,7 +102,7 @@ def main():
         kind = getattr(u, "kind", "info")
         step, loss, msg = (u.step, u.loss, u.msg) if hasattr(u, "step") else u[:3]
         send(type="update", kind=kind, step=step, loss=float(loss or 0), msg=str(msg), epoch=getattr(u, "epoch", 0),
-             max_epochs=getattr(u, "max_epochs", 0), lr=getattr(u, "lr", 0.0))
+             max_epochs=getattr(u, "max_epochs", 0), lr=getattr(u, "lr", 0.0), epoch_time=getattr(u, "epoch_time", 0.0))
         if kind == "fail":
             raise RuntimeError(str(msg))
     send(type="done", final=str(out / "final"))

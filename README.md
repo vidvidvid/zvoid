@@ -72,10 +72,22 @@ Press **◍ gym**. A creature is a LoRA adapter for ACE-Step, trained on audio y
    10 epochs, and can be stopped and continued any time.
 4. **Use** it: pick it as *creature* in any ace-step module and set *creature strength*.
 
-The creature on screen is drawn from what it ate and how far it has trained. Each track becomes a tentacle
-(colour from the track's brightness, sway from its tempo and dynamics, thickness from its bass). Bass makes the
-body lobed, treble makes it spiky, more minutes of audio make it bigger. Training grows the tentacles, adds
-organs with every doubling of epochs, and it opens its eyes once it has learned something.
+**What you see** is the entity: sound given a semi-physical form, drawn from what it ate and how far it has trained.
+
+- Every track is a **string** that vibrates as a standing wave (colour from brightness, harmonics from tempo, swing from dynamics).
+  New tracks sprout with a shockwave when you feed it.
+- Bass, mids and treble orbit it as three **circular waveforms**, and the core ripples on the beat.
+- Training adds **membrane shells**, lengthens the strings, and puts one tick on the halo per epoch. While it trains,
+  light runs down every string into the core. Until it has learned, the shells flicker; as the loss falls they settle.
+
+**Limbs.** Tracks that sound alike are grouped automatically (k-means on tempo, bass, brightness, dynamics and noise) and
+grow together as one limb. Each limb gets a description and its own trigger word, which goes into the training
+captions, so a single creature can hold several sub-styles and you can call one by putting its word in a caption.
+
+**Time.** Every track is one training step per epoch, so more or longer tracks mean slower epochs. The gym shows an
+estimate before you start, timed on your own Mac after the first epoch. For big collections, set
+*train on at most N tracks* and it picks the most typical tracks of every limb. Stopping keeps the last checkpoint,
+and a paused creature is already usable.
 
 Creatures live in `creatures/<name>/` (food, checkpoints, the final adapter and `creature.json`).
 That folder is not committed, so your music and adapters stay on your machine.

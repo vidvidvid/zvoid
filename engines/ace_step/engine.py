@@ -79,10 +79,12 @@ def _creature(dit, p, ctx):
     """Load (or drop) the creature's adapter. Returns its trigger tag, if it has one."""
     slug = (p.get("creature") or "").strip()
     cdir = _CREATURES / slug
-    final = cdir / "lora" / "final"
+    lora = cdir / "lora"
+    found = [x for x in [lora / "final", *(lora / "checkpoints").glob("epoch_*")] if (x / "adapter_config.json").exists()] if slug else []
+    final = max(found, key=lambda x: (x / "adapter_config.json").stat().st_mtime) if found else lora / "final"
     want = None
     if slug:
-        if not (final / "adapter_config.json").exists():
+        if not found:
             raise ValueError(f"Creature “{slug}” hasn't been trained yet. Train it in the gym first.")
         want = (str(final), (final / "adapter_model.safetensors").stat().st_mtime, id(dit))
     if _state.get("lora") != want:

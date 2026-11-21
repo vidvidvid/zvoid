@@ -24,7 +24,7 @@ from .paths import CREATURES_DIR, ENGINES_DIR, ENVS_DIR, ROOT
 
 _lock = threading.Lock()
 _train: dict = {"slug": None, "proc": None, "state": "idle", "msg": "", "stage": "", "epoch": 0, "max_epochs": 0,
-                "loss": None, "step": 0, "error": None, "started": 0}
+                "loss": None, "step": 0, "error": None, "started": 0, "audio_secs": 0, "tracks": 0, "from_epoch": 0}
 
 
 def slugify(name: str) -> str:
@@ -51,9 +51,16 @@ def _save(c: dict):
     (_dir(c["slug"]) / "creature.json").write_text(json.dumps(c, indent=2))
 
 
+def adapter_path(slug: str) -> Path | None:
+    """The newest usable adapter: the final one, or the latest checkpoint if training was paused."""
+    lora = _dir(slug) / "lora"
+    found = [d for d in [lora / "final", *(lora / "checkpoints").glob("epoch_*")] if (d / "adapter_config.json").exists()]
+    return max(found, key=lambda d: (d / "adapter_config.json").stat().st_mtime) if found else None
+
+
 def _view(c: dict) -> dict:
     slug = c["slug"]
-    c = dict(c, trained=(_dir(slug) / "lora" / "final" / "adapter_config.json").exists(),
+    c = dict(c, trained=adapter_path(slug) is not None,
              minutes=round(sum(f.get("secs", 0) for f in c.get("food", [])) / 60, 2))
     c["training"] = dict({k: v for k, v in _train.items() if k != "proc"}) if _train["slug"] == slug else None
     return c
@@ -94,6 +101,8 @@ def update(slug: str, patch: dict) -> dict:
     for k in ("style", "tag", "name"):
         if k in patch:
             c[k] = str(patch[k])[:300]
+    if "tag" in patch:
+        regroup(c)
     if "captions" in patch:
         for f in c["food"]:
             if f["name"] in patch["captions"]:
@@ -161,8 +170,75 @@ def feed(slug: str, src: Path, name: str) -> dict:
         raise RuntimeError("Could not read that audio file. " + r.stderr.strip()[-200:])
     f = dict(features(dst), name=dst.name, caption="", fed=time.strftime("%Y-%m-%d %H:%M:%S"))
     c["food"].append(f)
+    regroup(c)
     _save(c)
     return _view(c)
+
+
+LIMB_KEYS = ("low", "bright", "dyn", "noise", "bpm", "loud")
+
+
+def _describe(m: dict) -> list[str]:
+    words = ["sub-heavy" if m["low"] > .6 else "airy" if m["low"] < .25 else "balanced",
+             "slow" if m["bpm"] < 95 else "fast" if m["bpm"] > 135 else "mid-tempo",
+             "punchy" if m["dyn"] > .6 else "smooth" if m["dyn"] < .3 else "",
+             "gritty" if m["noise"] > .45 else "bright" if m["bright"] > .5 else "dark" if m["bright"] < .2 else ""]
+    return [w for w in words if w]
+
+
+def regroup(c: dict):
+    """Sort the food into limbs: groups of tracks that sound alike (k-means on the audio features).
+    Each limb gets a description and its own trigger word, so one creature can hold several sub-styles."""
+    food = [f for f in c["food"] if "low" in f]
+    n = len(food)
+    k = 1 if n < 6 else int(np.clip(round((n / 2) ** .5), 2, 6))
+    for f in c["food"]:
+        f["limb"] = 0
+    if not n:
+        c["limbs"] = []
+        return
+    X = np.array([[f[key] / (200 if key == "bpm" else 1) for key in LIMB_KEYS] for f in food], dtype=float)
+    Z = (X - X.mean(0)) / (X.std(0) + 1e-6)
+    cent = [Z[int(np.argmax(Z[:, 0]))]]                       # farthest-point start: same result every time
+    while len(cent) < k:
+        dist = np.min([((Z - m) ** 2).sum(1) for m in cent], axis=0)
+        cent.append(Z[int(np.argmax(dist))])
+    cent = np.array(cent)
+    for _ in range(25):
+        lab = np.argmin(((Z[:, None, :] - cent[None]) ** 2).sum(2), axis=1)
+        cent = np.array([Z[lab == j].mean(0) if (lab == j).any() else cent[j] for j in range(k)])
+    order = sorted(range(k), key=lambda j: -(lab == j).sum())
+    limbs = []
+    for new, j in enumerate([j for j in order if (lab == j).any()]):
+        idx = np.where(lab == j)[0]
+        mean = {key: float(np.mean([food[i][key] for i in idx])) for key in LIMB_KEYS}
+        dist = ((Z[idx] - cent[j]) ** 2).sum(1)
+        for rank_, i in enumerate(idx[np.argsort(dist)]):
+            food[i]["limb"], food[i]["core"] = new, rank_   # core 0 = the most typical track of its limb
+        limbs.append({"id": new, "count": int(len(idx)), "tags": _describe(mean), "mean": {a: round(b, 3) for a, b in mean.items()},
+                      "trigger": f"{c.get('tag') or c['slug']}-{chr(97 + new)}"})
+    c["limbs"] = limbs
+
+
+def training_set(c: dict, max_tracks: int = 0) -> list[dict]:
+    """Which tracks a session trains on. With a budget, take the most typical tracks of every limb, in proportion."""
+    food = c["food"]
+    if not max_tracks or max_tracks >= len(food):
+        return food
+    picked = []
+    limbs = c.get("limbs") or [{"id": 0, "count": len(food)}]
+    for limb in limbs:
+        share = max(1, round(max_tracks * limb["count"] / len(food)))
+        members = sorted((f for f in food if f.get("limb", 0) == limb["id"]), key=lambda f: f.get("core", 0))
+        picked += members[:share]
+    return picked[:max_tracks]
+
+
+def auto_caption(c: dict, f: dict) -> str:
+    limbs = c.get("limbs") or []
+    limb = next((x for x in limbs if x["id"] == f.get("limb", 0)), None)
+    parts = [limb["trigger"] if limb and len(limbs) > 1 else "", c.get("style", ""), ", ".join(limb["tags"]) if limb else ""]
+    return f.get("caption") or ", ".join(p for p in parts if p) or Path(f["name"]).stem
 
 
 AUDIO_EXT = {".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".m4a", ".opus"}
@@ -225,6 +301,7 @@ def feed_links(slug: str, paths: list[str]) -> dict:
             continue
         c["food"].append(dict(feats, name=dst.name, caption="", src=str(src), fed=time.strftime("%Y-%m-%d %H:%M:%S")))
         known.add(str(src))
+    regroup(c)
     _save(c)
     return dict(_view(c), skipped=skipped)
 
@@ -233,6 +310,7 @@ def unfeed(slug: str, name: str) -> dict:
     c = _load(slug)
     c["food"] = [f for f in c["food"] if f["name"] != name]
     (_dir(slug) / "food" / Path(name).name).unlink(missing_ok=True)
+    regroup(c)
     _save(c)
     return _view(c)
 
@@ -259,8 +337,13 @@ def train(slug: str, opt: dict, before=None) -> dict:
         if fresh:
             shutil.rmtree(_dir(slug) / "lora", ignore_errors=True)
             c["history"], c["epochs"] = [], 0
+        if "limbs" not in c:
+            regroup(c)
+        chosen = training_set(c, int(opt.get("max_tracks") or 0))
+        maxd = float(opt.get("max_duration", 240))
+        audio_secs = sum(min(f.get("secs", 0), maxd) for f in chosen)
         run = dict(opt, target_epochs=base + more, style=c.get("style", ""), tag=c.get("tag", ""),
-                   captions={f["name"]: f.get("caption", "") for f in c["food"]},
+                   only=[f["name"] for f in chosen], captions={f["name"]: auto_caption(c, f) for f in chosen},
                    save_every=max(1, min(int(opt.get("save_every", 5)), more)))
         run.pop("epochs", None)
         c["sessions"] = c.get("sessions", 0) + 1
@@ -270,7 +353,7 @@ def train(slug: str, opt: dict, before=None) -> dict:
         proc = subprocess.Popen([str(py), "-u", str(ENGINES_DIR / "ace_step" / "gym.py"), str(_dir(slug)), json.dumps(run)],
                                 stdout=subprocess.PIPE, stderr=log, text=True, bufsize=1, cwd=str(ROOT))
         _train.update(slug=slug, proc=proc, state="running", msg="waking up…", stage="start", epoch=base, max_epochs=base + more,
-                      loss=None, step=0, error=None, started=time.time())
+                      loss=None, step=0, error=None, started=time.time(), audio_secs=audio_secs, tracks=len(chosen), from_epoch=base)
     threading.Thread(target=_watch, args=(slug, proc), daemon=True).start()
     return get(slug)
 
@@ -294,6 +377,9 @@ def _watch(slug: str, proc):
                 c["epochs"] = max(c["epochs"], int(m["epoch"]))
                 c["history"].append([int(m["epoch"]), round(float(m["loss"]), 5)])
                 c["history"] = c["history"][-4000:]
+                if m.get("epoch_time") and _train.get("audio_secs"):   # how fast this Mac really trains, for honest estimates
+                    pace = float(m["epoch_time"]) / _train["audio_secs"]
+                    c["pace"] = round(pace if not c.get("pace") else c["pace"] * .7 + pace * .3, 5)
                 _save(c)
                 _train.update(epoch=int(m["epoch"]), loss=m["loss"])
             elif kind in ("info", "warn", "checkpoint") and _train["stage"] != "train":
