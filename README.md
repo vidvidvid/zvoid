@@ -83,6 +83,9 @@ To delete a creature, press the × on its row or *delete creature* in the gym (c
 - **Stars:** one ignites inside the dust every 25 epochs and lights the cloud around it. Voids are cavities carved out of it.
 - **It hears.** Press ▶ on a track in the food list, or play anything on the canvas: the pillars swell with the bass,
   the dust churns with the level, and the rims sparkle with the treble.
+- **It gains form.** Structure appears only with training. The dust crystallises from its densest cores outward into a
+  lattice of thin sheets that light up as waves pass. The voids turn from round holes into faceted cavities. Arcs begin
+  to orbit it, one ring per limb, circling at that limb's tempo. Fog becomes cloud, and cloud becomes structure.
 - **It reverberates.** Every pillar emits waves at its limb's tempo. They cross and interfere, so the dust shows moving
   standing patterns. Beats, touches and feeding send shock fronts that echo three times, and it rings on after sound stops.
 - **It behaves.** It drifts, breathes unevenly, and leans toward your pointer when it is curious.

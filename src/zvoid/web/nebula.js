@@ -7,6 +7,9 @@
    - stars: one ignites inside the dust every 25 epochs, and lights the dust around it.
    - resonance: every pillar emits waves at its limb's tempo. They cross, reflect and interfere, so the dust shows standing
      patterns. Touches, beats and feeding send shock fronts that echo three times. After sound stops it rings on, like reverb.
+   - form: structure that only appears with training. The dust crystallises from its densest cores outward into a lattice
+     of thin sheets (a gyroid morphing into another minimal surface) that light up as waves pass through. The voids turn
+     from round holes into faceted cavities. Arcs begin to orbit it: one ring per limb, circling at that limb's tempo.
    Live audio swells the pillars, stirs the dust and makes the rims sparkle. */
 'use strict';
 
@@ -32,6 +35,11 @@ uniform vec4 uLife;      // learned, growth, turbulence, kick
 uniform vec3 uLight, uKey, uAmb;
 uniform float uB, uFrame;
 uniform vec4 uTouch;     // xyz where the pointer is dragging, w strength
+uniform float uForm;     // 0 = cloud, 1 = fully formed (grows with training)
+uniform vec4 uGy;        // lattice: scale, drift speed, morph between two minimal surfaces, sheet thickness
+uniform vec3 uDiscN, uDiscU, uDiscV;
+uniform vec4 uDisc;      // inner radius, outer radius, half thickness, on
+uniform vec4 uRing[8];   // radius, weight, arcs around, angular speed
 const int STEPS = 80;
 
 float n3(vec3 x) {
@@ -80,9 +88,17 @@ float ripples(vec3 q) {                      // every pillar emits sound; the wa
   }
   return r;
 }
-float carve(vec3 q) {
+float discDist(vec3 p) {
+  if (uDisc.w <= 0.) return 1e3;
+  float hg = dot(p, uDiscN), r = length(p - uDiscN * hg);
+  return max(abs(hg) - uDisc.z, max(r - uDisc.y, uDisc.x - r));
+}
+float carve(vec3 q) {                         // voids: round holes that become faceted, geometric cavities as it forms
   float c = 1.;
-  for (int k = 0; k < 3; k++) { float r = uVoid[k].w; if (r > 0.) c *= smoothstep(r * .5, r * 1.5, length(q - uVoid[k].xyz)); }
+  for (int k = 0; k < 3; k++) {
+    float r = uVoid[k].w;
+    if (r > 0.) { vec3 v = q - uVoid[k].xyz; float dn = mix(length(v), (abs(v.x) + abs(v.y) + abs(v.z)) * .64, uForm); c *= smoothstep(r * mix(.5, .92, uForm), r * mix(1.5, 1.06, uForm), dn); }
+  }
   return c;
 }
 float dustLo(vec3 q) {                       // cheap density, for shadows
@@ -113,9 +129,19 @@ void main() {
     float turb = 1.1 + uLife.z * 1.4, tt = uT * .035;
     for (int i = 0; i < STEPS; i++) {
       vec3 p = ro + rd * t;
-      float far = nearest(p);
+      float farP = nearest(p), farD = discDist(p), far = min(farP, farD);
       if (far > 0.) { t += max(dt, far * .85); if (t > t1) break; continue; }
       t += dt; if (t > t1 + dt) break;
+      if (farD <= 0.) {                         // orbiting arcs: one ring per limb, broken into arcs that circle at its tempo
+        float hg = dot(p, uDiscN); vec3 pl = p - uDiscN * hg;
+        float r = length(pl), ang = atan(dot(pl, uDiscU), dot(pl, uDiscV)), dd = 0., hm = 0.;
+        for (int j = 0; j < 8; j++) {
+          float rw = uRing[j].y;
+          if (rw > 0.) { float dr = (r - uRing[j].x) / .026, e = exp(-dr * dr) * smoothstep(-.15, .25, sin(ang * uRing[j].z + uT * uRing[j].w + float(j) * 2.4) - (1. - rw * 1.2)) * rw; dd += e; hm += e * fract(float(j) * .37 + .2); }
+        }
+        if (dd > .003) { vec3 rc = mix(uAmb, uKey, clamp(hm / dd, 0., 1.)); dd *= exp(-hg * hg * 420.); float a = 1. - exp(-dd * dt * 20.); C += T * a * mix(rc, vec3(.9, .92, 1.), .45) * (.9 + uAud.w * 1.5 + uLife.w); T *= 1. - a * .35; }
+      }
+      if (farP > 0.) continue;
       vec3 s = p * .45 + uSeed;
       vec3 w = (vec3(n3(s + vec3(0., tt, 0.)), n3(s + vec3(31.4, -tt, 7.7)), n3(s + vec3(5.2, 13.1, tt))) - .5) * turb;
       vec3 q = p + w; float ring = 0.;
@@ -136,6 +162,14 @@ void main() {
         float f = fbm(fq);
         float soft = mix(.5, .1, uLife.x);
         float dust = smoothstep(-soft, soft, sh + (f - .47) * 1.6 - .8 + rip * .34) * cv * mix(.45, 1., uLife.x);
+        float lat = 0.;
+        if (uForm > .01) {                      // the dust crystallises from its densest cores outward into a lattice of thin sheets
+          vec3 g = q * uGy.x + vec3(0., uT * uGy.y, 0.);
+          float fld = mix(dot(sin(g), cos(g.yzx)), (cos(g.x) + cos(g.y) + cos(g.z)) * .8, uGy.z);
+          float mask = smoothstep(1.3 - uForm * 1.2, 1.5 - uForm * 1.2, sh + f * .35) * uForm;
+          lat = smoothstep(uGy.w, uGy.w * .25, abs(fld)) * mask;
+          dust = mix(dust, dust * (.1 + lat * 1.7), mask);
+        }
         if (dust > .01) {
           vec3 l = normalize(uLight - p);
           float shd = exp(-dustLo(q + l * .34) * 8.5);
@@ -143,6 +177,7 @@ void main() {
           vec3 lit = alb * (uKey * shd * 1.45 + uAmb * .07) + tint * (1. - dust) * .26;   // thin edges glow in their own colour
           for (int k = 0; k < 8; k++) { float sb = uStar[k].w; if (sb > 0.) { vec3 ds = uStar[k].xyz - p; lit += alb * vec3(1., .9, .8) * sb * .5 / (dot(ds, ds) * 6. + .15); } }
           lit *= 1. + uAud.z * 1.6 * n3(q * 7. + uT * 2.) * (1. - dust) + ring * 1.5 + max(0., rip) * 1.1;
+          lit += (tint * .65 + vec3(.38)) * lat * (.5 + max(0., rip) * 2.8 + ring * 2. + uAud.w * .8);   // the sheets carry the sound: they light up as waves pass
           float a = 1. - exp(-dust * dt * 9.);
           C += T * a * lit; T *= 1. - a;
           if (T < .02) break;
@@ -183,7 +218,7 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch']) NEB.U[n] = gl.getUniformLocation(pr, n);
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing']) NEB.U[n] = gl.getUniformLocation(pr, n);
   gl.uniform1i(NEB.U.uNoise, 0);
   NEB.gl = gl;
 }
@@ -287,7 +322,16 @@ function nebFrame(c, t, mouse) {
   gl.uniform4fv(U.uWave, wave); gl.uniform1fv(U.uWaveAmp, wamp); gl.uniform4fv(U.uRip, rip); gl.uniform4f(U.uReson, depth, L.tail, .35 + .4 * d.learned, 0); gl.uniform4fv(U.uStar, star);
   gl.uniform4f(U.uAud, au ? au.bass : 0, au ? au.mid : 0, au ? au.high : 0, lv);
   gl.uniform4f(U.uLife, n ? (d.epochs ? .4 + .6 * Math.max(d.learned, d.growth * .8) : .3) : .1, d.growth, turb, kick + (d.training ? .15 : 0));
-  let ext = 1.5; N.slots.forEach(sl => { if (sl.w > .01) ext = Math.max(ext, Math.hypot(sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 3.4, Math.hypot(...sl.p) + sl.rad * 3.4); });
+  // form: structure that only exists once it has trained
+  const form = n && d.epochs ? clamp(d.growth * 1.12 * (.7 + .3 * d.learned) + (d.training ? .03 * Math.sin(t * 2) : 0), 0, 1) : 0;
+  const nrings = n && d.epochs ? Math.min(8, K + Math.floor(d.epochs / 60), Math.floor(d.epochs / 20)) : 0, rings = new Float32Array(32);
+  for (let j = 0; j < nrings; j++) { const limb = limbs && limbs[j % limbs.length], bpm = (limb && limb.mean.bpm) || d.bpm || 100, share = limb ? limb.count / n : .5;
+    rings.set([1.95 + j * .25 + .04 * noise(t * .1 + j * 5 + sd), clamp(.35 + share * 1.2 + (au ? au.mid * .4 : 0), .3, .95), 1 + ((j * 2 + Math.round(bpm / 40)) % 5), bpm / 60 * .28 * (j % 2 ? 1 : -1)], j * 4); }
+  const dn0 = nvec(t * .03, sd + 300), dnv = [dn0[0] * .7, 1, dn0[2] * .7 + .35], dnl = Math.hypot(...dnv), DN = dnv.map(v => v / dnl);
+  let DU = [DN[1], -DN[0], 0]; const dul = Math.hypot(...DU) || 1; DU = DU.map(v => v / dul); const DV = [DN[1] * DU[2] - DN[2] * DU[1], DN[2] * DU[0] - DN[0] * DU[2], DN[0] * DU[1] - DN[1] * DU[0]];
+  gl.uniform1f(U.uForm, form); gl.uniform4f(U.uGy, 5.2 + d.bright * 4.5 + (au ? au.high * 1.5 : 0), .05 + lv * .25, .5 + .5 * noise(t * .03 + sd + 60), .26 + .1 * noise(t * .07 + sd));
+  gl.uniform3fv(U.uDiscN, DN); gl.uniform3fv(U.uDiscU, DU); gl.uniform3fv(U.uDiscV, DV); gl.uniform4f(U.uDisc, 1.8, 2.1 + nrings * .25, .13, nrings ? 1 : 0); gl.uniform4fv(U.uRing, rings);
+  let ext = nrings ? 2.3 + nrings * .25 : 1.5; N.slots.forEach(sl => { if (sl.w > .01) ext = Math.max(ext, Math.hypot(sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 3.4, Math.hypot(...sl.p) + sl.rad * 3.4); });
   gl.uniform1f(U.uB, Math.min(6, ext + .8)); gl.uniform1f(U.uFrame, (NEB.fr = (NEB.fr || 0) + 1) % 1024);
   const D = NEB.drag; D.s += ((D.on ? 1 : 0) - D.s) * Math.min(1, dt * (D.on ? 9 : 2.2)); gl.uniform4f(U.uTouch, D.p[0], D.p[1], D.p[2], D.s < .01 ? 0 : D.s);
   gl.uniform3fv(U.uLight, light); gl.uniform3fv(U.uKey, key); gl.uniform3fv(U.uAmb, amb);
