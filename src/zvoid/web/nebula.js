@@ -131,7 +131,7 @@ float shapes(vec3 q, out vec3 tint, out float halo) {
 float nearest(vec3 p) {                      // distance to the outer edge of anything visible; lets rays leap over empty space
   float m = 1e3; p.x = mix(p.x, abs(p.x), uSym);
   for (int i = 0; i < 6; i++) {
-    if (uCol[i].w > 0.) { vec3 ba = uAxis[i].xyz * uAxis[i].w, pa = p - uPole[i].xyz; float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.); m = min(m, length(pa - ba * h) - uPole[i].w * (2.1 + .5 * uTrait[i].w) - .75 - uAxis[i].w * .3 * min(uFract.x, 1.)); }   // room for its branches
+    if (uCol[i].w > 0.) { vec3 ba = uAxis[i].xyz * uAxis[i].w, pa = p - uPole[i].xyz; float h = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.); m = min(m, length(pa - ba * h) - uPole[i].w * (3.0 + .9 * uTrait[i].w) - 1.25 - uAxis[i].w * .3 * min(uFract.x, 1.)); }   // room for its branches
   }
   return m;
 }
@@ -357,11 +357,11 @@ void main() {
       float fl = uEvI[k].z, pd = (sm - uEvI[k].y) / .06, bead = exp(-pd * pd), wide = floor(uEvI[k].w), wd = .00011 * (1. + fl * 3. + bead * 4.) * (.5 + sm) * (1. + wide * 1.1);
       float g = wd / (dm + wd) * (.45 + fl * 1.8 + bead * 2.5) + exp(-dm * 130.) * .045 * (1. + fl * 4.);
       vec3 so = uEvP[k * 17 + 16] - ro; float tc = dot(so, rd); vec3 dl = so - rd * tc; g += exp(-dot(dl, dl) * 70.) * fl * .35 * step(0., tc);   // the flare where it lands
-      C += mix(mix(uKey, uAmb, fract(uEvI[k].w)), vec3(.84, .95, 1.), .55 - wide * .15) * g * ei * mix(1., T, .7);
+      C += mix(mix(uKey, uAmb, fract(uEvI[k].w)), vec3(.84, .95, 1.), .55 - wide * .15) * g * ei * mix(1., T, .7) * smoothstep(0., .3, sm);   // its outer end fades into the dark: no end is ever left hanging
     }
   }
   for (int k = 0; k < 8; k++) {                // filaments: fine threads that grow out of the limbs' tips and spines, thick at the root, and sway
-    float fi = uFilC[k].w;
+    float fi = uFilC[k].w; bool sinew = fi > 1.5; if (sinew) fi -= 2.;
     if (fi > 0.) {
       float dm = 1e9, sm = 0.;
       for (int i = 0; i < 8; i++) {
@@ -370,8 +370,8 @@ void main() {
         vec3 dv = w0 + rd * tr - u * sc; float d2 = tr > 0. ? dot(dv, dv) : 1e9;
         if (d2 < dm) { dm = d2; sm = (float(i) + sc) / 8.; }
       }
-      float tp = 1. - sm * .86, wd = .00022 * tp * tp + .000008, pd = (sm - fract(uT * .2 + float(k) * .37) * 1.4) / .07, bead = exp(-pd * pd);
-      float g = wd / (dm + wd) * (.85 + bead * 1.4 + uAud.w * 1.4) * (1. - sm * .5) + exp(-dm * 170.) * .018 * tp;
+      float tp = sinew ? .5 + .5 * abs(1. - 2. * sm) : 1. - sm * .86, wd = .0003 * tp * tp + .000008, pd = (sm - fract(uT * .2 + float(k) * .37) * 1.4) / .07, bead = exp(-pd * pd);
+      float g = wd / (dm + wd) * (.85 + bead * 1.4 + uAud.w * 1.4) * (sinew ? 1. : 1. - sm * .5) + exp(-dm * 170.) * .018 * tp;
       C += mix(uFilC[k].rgb, vec3(.93, .9, .84), .4) * g * fi * mix(1., T, .8);
     }
   }
@@ -445,7 +445,7 @@ function nebSources() {
   const bake = head + 'layout(location = 0) out vec4 o0; layout(location = 1) out vec4 o1; layout(location = 2) out vec4 o2; layout(location = 3) out vec4 o3; uniform float uZ;\n' + common +
     'void main() {\n  vec3 p = vec3(gl_FragCoord.xy / ' + NEB_VN + '. * 2. - 1., uZ * 2. - 1.) * uB;\n  float turb = 1.1 + uLife.z * 1.4, tt = uT * .035;\n' + field +
     '  o0 = vec4(sh, halo, hAlong, gTip); o1 = vec4(tint, cv); o2 = vec4(dsp, ring); o3 = vec4(grow * .3 - melt * .6, bloom, rip, melt);\n}';
-  const look = `      vec3 vc = p / (2. * uB) + .5; vec4 v0 = texture(uV0, vc); float sh = v0.x, halo = v0.y;
+  const look = `      vec3 vc = p / (2. * uB) + .5; vec4 v0 = texture(uV0, vc); float fe = smoothstep(uB, uB * .88, length(p)), sh = v0.x * fe, halo = v0.y * fe;   // fade out toward the edge of the volume, so nothing is ever sliced off
       if (halo + sh < .03) continue;
       float gk = 1.;
       if (sh < .02) { gk = 1.9; t += dt * .9; }
@@ -597,7 +597,7 @@ function nebFrame(c, t, mouse) {
   // camera
   const cy_ = Math.cos(L.yaw), sy_ = Math.sin(L.yaw), cp = Math.cos(L.pitch * .7), sp = Math.sin(L.pitch * .7), cr = Math.cos(L.roll * .6), sr = Math.sin(L.roll * .6);
   const M = [[cy_ * cr + sy_ * sp * sr, -cy_ * sr + sy_ * sp * cr, sy_ * cp], [cp * sr, cp * cr, -sp], [-sy_ * cr + cy_ * sp * sr, sy_ * sr + cy_ * sp * cr, cy_ * cp]];   // Ry * Rx * Rz
-  const dist = 9, grow = n ? .98 + .1 * clamp(d.minutes / 30, 0, 1) + .14 * d.growth : .55, tan = Math.max(.56 / grow, (fx.extR || 0) / dist * 1.08) * (1 + .04 * (L.breath - .5));   // never so close that the body leaves the frame
+  const dist = 9, grow = n ? .98 + .1 * clamp(d.minutes / 30, 0, 1) + .14 * d.growth : .55, tan = Math.max(.56 / grow, (fx.extR || 0) / dist * 1.15) * (1 + .04 * (L.breath - .5));   // never so close that the body leaves the frame
   const rot = v => [M[0][0] * v[0] + M[0][1] * v[1] + M[0][2] * v[2], M[1][0] * v[0] + M[1][1] * v[1] + M[1][2] * v[2], M[2][0] * v[0] + M[2][1] * v[1] + M[2][2] * v[2]];
   const toCam = p => [M[0][0] * p[0] + M[1][0] * p[1] + M[2][0] * p[2], M[0][1] * p[0] + M[1][1] * p[1] + M[2][1] * p[2], M[0][2] * p[0] + M[1][2] * p[1] + M[2][2] * p[2]];
   const proj = p => { const q = toCam(p), depth = dist - q[2]; return [cx + q[0] / (depth * tan) * S / 2, cy - q[1] / (depth * tan) * S / 2, depth]; };
@@ -722,9 +722,9 @@ function nebFrame(c, t, mouse) {
   gl.uniform4fv(U.uFood, food); gl.uniform1f(U.uSym, n ? 1 : 0);
   let ext = 1.5; N.slots.forEach(sl => { if (sl.w > .01) ext = Math.max(ext, Math.hypot(sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 3.4, Math.hypot(...sl.p) + sl.rad * 3.4); });
   gl.uniform4f(U.uSweep, pg.i, trn * (tr && tr.stage !== 'train' ? .6 : 1), 0, 0);
-  gl.uniform1f(U.uB, Math.min(6, ext + .8)); gl.uniform1f(U.uFrame, (NEB.fr = (NEB.fr || 0) + 1) % 1024);
+  gl.uniform1f(U.uB, Math.min(7, ext + 1.4)); gl.uniform1f(U.uFrame, (NEB.fr = (NEB.fr || 0) + 1) % 1024);
   { // energy arcs: rarely, something far outside strikes a part of the body. The arc is jagged, re-strikes like lightning, hops between parts, and is heard.
-    const ev = fx.ev || (fx.ev = []), rnd = Math.random, R = Math.max(3.8, ext * 2.1), act = 1 + trn * 1.2 + lv * 2;
+    const ev = fx.ev || (fx.ev = []), rnd = Math.random, R = Math.max(6, ext * 3.2), act = 1 + trn * 1.2 + lv * 2;
     const V = (x, y, z) => NEB.nz[((y + 17 * (z - 1)) & 255) * 256 + ((x + 37 * (z - 1)) & 255)] / 255, sstep = f => f * f * (3 - 2 * f);
     const n3 = (x, y, z) => { const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z), fx_ = sstep(x - ix), fy = sstep(y - iy), fz = sstep(z - iz), L2 = k => { const a = V(ix, iy, iz + k), b = V(ix + 1, iy, iz + k), c2 = V(ix, iy + 1, iz + k), e2 = V(ix + 1, iy + 1, iz + k); return a + (b - a) * fx_ + (c2 - a) * fy + (a - b - c2 + e2) * fx_ * fy; }; const lo = L2(0); return lo + (L2(1) - lo) * fz; };
     const sdv = d.seed * 40, tt = fx.clock * .035, tS = 1.1 + turb * 1.4;
@@ -773,19 +773,30 @@ function nebFrame(c, t, mouse) {
       ep.set(e.pts, i * 51); ei.set([Math.min(1, age / .06) * Math.min(1, (e.life - age) / .35) * (e.kd.soft ? .55 + .25 * Math.sin(age * 2.3) : .22 + .78 * Math.min(1, e.flash)), e.kd.soft ? (age * .7) % 1.5 : (t - e.last) / .14, Math.min(1.5, e.flash), e.hue * .999 + e.kd.wide], i * 4);   // a tendril carries slow beads of light inward, over and over
     });
     gl.uniform3fv(U.uEvP, ep); gl.uniform4fv(U.uEvI, ei);
-    // filaments: threads that grow out of the body itself, first from the limbs' tips, then from points along their spines. More appear as it trains.
-    const fp = new Float32Array(216), fc = new Float32Array(32), NF = Math.min(8, nrings);
-    for (let k = 0; k < NF; k++) {
-      const j = k % K, round = Math.floor(k / K), sl = N.slots[j]; if (!sl || sl.w < .3) continue;
-      const e = { j, hh: round === 0 ? 1 : round === 1 && j ? 1 : [.62, .36, .8][round % 3], mx: j && n ? (round % 2 ? -1 : 1) : 1 }, P = land(e), ax = [sl.a[0] * e.mx, sl.a[1], sl.a[2]];
-      let dir = ax.slice();
-      if (e.hh < 1) { const sv = nvec(t * .03, k * 31 + 7), c0 = [ax[1] * sv[2] - ax[2] * sv[1], ax[2] * sv[0] - ax[0] * sv[2], ax[0] * sv[1] - ax[1] * sv[0]], cl = Math.hypot(...c0) || 1; dir = [c0[0] / cl + ax[0] * .35, c0[1] / cl + ax[1] * .35, c0[2] / cl + ax[2] * .35]; }   // from the side of a limb it grows outward, not along it
-      const seg = sl.len * (.13 + .09 * d.growth) * (.8 + .4 * ((k * .618) % 1)) * (e.hh < 1 ? .8 : 1);
-      fp.set(P, k * 27);
-      for (let i = 1; i < 9; i++) { const w = nvec(t * .11 + i * .33, k * 17 + 3), bend = .16 + i * .075 + lv * .5; dir = [dir[0] + w[0] * bend, dir[1] + w[1] * bend - .02 * i, dir[2] + w[2] * bend]; const dl = Math.hypot(...dir) || 1; dir = dir.map(v => v / dl);
-        P[0] += dir[0] * seg; P[1] += dir[1] * seg; P[2] += dir[2] * seg; fp.set(P, k * 27 + i * 3); }
-      fc.set([sl.col[0], sl.col[1], sl.col[2], Math.min(1, sl.w) * (.8 + sl.ring * .8) * clamp(nrings - k, 0, 1)], k * 4);
+    // filaments: threads that belong to the body. Short antennae leave through the limbs' tips, and sinews are strung between two parts of it
+    // (a side limb and the spine, or a limb and its mirror), fixed at both ends. More appear as it trains.
+    const fp = new Float32Array(216), fc = new Float32Array(32), NF = Math.min(8, nrings), specs = [];
+    for (let r = 0; r < 3 && specs.length < 8; r++) for (let j = 0; j < K && specs.length < 8; j++) {
+      if (r === 0) { specs.push({ a: { j, hh: .5, mx: 1 } }); if (j && n) specs.push({ a: { j, hh: .5, mx: -1 } }); }
+      else if (j > 0) specs.push({ a: { j, hh: .8, mx: r === 1 ? 1 : -1 }, b: { j: 0, hh: Math.min(.9, .3 + .14 * j), mx: 1 } });
+      else if (r === 1 && K > 1 && n) specs.push({ a: { j: 1, hh: .55, mx: 1 }, b: { j: 1, hh: .55, mx: -1 } });
     }
+    specs.slice(0, NF).forEach((sp, k) => {
+      const sl = N.slots[sp.a.j]; if (!sl || sl.w < .3) return;
+      const P = land(sp.a), sway = nvec(t * .1, k * 17 + 3);
+      if (sp.b) {                                                                                   // a sinew: fixed at both ends, bowed outward, swaying in the middle
+        const Q = land(sp.b), L = Math.hypot(Q[0] - P[0], Q[1] - P[1], Q[2] - P[2]), mid = [(P[0] + Q[0]) / 2, (P[1] + Q[1]) / 2, (P[2] + Q[2]) / 2], ml = Math.hypot(...mid) || 1, bow = [0, 1, 2].map(c => (mid[c] / ml * .2 + sway[c] * .14 * (1 + lv * 2)) * L);
+        for (let i = 0; i < 9; i++) { const u = i / 8, h = Math.sin(Math.PI * u); fp.set([P[0] + (Q[0] - P[0]) * u + bow[0] * h, P[1] + (Q[1] - P[1]) * u + bow[1] * h, P[2] + (Q[2] - P[2]) * u + bow[2] * h], k * 27 + i * 3); }
+      } else {                                                                                      // an antenna: up the limb's own axis, out through its end, then a short curl
+        const ax = [sl.a[0] * sp.a.mx, sl.a[1], sl.a[2]], rf = Math.abs(ax[1]) < .9 ? [0, 1, 0] : [1, 0, 0], u0 = [ax[1] * rf[2] - ax[2] * rf[1], ax[2] * rf[0] - ax[0] * rf[2], ax[0] * rf[1] - ax[1] * rf[0]], ul = Math.hypot(...u0) || 1, u = u0.map(v => v / ul), v = [ax[1] * u[2] - ax[2] * u[1], ax[2] * u[0] - ax[0] * u[2], ax[0] * u[1] - ax[1] * u[0]];
+        const seg = sl.len * (.07 + .04 * d.growth) * (.8 + .4 * ((k * .618) % 1)), ph = k * 2.4 + t * .06 + sway[0] * 1.5, curl = .2 + .09 * Math.sin(t * .35 + k * 1.7) + sway[1] * .12 + lv * .25;   // it curls like a fern tip, and slowly curls and uncurls
+        fp.set(P, k * 27);
+        for (let i = 1; i < 9; i++) { const th = i === 1 ? 0 : Math.pow(i - 1, 1.3) * curl * .85, sg = i === 1 ? sl.len * .42 : seg * (1.2 - .08 * i), c = Math.cos(th), sn = Math.sin(th), cp = Math.cos(ph), spn = Math.sin(ph);
+          for (let q = 0; q < 3; q++) P[q] += (ax[q] * c + (u[q] * cp + v[q] * spn) * sn) * sg;
+          fp.set(P, k * 27 + i * 3); }
+      }
+      fc.set([sl.col[0], sl.col[1], sl.col[2], Math.min(1, sl.w) * (.8 + sl.ring * .8) * clamp(nrings - k, 0, 1) + (sp.b ? 2 : 0)], k * 4);
+    });
     gl.uniform3fv(U.uFil, fp); gl.uniform4fv(U.uFilC, fc);
   }
   const D = NEB.drag; D.s += ((D.on ? 1 : 0) - D.s) * Math.min(1, dt * (D.on ? 9 : 2.2)); gl.uniform4f(U.uTouch, D.p[0], D.p[1], D.p[2], D.s < .01 ? 0 : D.s);
