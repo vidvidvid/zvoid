@@ -305,7 +305,7 @@ function gymRender() {
         h('div', { class: 'tr-phases' }, ['digest', 'wake', 'train'].map((p, i) => h('span', { class: i < ph ? 'done' : i === ph ? 'now' : '' }, p))),
         h('div', { class: 'tr-big' }, big), h('div', { class: 'tr-sub' }, sub),
         h('div', { class: 'tr-bar' }, h('i', { style: `width:${clamp(ph === 2 ? done / total * 100 : 0, 0, 100)}%` })),
-        h('div', { class: 'tr-foot' }, ph === 2 ? `${Math.round(done / total * 100)}% of this session · ${dur(el)} in` : `${dur(el)} in`));
+        h('div', { class: 'tr-foot' }, (ph === 2 ? `${Math.round(done / total * 100)}% of this session · ${dur(el)} in` : `${dur(el)} in`) + ((Gym.fx[c.slug] || {}).part ? `  ·  building its ${Gym.fx[c.slug].part} (${Gym.fx[c.slug].partPct}%)` : '')));
     }
   }
 }

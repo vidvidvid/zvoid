@@ -47,6 +47,8 @@ uniform vec4 uSweep;     // training: how far light has risen through the pillar
 uniform vec4 uFood[12];  // digesting: tracks waiting to be eaten, as motes (xyz, brightness)
 float gH;                // how far along its pillar the last sampled point was
 uniform float uSym;      // 1 = the body is mirrored across its midline
+uniform vec4 uBuild;     // how far each part of the frame is built along every limb (0 base .. 1 tip): spine, ribs, cables, armour
+float gFront;            // how close the last sampled point was to where the frame is being built right now
 const int STEPS = 96;
 vec3 gPa, gBa; float gR0, gBest;   // the pillar nearest the last sampled point, in its own frame
 float gSeam;             // how deep in a groove of the body the last sampled point was
@@ -115,20 +117,27 @@ float carve(vec3 q) {                         // voids: round holes that become 
 float smin(float a, float b, float k) { float h = clamp(.5 + .5 * (b - a) / k, 0., 1.); return mix(b, a, h) - k * h * (1. - h); }
 /* the body: a biomechanical armature along each pillar. Stacked vertebrae, open ribs, cables wound around the spine.
    It only exists once the creature has trained, and it grows in that order. Returns a signed distance. */
+float built(float front, float hh) { return front <= .001 ? 0. : smoothstep(front + .015, front - .07, hh); }
+float edge(float front, float hh) { float e = (hh - front) / .035; return front > .001 && front < .995 ? exp(-e * e) : 0.; }
 float bodyL(vec3 pa, vec3 ba, float r0) {
   float hh = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.);
-  gSeam = 0.;
   float L = length(ba); vec3 ax = ba / L; float z = dot(pa, ax); vec3 rv = pa - ax * z; float rho = length(rv);
   vec3 u = normalize(cross(ax, vec3(.31, .95, .07))), v = cross(ax, u); float phi = atan(dot(rv, v), dot(rv, u));
-  float taper = 1. - .45 * hh, f = uForm;
+  float taper = 1. - .45 * hh, sB = built(uBuild.x, hh), rB = built(uBuild.y, hh), cB = built(uBuild.z, hh), pB = built(uBuild.w, hh);
+  gFront = max(max(edge(uBuild.x, hh), edge(uBuild.y, hh)), max(edge(uBuild.z, hh), edge(uBuild.w, hh))) * uProg.z;
   float seg = r0 * .36, sv = abs(sin(z * 3.14159 / seg));                                   // spine: stacked vertebrae
-  float d = rho - r0 * .21 * taper * (.6 + .4 * sqrt(sv)) * smoothstep(.04, .3, f);
-  gSeam = smoothstep(.3, 0., sv);
-  float gap = r0 * .52, zc = (fract(z / gap + .5) - .5) * gap, rr = r0 * (.74 - .3 * hh) * (1. + .1 * sin(z * 2.3 / r0));   // ribs: open arcs
-  float th = r0 * .05 * smoothstep(-.9, .5, cos(phi)) * smoothstep(.28, .6, f);
+  float d = rho - r0 * .24 * taper * (.6 + .4 * sqrt(sv)) * sB + (sB > .001 ? 0. : 1.);
+  gSeam = smoothstep(.3, 0., sv) * sB;
+  float gap = r0 * .52, zc = (fract(z / gap + .5) - .5) * gap, rr = r0 * (.98 - .34 * hh) * (1. + .08 * sin(z * 2.3 / r0));   // ribs: a cage around the cloud, arcs that close as they finish
+  float open = (1. - rB) * 1.5, th = r0 * .042 * smoothstep(-.9 + open, .5 + open, cos(phi)) * min(1., rB * 3.);
   d = smin(d, length(vec2(rho - rr, zc)) - th + (th > 1e-4 ? 0. : 1.), r0 * .07);
-  float tw = phi - z * 2.2 / r0, a2 = mod(tw + 1.0472, 2.0944) - 1.0472, rc = r0 * .41 * taper, tc = r0 * .046 * smoothstep(.55, .9, f);   // cables: three helices
+  float tw = phi - z * 2.2 / r0, a2 = mod(tw + 1.0472, 2.0944) - 1.0472, rc = r0 * .55 * taper, tc = r0 * .04 * cB;   // cables: three helices
   d = smin(d, length(vec2(rho - rc, a2 * rc)) - tc + (tc > 1e-4 ? 0. : 1.), r0 * .05);
+  if (pB > .001) {                                                                           // armour: segmented plates over its back
+    float Rp = r0 * (1.12 - .38 * hh), pz = (fract(z / (gap * 1.6)) - .5) * gap * 1.6, pa6 = abs(mod(phi + .5236, 1.0472) - .5236);
+    float plate = max(abs(rho - Rp) - r0 * .017 * pB, max(abs(pz) - gap * .68, pa6 * rho - Rp * .47));
+    d = min(d, max(plate, (-cos(phi - 2.1) - .2) * r0 * .4));
+  }
   return max(d, max(-z, z - L) - r0 * .04);
 }
 float dustLo(vec3 q) {                       // cheap density, for shadows
@@ -170,6 +179,7 @@ void main() {
           float seg1 = smoothstep(-.75, -.55, sin(tau * 29.) + .5 * sin(tau * 11. + 1.3)), seg2 = smoothstep(-.6, -.4, sin(tau * 41. + 2.) + .6 * sin(tau * 13.));   // irregular marks, like its script
           float d1 = (r - 1.66) / .02, d2 = (r - 1.52) / .013, h1 = min(abs(a01 - uProg.x), 1. - abs(a01 - uProg.x)) * 50., h2 = min(abs(a01 - uProg.y), 1. - abs(a01 - uProg.y)) * 50.;
           float g1 = exp(-d1 * d1) * (.05 + step(a01, uProg.x) * seg1 * .95) + exp(-h1 * h1 - d1 * d1 * .1) * (1.1 + uProg.w), g2 = exp(-d2 * d2) * (.035 + step(a01, uProg.y) * seg2 * .75) + exp(-h2 * h2 - d2 * d2 * .08) * (.9 + uProg.w);
+          g1 *= uProg.z; g2 *= uProg.z;
           if (g1 + g2 > .01) { ringC += mix(vec3(1.), uKey, .3) * g1 + mix(vec3(1.), uAmb, .5) * g2; ringA = max(ringA, min(1., g1 + g2)); tP = tq; }
         }
       }
@@ -211,17 +221,18 @@ void main() {
       float haze = n3(q * .7 + vec3(0., uT * .02, 3.)), wisp = w.x / turb + .5;
       float sapD = (hAlong - uSweep.x) / .04, sap = uSweep.y * (smoothstep(uSweep.x + .05, uSweep.x - .03, hAlong) * .3 + exp(-sapD * sapD) * 1.5);   // training: light rises through each pillar, base to tip, once per epoch
       ring += sap;
-      float ds = dt, shv = -1.;                  // shv: shadow toward the light, worked out once and shared by body and dust
-      if (uForm > .05 && sh > .1) {              // the body inside the dust
-        vec3 bpa = gPa, bba = gBa; float br0 = gR0, bd = bodyL(bpa, bba, br0), seam = gSeam;
+      float ds = dt, shv = -1., bd = 1e3;                  // shv: shadow toward the light, worked out once and shared by body and dust
+      if (uBuild.x > .001 && sh > .08) {         // the frame inside the dust
+        vec3 bpa = gPa, bba = gBa; float br0 = gR0; bd = bodyL(bpa, bba, br0); float seam = gSeam, front = gFront;
         if (bd < dt * .7) { ds = clamp(bd * .75, dt * .24, dt); t += ds - dt; }       // slow down near its surface so it stays crisp
         if (bd < .022) {
           float ab = smoothstep(.022, -.008, bd) * cv;
           if (ab > .01) {
             float e = .035, nl = clamp((bodyL(bpa + lF * e, bba, br0) - bd) / e, 0., 1.), nv = clamp((bodyL(bpa - rdF * e, bba, br0) - bd) / e, 0., 1.); shv = dustLo(q + lF * .32); float shB = exp(-shv * 5.);
             vec3 alb = mix(vec3(.15, .14, .17), tint, .2);                      // dark, glossy, like wet bone
-            vec3 lb = alb * (uKey * nl * shB * 1.9 + uAmb * .1) + pow(1. - nv, 3.) * (uAmb * .55 + uKey * .3) * (.3 + shB * .6)
-                    + tint * seam * (.22 + max(0., rip) * 2.6 + ring * 2.2 + uAud.w * .9);          // its seams glow, and carry the sound
+            vec3 lb = alb * (uKey * nl * (.35 + shB * .65) * 2.2 + uAmb * .16) + pow(1. - nv, 2.5) * (uAmb * .7 + uKey * .45) * (.45 + shB * .55) + tint * .05
+                    + tint * seam * (.4 + max(0., rip) * 2.6 + ring * 2.2 + uAud.w * .9)           // its seams glow, and carry the sound
+                    + vec3(1., .84, .58) * front * 2.4;                                              // white-hot where it is being built
             C += T * ab * lb; T *= 1. - ab;
             if (T < .02) break;
           }
@@ -250,7 +261,7 @@ void main() {
           for (int k = 0; k < 8; k++) { float sb = uStar[k].w; if (sb > 0.) { vec3 ds = uStar[k].xyz - p; lit += alb * vec3(1., .9, .8) * sb * .5 / (dot(ds, ds) * 6. + .15); } }
           lit *= 1. + uAud.z * 1.6 * n3(q * 7. + uT * 2.) * (1. - dust) + ring * 1.5 + max(0., rip) * 1.1;
           lit += (tint * .65 + vec3(.38)) * lat * (.5 + max(0., rip) * 2.8 + ring * 2. + uAud.w * .8);   // the sheets carry the sound: they light up as waves pass
-          float a = 1. - exp(-dust * (1. - uForm * .5) * ds * 9.);                 // the dust thins to a shroud as the body forms
+          float a = 1. - exp(-dust * (1. - max(uForm * .5, uBuild.x * .72)) * mix(1., smoothstep(0., .16, bd), .9) * ds * 9.);   // and clears around the frame, so you can see it                 // the dust thins to a shroud as the body forms
           C += T * a * lit; T *= 1. - a;
           if (T < .02) break;
         }
@@ -264,14 +275,12 @@ void main() {
   }
   for (int k = 0; k < 12; k++) {               // digesting: the tracks it has yet to eat drift around it as motes
     float fb = uFood[k].w;
-    if (fb > 0.) {                               // each is a small spore: a lobed membrane, a nucleus, a crown of cilia
+    if (fb > 0.) {                               // each is a fragment of frame on its way in: a small turning arc
       vec3 so = uFood[k].xyz - ro; float tc = dot(so, rd); vec3 dv = so - rd * tc; float d2 = dot(dv, dv);
-      if (tc > 0. && d2 < .09) {
-        float fk = float(k), rr = sqrt(d2), an = atan(dot(dv, uCam[1]), dot(dv, uCam[0])), nl = 3. + mod(fk, 3.);
-        float lobe = .5 + .5 * cos(an * nl + uT * (1.2 + fk * .3) + fk * 1.7), mem = (rr - .06 * (1. + .45 * lobe)) / .008;
-        float cil = (rr - .115) / .045, hairs = pow(.5 + .5 * cos(an * (9. + nl) - uT * 2.5 + fk), 7.);
-        float sp = exp(-mem * mem) * .95 + exp(-d2 * 1400.) * 1.3 + exp(-cil * cil) * hairs * .55 + exp(-d2 * 260.) * .12 * lobe;
-        C += mix(uAmb, vec3(1.), .5) * fb * sp * mix(1., T, .5);
+      if (tc > 0. && d2 < .02) {
+        float fk = float(k), rr = sqrt(d2), an = atan(dot(dv, uCam[1]), dot(dv, uCam[0])) + uT * (.7 + fk * .17) * (mod(fk, 2.) < 1. ? 1. : -1.) + fk;
+        float mem = (rr - .05 - .012 * mod(fk, 3.)) / .006;
+        C += mix(uAmb, vec3(1., .9, .75), .6) * fb * (exp(-mem * mem) * smoothstep(-.25, .35, cos(an)) * 1.2 + exp(-d2 * 3000.) * .5 + exp(-d2 * 240.) * .06) * mix(1., T, .5);
       }
     }
   }
@@ -304,7 +313,7 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym']) NEB.U[n] = gl.getUniformLocation(pr, n);
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild']) NEB.U[n] = gl.getUniformLocation(pr, n);
   gl.uniform1i(NEB.U.uNoise, 0);
   NEB.gl = gl;
 }
@@ -337,6 +346,10 @@ function nebFrame(c, t, mouse) {
   const au = audioLevels(), lv = au ? au.level : 0, S = Math.min(cw, ch), cx0 = cw / 2, cy0 = ch / 2 * .94;
   const L = live(fx, d, t, mouse, cx0, cy0, S, au), kick = Math.exp(-(t - L.beat) * 7), dt = L.dt || .016, ease = Math.min(1, dt * 1.7);
   const cx = cx0 + L.dx, cy = cy0 + L.dy;
+  // nothing switches on or off: training fades in and out, and every state-driven value glides
+  const trOn = !!(c.training && c.training.state === 'running'); fx.trn = (fx.trn || 0) + ((trOn ? 1 : 0) - (fx.trn || 0)) * Math.min(1, dt * .8); const trn = fx.trn;
+  const SM = fx.sm || (fx.sm = {}), sm = (k, v, rate) => (SM[k] = SM[k] == null ? v : SM[k] + (v - SM[k]) * Math.min(1, dt * (rate || 1.2)));
+  fx.clock = (fx.clock == null ? t % 1000 : fx.clock) + dt * (1 + .5 * trn);
 
   // camera
   const cy_ = Math.cos(L.yaw), sy_ = Math.sin(L.yaw), cp = Math.cos(L.pitch * .7), sp = Math.sin(L.pitch * .7), cr = Math.cos(L.roll * .6), sr = Math.sin(L.roll * .6);
@@ -390,28 +403,28 @@ function nebFrame(c, t, mouse) {
   L.tail = Math.max(lv, (L.tail || 0) * Math.exp(-dt / 1.3));
   const rip = new Float32Array(24);
   N.slots.forEach((sl, j) => { const limb = limbs && limbs[j], bpm = (limb && limb.mean.bpm) || d.bpm || 100, br = limb ? limb.mean.bright : d.bright;
-    rip.set([2 * Math.PI / (.85 - .5 * clamp(br, 0, 1) + .2 * (120 / clamp(bpm, 60, 200))), bpm / 60 * Math.PI * (d.training ? 1.5 : 1), j * 1.9 + d.seed * 9, .75 + .25 * noise(t * .1 + j * 3 + sd)], j * 4); });
+    rip.set([2 * Math.PI / (.85 - .5 * clamp(br, 0, 1) + .2 * (120 / clamp(bpm, 60, 200))), bpm / 60 * Math.PI, j * 1.9 + d.seed * 9, .75 + .25 * noise(t * .1 + j * 3 + sd)], j * 4); });
   const depth = n ? clamp((.07 + .2 * d.learned + .1 * d.growth) * (1 + L.tail * 2.6) + kick * .15 + L.startle * .1, 0, .7) : .03;
 
   // stars: one ignites every 25 epochs
-  const ns = Math.min(8, Math.floor(d.epochs / 25) + (d.training ? 1 : 0)), star = new Float32Array(32);
-  for (let k = 0; k < ns; k++) { const s = N.slots[k % K], hh = hash(c.slug + 'star' + k), u = .55 + hh * .5, o = nvec(t * .03, k * 17 + sd), newest = d.training && k === ns - 1;
+  const ns = Math.min(8, Math.floor(d.epochs / 25)), star = new Float32Array(32);                  // stars are earned: one per 25 finished epochs
+  for (let k = 0; k < ns; k++) { const s = N.slots[k % K], hh = hash(c.slug + 'star' + k), u = .55 + hh * .5, o = nvec(t * .03, k * 17 + sd), newest = false;
     star.set([(s.p[0] + s.a[0] * s.len * u + o[0] * .25) * (k % 2 ? -1 : 1), s.p[1] + s.a[1] * s.len * u + o[1] * .25, s.p[2] + s.a[2] * s.len * u + o[2] * .25,
       (.55 + .3 * hh + .2 * noise(t * 1.3 + k * 9) + (au ? au.high * .8 : 0)) * (newest ? .25 + .75 * Math.abs(noise(t * 7)) : 1)], k * 4); }
 
   const hue = hueOf(d.bright) + noise(t * .02 + sd) * 16 + (au ? (au.high - au.bass) * 40 : 0), lw = nvec(t * .05, sd + 200);
   const light = [lw[0] * 3.2 + (pointer ? pointer[0] * .5 * L.curious : 0), 3 + lw[1] * 1.2 + (pointer ? pointer[1] * .5 * L.curious : 0), lw[2] * 3.2 + 1.5];
   const key = hsl2rgb(hue + 30, .35, .82), amb = hsl2rgb(hue + 50 + d.seed * 140, .85, .5);
-  const turb = (n ? (1 - d.learned) * (d.epochs ? .45 : .7) : .5) + lv * .9 + L.startle * .8 + (d.digesting ? .4 : 0) + (d.training ? .15 : 0);
+  const turb = sm('turb', (n ? (1 - d.learned) * (d.epochs ? .45 : .7) : .5) + (d.digesting ? .4 : 0)) + lv * .9 + L.startle * .8 + trn * .15;
   gl.uniform2f(U.uRes, W, H); gl.uniform2f(U.uCenter, cx * sc, (ch - cy) * sc);
-  gl.uniform1f(U.uT, t % 10000 * (d.training ? 1.5 : 1)); gl.uniform1f(U.uTan, tan); gl.uniform1f(U.uDist, dist); gl.uniform1f(U.uSeed, d.seed * 40);
+  gl.uniform1f(U.uT, fx.clock); gl.uniform1f(U.uTan, tan); gl.uniform1f(U.uDist, dist); gl.uniform1f(U.uSeed, d.seed * 40);
   gl.uniformMatrix3fv(U.uCam, false, [M[0][0], M[1][0], M[2][0], M[0][1], M[1][1], M[2][1], M[0][2], M[1][2], M[2][2]]);
   gl.uniform4fv(U.uPole, pole); gl.uniform4fv(U.uAxis, axis); gl.uniform4fv(U.uCol, col); gl.uniform4fv(U.uVoid, voids);
   gl.uniform4fv(U.uWave, wave); gl.uniform1fv(U.uWaveAmp, wamp); gl.uniform4fv(U.uWaveK, wk); gl.uniform4fv(U.uWaveN, wnv); gl.uniform4fv(U.uRip, rip); gl.uniform4f(U.uReson, depth, L.tail, .35 + .4 * d.learned, 0); gl.uniform4fv(U.uStar, star);
   gl.uniform4f(U.uAud, au ? au.bass : 0, au ? au.mid : 0, au ? au.high : 0, lv);
-  gl.uniform4f(U.uLife, n ? (d.epochs ? .4 + .6 * Math.max(d.learned, d.growth * .8) : .3) : .1, d.growth, turb, kick + (d.training ? .15 : 0));
+  gl.uniform4f(U.uLife, sm('sharp', n ? (d.epochs ? .4 + .6 * Math.max(d.learned, d.growth * .8) : .3) : .1, .6), d.growth, turb, kick + trn * .15);
   // form: structure that only exists once it has trained
-  const form = n && d.epochs ? clamp(d.growth * 1.12 * (.7 + .3 * d.learned) + (d.training ? .03 * Math.sin(t * 2) : 0), 0, 1) : 0;
+  const form = sm('form', n && d.epochs ? clamp(d.growth * 1.12 * (.7 + .3 * d.learned), 0, 1) : 0, .6);
   const nrings = n && d.epochs ? Math.min(8, K + Math.floor(d.epochs / 60), Math.floor(d.epochs / 20)) : 0, rings = new Float32Array(32);
   for (let j = 0; j < nrings; j++) { const limb = limbs && limbs[j % limbs.length], bpm = (limb && limb.mean.bpm) || d.bpm || 100, share = limb ? limb.count / n : .5;
     rings.set([1.95 + j * .25 + .04 * noise(t * .1 + j * 5 + sd), clamp(.35 + share * 1.2 + (au ? au.mid * .4 : 0), .3, .95), 1 + ((j * 2 + Math.round(bpm / 40)) % 5), bpm / 60 * .28 * (j % 2 ? 1 : -1)], j * 4); }
@@ -430,29 +443,36 @@ function nebFrame(c, t, mouse) {
       sess = clamp((tr.epoch - tr.from_epoch + inner) / Math.max(1, tr.max_epochs - tr.from_epoch), 0, 1); sweepA = .85;
     } else { inner = tr.stage === 'load' ? 1 : clamp((tr.digested || 0) / Math.max(1, tr.tracks), 0, 1); sweepA = .3; }
   }
-  pg.i = inner < pg.i - .3 ? inner : pg.i + (inner - pg.i) * Math.min(1, dt * 3); pg.s += (sess - pg.s) * Math.min(1, dt * 3);
-  gl.uniform4f(U.uProg, pg.s, pg.i, tr ? 1 : 0, tr ? .5 + .5 * Math.sin(t * (tr.stage === 'train' ? 5 : 9)) : 0);
-  if (tr) {                                        // while it trains, its orbit turns to face you enough to be read
-    const cf = rot([0, 0, 1]), mixN = [DN[0] * .45 + cf[0] * .55, DN[1] * .45 + cf[1] * .55, DN[2] * .45 + cf[2] * .55], ml = Math.hypot(...mixN) || 1; for (let k = 0; k < 3; k++) DN[k] = mixN[k] / ml;
+  if (tr) { pg.i = inner < pg.i - .3 ? inner : pg.i + (inner - pg.i) * Math.min(1, dt * 3); pg.s += (sess - pg.s) * Math.min(1, dt * 3); pg.dig = tr.stage === 'train' ? (pg.dig || 0) : clamp((tr.digested || 0) / Math.max(1, tr.tracks), 0, 1); }
+  else if (trn < .01) { pg.i = 0; pg.s = 0; pg.dig = 0; }
+  gl.uniform4f(U.uProg, pg.s, pg.i, trn, trn * (.5 + .5 * Math.sin(t * 5)));
+  // the frame: what has been built so far. It advances all the time while training, not only when an epoch lands.
+  const E = d.epochs + (tr && tr.stage === 'train' ? pg.i : 0), bt = n ? [clamp(Math.max(E / 5, (pg.dig || 0) * .22 * trn), 0, 1), clamp((E - 2) / 20, 0, 1), clamp((E - 14) / 70, 0, 1), clamp((E - 50) / 250, 0, 1)] : [0, 0, 0, 0];
+  const B = fx.bld || (fx.bld = bt.slice()); for (let k = 0; k < 4; k++) B[k] += (bt[k] - B[k]) * Math.min(1, dt * .9);
+  gl.uniform4f(U.uBuild, B[0], B[1], B[2], B[3]);
+  fx.part = B[0] < .995 ? 'spine' : B[1] < .995 ? 'ribs' : B[2] < .995 ? 'cables' : B[3] < .995 ? 'armour' : null; fx.partPct = Math.round((B[0] < .995 ? B[0] : B[1] < .995 ? B[1] : B[2] < .995 ? B[2] : B[3]) * 100);
+  if (trn > .01) {                                 // while it trains, its orbit turns to face you enough to be read
+    const wF = .55 * trn, cf = rot([0, 0, 1]), mixN = [DN[0] * (1 - wF) + cf[0] * wF, DN[1] * (1 - wF) + cf[1] * wF, DN[2] * (1 - wF) + cf[2] * wF], ml = Math.hypot(...mixN) || 1; for (let k = 0; k < 3; k++) DN[k] = mixN[k] / ml;
     DU = [DN[1], -DN[0], 0]; const l2 = Math.hypot(...DU) || 1; DU = DU.map(v => v / l2); DV[0] = DN[1] * DU[2] - DN[2] * DU[1]; DV[1] = DN[2] * DU[0] - DN[0] * DU[2]; DV[2] = DN[0] * DU[1] - DN[1] * DU[0];
   }
-  gl.uniform3fv(U.uDiscN, DN); gl.uniform3fv(U.uDiscU, DU); gl.uniform3fv(U.uDiscV, DV); gl.uniform4f(U.uDisc, tr ? 1.42 : 1.8, Math.max(tr ? 1.78 : 0, 2.1 + nrings * .25), .13, nrings || tr ? 1 : 0); gl.uniform4fv(U.uRing, rings);
+  gl.uniform3fv(U.uDiscN, DN); gl.uniform3fv(U.uDiscU, DU); gl.uniform3fv(U.uDiscV, DV); gl.uniform4f(U.uDisc, trn > .01 ? 1.42 : 1.8, Math.max(trn > .01 ? 1.78 : 0, 2.1 + nrings * .25), .13, nrings || trn > .01 ? 1 : 0); gl.uniform4fv(U.uRing, rings);
   // food motes: one per track (or per group of tracks) while it digests; each is drawn in and absorbed as it is eaten
   const food = new Float32Array(48), FS = fx.foodS || (fx.foodS = []);
   if (tr && (tr.stage === 'digest' || tr.stage === 'start')) {
     const Mn = Math.min(12, tr.tracks || 0), frac = (tr.digested || 0) / Math.max(1, tr.tracks);
     for (let k = 0; k < Mn; k++) {
-      const st = FS[k] || (FS[k] = { e: 0 }), eaten = (k + 1) / Mn <= frac + 1e-6, sl = N.slots[k % K];
+      const st = FS[k] || (FS[k] = { e: 0, a: 0 }); st.a = Math.min(1, st.a + dt / 1.6); const eaten = (k + 1) / Mn <= frac + 1e-6, sl = N.slots[k % K];
       if (eaten && st.e === 0) fx.waves.push({ t0: t + .9, o: [sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len], soft: true, taps: [[0, 1]], speed: 2.6, width: 3 });
       if (eaten) st.e = Math.min(1, st.e + dt / 1.4);
       const a = k * 2.39996 + t * (.22 + (k % 3) * .05), orbR = 2.25 + .35 * noise(t * .2 + k * 7), out = [Math.cos(a) * orbR, Math.sin(t * .31 + k * 1.9) * .9, Math.sin(a) * orbR];
-      const tip = [sl.p[0] + sl.a[0] * sl.len * .9, sl.p[1] + sl.a[1] * sl.len * .9, sl.p[2] + sl.a[2] * sl.len * .9], e = st.e * st.e * (3 - 2 * st.e);
-      food.set([out[0] + (tip[0] - out[0]) * e, out[1] + (tip[1] - out[1]) * e, out[2] + (tip[2] - out[2]) * e, st.e >= 1 ? 0 : (.55 + .25 * Math.sin(t * 3 + k)) * (1 + e * 1.5)], k * 4);
+      const bu = Math.max(.06, B[0]), tip = [sl.p[0] + sl.a[0] * sl.len * bu, sl.p[1] + sl.a[1] * sl.len * bu, sl.p[2] + sl.a[2] * sl.len * bu],     // they fly to where the spine is being built
+        e = st.e * st.e * (3 - 2 * st.e);
+      food.set([out[0] + (tip[0] - out[0]) * e, out[1] + (tip[1] - out[1]) * e, out[2] + (tip[2] - out[2]) * e, st.e >= 1 ? 0 : (.55 + .25 * Math.sin(t * 3 + k)) * (1 + e * 1.5) * st.a], k * 4);
     }
   } else if (FS.length) fx.foodS = [];
   gl.uniform4fv(U.uFood, food); gl.uniform1f(U.uSym, n ? 1 : 0);
   let ext = 1.5; N.slots.forEach(sl => { if (sl.w > .01) ext = Math.max(ext, Math.hypot(sl.p[0] + sl.a[0] * sl.len, sl.p[1] + sl.a[1] * sl.len, sl.p[2] + sl.a[2] * sl.len) + sl.rad * 3.4, Math.hypot(...sl.p) + sl.rad * 3.4); });
-  gl.uniform4f(U.uSweep, pg.i, tr ? (tr.stage === 'train' ? 1 : .6) : 0, 0, 0);
+  gl.uniform4f(U.uSweep, pg.i, trn * (tr && tr.stage !== 'train' ? .6 : 1), 0, 0);
   gl.uniform1f(U.uB, Math.min(6, ext + .8)); gl.uniform1f(U.uFrame, (NEB.fr = (NEB.fr || 0) + 1) % 1024);
   const D = NEB.drag; D.s += ((D.on ? 1 : 0) - D.s) * Math.min(1, dt * (D.on ? 9 : 2.2)); gl.uniform4f(U.uTouch, D.p[0], D.p[1], D.p[2], D.s < .01 ? 0 : D.s);
   gl.uniform3fv(U.uLight, light); gl.uniform3fv(U.uKey, key); gl.uniform3fv(U.uAmb, amb);
