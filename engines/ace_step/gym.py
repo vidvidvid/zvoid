@@ -34,7 +34,8 @@ def latest_checkpoint(out: Path):
 
 
 def main():
-    cdir, opt = Path(sys.argv[1]), json.loads(sys.argv[2])
+    cdir = Path(sys.argv[1])
+    opt = json.loads(Path(sys.argv[2][1:]).read_text(encoding="utf-8") if sys.argv[2].startswith("@") else sys.argv[2])   # '@file' reads the options from a file
     ckpt = _MODELS / "checkpoints"
     food, tensors, out = cdir / "food", cdir / "tensors", cdir / "lora"
     variant = opt.get("variant", "turbo")
