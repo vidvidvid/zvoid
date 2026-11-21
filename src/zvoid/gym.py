@@ -555,7 +555,7 @@ def train(slug: str, opt: dict, before=None) -> dict:
         run.pop("epochs", None)
         run.pop("where", None)
         if far:                                        # an Nvidia card trains in half precision; epochs are quick there, so save less often
-            want, end = max(5, more // 4), base + more   # checkpoints land on multiples, so pick one that also lands on the last epoch
+            want, end = min(10, max(5, more // 4)), base + more   # checkpoints land on multiples, so pick one that also lands on the last epoch
             fits = [d for d in range(max(2, want // 2), want * 2 + 1) if end % d == 0]
             run.update(precision="bf16", device="cuda", save_every=min(fits, key=lambda d: abs(d - want)) if fits else want)
         c["sessions"] = c.get("sessions", 0) + 1
@@ -647,9 +647,10 @@ def _watch(slug: str, proc, far: dict | None = None):
             _train.update(msg=f"bringing it back from {far['name']}…")
             got = _remote_fetch(slug, far)
             c = _load(slug)
-            if got is not None and (stopped or err):   # an unfinished session counts up to its last saved checkpoint
-                c["epochs"] = got
-                c["history"] = [h for h in c["history"] if h[0] <= got]
+            if stopped or err:                         # an unfinished session counts up to its last saved checkpoint
+                kept = got if got is not None else max([int(p.name.split("_")[1]) for p in (_dir(slug) / "lora" / "checkpoints").glob("epoch_*") if p.name.split("_")[1].isdigit()], default=0)
+                c["epochs"] = kept
+                c["history"] = [h for h in c["history"] if h[0] <= kept]
                 _save(c)
         except Exception as ex:
             err = err or f"Trained on the PC, but could not bring the result back: {ex}"
