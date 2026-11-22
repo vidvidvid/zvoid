@@ -11,7 +11,7 @@ function dna(c) {
   const avg = (k, d) => n ? F.reduce((a, f, i) => a + (f[k] ?? d) * w[i], 0) / W : d;
   const H = c.history || [], first = H.length ? H[0][1] : null, last = H.length ? H[H.length - 1][1] : null;
   const tr = c.training && c.training.state === 'running';
-  return { n, F, seed: hash(c.slug), minutes: c.minutes || 0, epochs: c.epochs || 0, growth: 1 - Math.exp(-(c.epochs || 0) / 180),
+  return { n, F, look: c.look || null, seed: hash(c.slug), minutes: c.minutes || 0, epochs: c.epochs || 0, growth: 1 - Math.exp(-(c.epochs || 0) / 180),
     low: avg('low', .3), mid: avg('mid', .3), high: avg('high', .1), bright: avg('bright', .3), dyn: avg('dyn', .3), noise: avg('noise', .2), bpm: avg('bpm', 70), loud: avg('loud', .3),
     learned: first && last ? clamp((first - last) / first * 3, 0, 1) : 0, training: tr, digesting: tr && c.training.stage !== 'train', step: tr ? c.training.step : 0 };
 }
@@ -65,7 +65,7 @@ function drawCreature(g, W, H, c, t, mouse, mini) {
   const au = mini ? null : audioLevels(), lv = au ? au.level : 0;
   const L = mini ? { yaw: t * .15 + d.seed * 6, pitch: .45, roll: 0, breath: .5 + .5 * Math.sin(t * 1.2), dx: 0, dy: 0, startle: 0, curious: 0, beat: -9, dt: .016, sx: cx0, sy: cy0 } : live(fx, d, t, mouse, cx0, cy0, S, au);
   const cx = cx0 + L.dx, cy = cy0 + L.dy, kick = Math.exp(-(t - L.beat) * 7);
-  const hue = (hueOf(d.bright) + (au ? (au.high - au.bass) * 50 : 0) + noise(t * .02 + sd) * 18 + 360) % 360, hue2 = (hue + 50 + d.seed * 140) % 360;
+  const hue = ((d.look ? d.look.hue : hueOf(d.bright)) + (au ? (au.high - au.bass) * 50 : 0) + noise(t * .02 + sd) * 18 + 360) % 360, hue2 = d.look ? d.look.hue2 : (hue + 50 + d.seed * 140) % 360;
   const R = S * (n ? .1 + .025 * clamp(d.minutes / 30, 0, 1) + .035 * d.growth : .07) * (mini ? 1.35 : 1) * (1 + (.03 + d.dyn * .05) * (L.breath - .5) * 2);
   const cyw = Math.cos(L.yaw), syw = Math.sin(L.yaw), cp = Math.cos(L.pitch), sp = Math.sin(L.pitch), cr = Math.cos(L.roll), sr = Math.sin(L.roll), F = S * 1.7;
   const proj = (x, y, z) => { const x1 = x * cyw + z * syw, z1 = -x * syw + z * cyw, y1 = y * cp - z1 * sp, z2 = y * sp + z1 * cp, k = F / (F - z2); return [cx + (x1 * cr - y1 * sr) * k, cy + (x1 * sr + y1 * cr) * k, z2, k]; };
@@ -117,7 +117,7 @@ function drawCreature(g, W, H, c, t, mouse, mini) {
   const hits = mini ? null : (fx.hits = []);
   for (let i = 0, q = 0; i < n; i++) {
     const f = d.F[i], born = fx.births[f.name], grow = born == null ? 1 : easeOut((t - born) / 2.2); if (grow <= 0) { q += per; continue; }
-    const P = poles[fx.pole[i] % K], th = hueOf(f.bright ?? .3), thick = .5 + (f.low ?? .3) * 1.3, playing = Gym.playing === f.name;
+    const P = poles[fx.pole[i] % K], th = d.look ? (d.look.hue + ((f.bright ?? .3) - .3) * 70 + 360) % 360 : hueOf(f.bright ?? .3), thick = .5 + (f.low ?? .3) * 1.3, playing = Gym.playing === f.name;
     const pl = fx.pluck[i], pk = pl ? pl.a * Math.exp(-(t - pl.t0) * 1.5) * (t >= pl.t0 ? 1 : 0) : 0; if (pl && t - pl.t0 > 4) delete fx.pluck[i];
     const twitch = Math.max(0, noise(t * .4 + i * 7.3) - .5) * 2.4, hm = 2 + Math.round(clamp((f.bpm ?? 100) / 50, 1, 5));
     for (let m = 0; m < per; m++, q++) {
@@ -344,7 +344,7 @@ function gymRender() {
   const key = JSON.stringify([Gym.playing, Gym.list.map(x => [x.slug, x.food.length, x.epochs, x.trained]), c && c.slug, c && c.food.map(f => f.name), running, c && c.trained, (gymOther(c) || {}).slug]);
   if (key !== Gym.key) { Gym.key = key; gymBuild(); }
   if (!c) return;
-  $('#gym-stats').textContent = `${stageName(c)} · ate ${c.food.length} track${c.food.length === 1 ? '' : 's'} (${c.minutes} min) · trained ${c.epochs} epoch${c.epochs === 1 ? '' : 's'}` + (c.history.length ? ` · loss ${c.history[c.history.length - 1][1].toFixed(3)}` : '');
+  $('#gym-stats').textContent = `${c.look ? c.look.species + ' · ' : ''}${stageName(c)} · ate ${c.food.length} track${c.food.length === 1 ? '' : 's'} (${c.minutes} min) · trained ${c.epochs} epoch${c.epochs === 1 ? '' : 's'}` + (c.history.length ? ` · loss ${c.history[c.history.length - 1][1].toFixed(3)}` : '');
   const st = $('#gym-status');
   st.textContent = tr ? (tr.state === 'error' ? '✖ ' + tr.error : tr.msg) : (c.trained ? 'usable now: pick it in an ace-step module as “creature”.' : c.food.length ? 'fed, not trained yet.' : 'hungry. drop audio on it.');
   st.className = tr && tr.state === 'error' ? 'err' : '';
@@ -393,7 +393,7 @@ function gymBuild() {
     h('div', { class: 'drawer-head' }, h('span', {}, 'vivarium'), h('button', { onclick: closeGym, title: 'Back to the canvas (esc)' }, '← canvas')),
     h('p', { class: 'gym-note' }, 'A creature is a small adapter for ACE-Step that learns your sound. Feed it your tracks, train it, then pick it inside any ace-step module.'),
     h('div', { class: 'gym-list' }, Gym.list.map(x => h('button', { class: 'creature-row' + (c && x.slug === c.slug ? ' cur' : ''), onclick: () => { Gym.cur = x; Gym.key = ''; gymRender(); } },
-      h('canvas', { class: 'mini-creature', data: { slug: x.slug } }), h('span', {}, h('b', {}, x.name), h('small', {}, `${stageName(x)} · ${x.food.length} tracks · ${x.epochs} ep`)),
+      h('canvas', { class: 'mini-creature', data: { slug: x.slug } }), h('span', {}, h('b', {}, x.name), h('small', {}, `${x.look ? x.look.species + ' · ' : ''}${x.food.length} tracks · ${x.epochs} ep`)),
       h('span', { class: 'row-del', data: { label: '×', confirm: 'delete?' }, title: 'Delete this creature (click twice)', onclick: e => { e.stopPropagation(); gymDelete(e.currentTarget, x); } }, '×')))),
     h('div', { class: 'gym-new' }, nameIn, hatchB));
 
@@ -431,7 +431,7 @@ function gymBuild() {
       h('h3', {}, 'food'),
       h('div', { class: 'food' }, c.food.length ? c.food.map(f => {
         const cap = h('input', { spellcheck: 'false', placeholder: 'caption for this track (optional)', onchange: () => api('/api/gym/' + c.slug, { method: 'PUT', json: { captions: { [f.name]: cap.value } } }) }); cap.value = f.caption || '';
-        return h('div', { class: 'food-row' + (Gym.playing === f.name ? ' playing' : ''), style: `--c:hsl(${hueOf(f.bright ?? .3)},90%,60%)` }, h('button', { class: 'food-play', title: 'Play this track to the entity', onclick: () => gymPlay(c.slug, f.name) }, Gym.playing === f.name ? '■' : '▶'), h('div', {}, h('b', { title: f.name + '\nDrag it onto the creature, or double-click, to make it sing from this track', class: 'food-grab', onpointerdown: e => gymThrow(e, f.name), ondblclick: () => gymSing(c, null, f.name) }, f.name), h('small', {}, `${Math.round(f.secs)}s · ~${Math.round(f.bpm || 0)} bpm · bass ${Math.round((f.low || 0) * 100)}% · bright ${Math.round((f.bright || 0) * 100)}%`), cap),
+        return h('div', { class: 'food-row' + (Gym.playing === f.name ? ' playing' : ''), style: `--c:hsl(${c.look ? c.look.hue + ((f.bright ?? .3) - .3) * 70 : hueOf(f.bright ?? .3)},90%,60%)` }, h('button', { class: 'food-play', title: 'Play this track to the entity', onclick: () => gymPlay(c.slug, f.name) }, Gym.playing === f.name ? '■' : '▶'), h('div', {}, h('b', { title: f.name + '\nDrag it onto the creature, or double-click, to make it sing from this track', class: 'food-grab', onpointerdown: e => gymThrow(e, f.name), ondblclick: () => gymSing(c, null, f.name) }, f.name), h('small', {}, `${Math.round(f.secs)}s · ~${Math.round(f.bpm || 0)} bpm · bass ${Math.round((f.low || 0) * 100)}% · bright ${Math.round((f.bright || 0) * 100)}%`), cap),
           h('button', { title: 'Sing from this track: the creature makes a new clip out of a passage of it', disabled: running, onclick: () => gymSing(c, null, f.name) }, '♪'),
           h('button', { title: 'Take this track away', disabled: running, onclick: () => gymDo(() => api(`/api/gym/${c.slug}/food/${encodeURIComponent(f.name)}`, { method: 'DELETE' })) }, '×'));
       }) : h('p', { class: 'gym-note' }, 'Nothing yet. Drop audio files anywhere on this screen.')),
@@ -440,7 +440,7 @@ function gymBuild() {
         h('input', { type: 'range', min: 0, max: 1, step: .05, value: Gym.stray == null ? .7 : Gym.stray, oninput: e => { Gym.stray = +e.target.value; try { localStorage.setItem('zvoid.stray', Gym.stray); } catch (x) {} } })),
       ...((c.limbs || []).length > 1 ? [h('h3', {}, 'limbs'),
         h('p', { class: 'gym-note' }, 'Tracks that sound alike grow together as one limb. Each limb learns its own word: put it in a caption to call that side of the creature.'),
-        h('div', { class: 'limbs' }, c.limbs.map(l => h('div', { class: 'limb-row', style: `--c:hsl(${hueOf(l.mean.bright)},90%,60%)` }, h('i'), h('span', {}, l.tags.join(' · ')), h('small', {}, l.count + ' tracks'), h('code', { title: 'The trigger word of this limb' }, l.trigger), h('button', { class: 'limb-sing', title: 'Ask this limb to sing: ACE-Step makes a short new clip in its style and the creature performs it. You can also double-click the limb itself.', disabled: running, onclick: () => gymSing(c, l.id) }, '♪'))))] : []),
+        h('div', { class: 'limbs' }, c.limbs.map(l => h('div', { class: 'limb-row', style: `--c:hsl(${c.look ? c.look.hue + (l.mean.bright - .3) * 60 + l.id * 9 : hueOf(l.mean.bright)},90%,60%)` }, h('i'), h('span', {}, l.tags.join(' · ')), h('small', {}, l.count + ' tracks'), h('code', { title: 'The trigger word of this limb' }, l.trigger), h('button', { class: 'limb-sing', title: 'Ask this limb to sing: ACE-Step makes a short new clip in its style and the creature performs it. You can also double-click the limb itself.', disabled: running, onclick: () => gymSing(c, l.id) }, '♪'))))] : []),
       h('h3', {}, 'identity'),
       h('label', { title: 'Used as the caption for every track that has no caption of its own. Good tags make a much better creature.' }, h('span', {}, 'its sound, in tags'), style),
       h('label', { title: 'A made-up word the model learns to associate with this sound. Zvoid adds it to your caption automatically when the creature is active.' }, h('span', {}, 'trigger word'), tag),
@@ -466,7 +466,9 @@ function gymBuild() {
       ...(!running ? [h('div', { class: 'acts gym-end' }, h('button', { class: 'danger', data: { label: 'delete creature' }, title: 'Deletes what it learned and its list of tracks. Your original audio files are not touched.', onclick: e => gymDelete(e.currentTarget, c) }, 'delete creature'))] : []));
   }
   const keepPicker = $('#gym-picker'); if (keepPicker) stage.append(keepPicker);
+  const keepAt = ['#gym-left', '#gym-right', '#gym .food', '#gym .gym-list'].map(q => { const o = $(q); return [q, o ? o.scrollTop : 0]; });   // rebuilding the panels must not jump the lists back to the top
   el.replaceChildren(left, stage, right, h('input', { id: 'gym-pick', type: 'file', multiple: true, accept: 'audio/*,video/*,.wav,.mp3,.flac,.aiff,.aif,.ogg,.m4a,.mp4,.mov,.mkv,.webm', hidden: true, onchange: e => gymFeedFiles([...e.target.files]) }));
+  keepAt.forEach(([q, y]) => { const o = $(q); if (o && y) o.scrollTop = y; });
 }
 
 /* delete with a second click instead of a system dialog */
@@ -680,7 +682,7 @@ function gymFolderPicker(res) {
 async function feedChooser(path, ev) {
   const list = await api('/api/gym'), p = $('#palette');
   if (!list.length) { toast('no creatures yet — open the vivarium and hatch one'); return; }
-  p.replaceChildren(h('div', { style: 'font:10px var(--mono);color:var(--muted);padding:4px 8px;letter-spacing:.12em' }, 'FEED TO…'), ...list.map(c => h('button', { style: `--c:hsl(${hueOf(dna(c).bright)},90%,60%)`, onclick: async () => {
+  p.replaceChildren(h('div', { style: 'font:10px var(--mono);color:var(--muted);padding:4px 8px;letter-spacing:.12em' }, 'FEED TO…'), ...list.map(c => h('button', { style: `--c:hsl(${c.look ? c.look.hue : hueOf(dna(c).bright)},90%,60%)`, onclick: async () => {
     closePalette(); try { await api(`/api/gym/${c.slug}/feed?path=` + encodeURIComponent(path), { method: 'POST' }); toast(`“${c.name}” ate it`); } catch (e) { toast(String(e.message || e), true); } } }, h('i'), c.name, h('small', {}, c.food.length + ' tracks'))));
   p.style.left = Math.min(ev.clientX, innerWidth - 270) + 'px'; p.style.top = Math.min(ev.clientY, innerHeight - 300) + 'px'; p.hidden = false;
 }

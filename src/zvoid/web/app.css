@@ -163,7 +163,17 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 #bar .hot { background: var(--acid); color: #05050a; font-weight: 700; border-color: transparent; box-shadow: 0 6px 26px -8px var(--violet); }
 #bar .hot:hover { filter: brightness(1.15); }
 #bar .hot.busy { animation: hue 1.2s linear infinite; }
-.patch { display: flex; gap: 6px; }
+.patch { display: flex; gap: 6px; align-items: center; position: relative; }
+#patch-name { min-width: 180px; background: transparent; border-color: transparent; font-weight: 600; }
+#patch-name:hover { border-color: var(--line); } #patch-name:focus { border-color: var(--violet); background: var(--ink); }
+#patch-dirty { color: var(--pink); font-size: 10px; margin-left: -4px; }
+#patch-pop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 60; width: 330px; max-height: 60vh; overflow: auto; padding: 8px; background: var(--panel); border: 1px solid var(--line-hi); border-radius: 12px; box-shadow: 0 18px 50px -12px #000; }
+#patch-pop .pp-acts { display: flex; gap: 6px; padding-bottom: 8px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+#patch-pop .pp-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+#patch-pop .pp-row:hover { background: #ffffff0d; } #patch-pop .pp-row.cur { box-shadow: inset 0 0 0 1px var(--violet); }
+#patch-pop .pp-row b { font: 600 12.5px var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } #patch-pop .pp-row small { font: 10px var(--mono); color: var(--muted); }
+#patch-pop .pp-row button { padding: 0 7px; opacity: 0; } #patch-pop .pp-row:hover button { opacity: .8; }
+#patch-pop .pp-empty { margin: 8px; font-size: 12px; color: var(--muted); }
 
 #dock { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; z-index: 20;
   background: #08080fd9; border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);

@@ -49,6 +49,8 @@ uniform vec4 uFilC[8];    // each one's colour and strength
 uniform vec4 uEvI[3];     // each arc's brightness, where its bead of light is along it, the flare where it lands, its tint
 uniform vec4 uTouch;     // xyz where the pointer is dragging, w strength
 uniform float uForm;     // 0 = cloud, 1 = fully formed (grows with training)
+uniform vec4 uPlan;      // its species: 0 vertebrate, 1 bloom, 2 shell, 3 coral, 4 crystal, 5 medusa. Then three numbers read from what it has learned
+uniform vec4 uMat;       // what it is made of: how wet, how metallic, how much it glows from inside, how corroded
 uniform vec4 uGy;        // lattice: scale, drift speed, morph between two minimal surfaces, sheet thickness
 uniform vec3 uDiscN, uDiscU, uDiscV;
 uniform vec4 uDisc;      // inner radius, outer radius, half thickness, on
@@ -178,6 +180,68 @@ float bodyL(vec3 pa, vec3 ba, float r0) {
   vec4 B = clamp(uBuild * (.65 + .7 * gTr2.y), 0., 1.);                                       // each limb builds at its own pace: the more it was fed, the faster
   float taper = 1. - .45 * hh, sB = built(B.x, hh), rB = built(B.y, hh), cB = built(B.z, hh), pB = built(B.w, hh);
   gFront = max(max(edge(B.x, hh), edge(B.y, hh)), max(edge(B.z, hh), edge(B.w, hh))) * uProg.z;
+  if (uPlan.x > .5) {                                                                          // the other species: the same four stages of growth, a different animal
+    float sp = uPlan.x, x = rho * cos(phi), y = rho * sin(phi), gp = r0 * mix(.74, .34, gTr2.x), zc = (fract(z / gp + .5) - .5) * gp, row = floor(z / gp + .5), d2 = 1e3;
+    float cn = gVb.z, cs = 6.28318 / cn, a2 = mod(phi - z * gVb.w / r0 + cs * .5, cs) - cs * .5;
+    gSeam = 0.;
+    if (sp < 1.5) {                                                                            // bloom: every limb is a petal. A midrib, a cupped blade with veins, stamens, a beaded rim
+      float W = r0 * (.95 + .3 * uPlan.z) * pow(max(sin(3.14159 * hh), 0.), .6), yc = y - x * x / (r0 * 1.5) * (.45 + gVa.y + .5 * uPlan.y);
+      float vein = smoothstep(.7, 1., cos((z - abs(x) * .9) / gp * 6.28318));
+      d2 = rho - r0 * .13 * taper * sB + (sB > .001 ? 0. : 1.);
+      d2 = smin(d2, max(abs(yc) - r0 * (.022 + .022 * vein) * min(1., rB * 3.), abs(x) - W) + (rB > .001 ? 0. : 1.), r0 * .06);
+      float rc = r0 * .32 * taper, tc = r0 * .03 * cB;
+      d2 = smin(d2, length(vec2(rho - rc, a2 * rc)) - tc + (tc > 1e-4 ? 0. : 1.), r0 * .04);
+      if (pB > .001) d2 = smin(d2, length(vec3(abs(x) - W, yc, zc)) - r0 * .055 * pB, r0 * .03);
+      gSeam = smoothstep(r0 * .1, 0., abs(x)) * rB * .7;
+    } else if (sp < 2.5) {                                                                     // shell: a chambered tube, open along a slit that winds round it
+      float R = r0 * (.95 - .3 * hh) * (1. + .1 * sin(z * 2.3 / r0)), sl = cos(phi - z * (1.1 + uPlan.y) / r0);
+      d2 = max(abs(rho - R) - r0 * .034 * sB, (sl - .55) * R * .5) + (sB > .001 ? 0. : 1.);
+      d2 = min(d2, rho - r0 * .07 * sB + (sB > .001 ? 0. : 1.));
+      float th = r0 * .022 * min(1., rB * 3.);
+      d2 = smin(d2, max(abs(zc) - th, max(rho - R, r0 * (.22 + .2 * uPlan.z) - rho)) + (th > 1e-4 ? 0. : 1.), r0 * .04);
+      float tc = r0 * .05 * cB;
+      d2 = smin(d2, length(vec2(rho - R * 1.03, a2 * R)) - tc + (tc > 1e-4 ? 0. : 1.), r0 * .05);
+      if (pB > .001) d2 = smin(d2, length(vec2(rho - R, zc)) - r0 * .05 * pB, r0 * .04);
+      gSeam = smoothstep(.3, 0., abs(zc) / gp) * rB;
+    } else if (sp < 3.5) {                                                                     // coral: a knobbed trunk, rings of polyp cups that open at the end, a thread waving from each
+      float N = 5. + floor(uPlan.y * 3.99), ca = 6.28318 / N, pa5 = mod(phi + row * ca * .5 + ca * .5, ca) - ca * .5, tt = pa5 * rho, ln = length(vec2(tt, zc));
+      float Lp = r0 * (.78 + .34 * gTr.y) * (1. - .3 * hh), rp = r0 * (.1 + .05 * uPlan.z) * (1. + .9 * smoothstep(.55, 1., rho / Lp)) * min(1., rB * 3.);
+      d2 = rho - r0 * (.33 * taper + .045 * sin(z * 5. / r0 + phi * 2.)) * sB + (sB > .001 ? 0. : 1.);
+      float cup = max(max(ln - rp, rho - Lp), -max(ln - rp * .6, Lp - r0 * .16 - rho));
+      d2 = smin(d2, cup + (rB > .001 ? 0. : 1.), r0 * .07);
+      float sway = sin(uT * 1.3 + row * 1.7 + pa5 * 3.) * r0 * .07 * clamp((rho - Lp * .8) / Lp, 0., 1.);
+      d2 = min(d2, max(length(vec2(tt - sway, zc)) - r0 * .017 * cB, max(rho - Lp * 1.3, Lp * .8 - rho)) + (cB > .001 ? 0. : 1.));
+      if (pB > .001) d2 = smin(d2, length(pa - ba) - r0 * .3 * pB, r0 * .1);
+      gSeam = smoothstep(rp, 0., ln) * step(Lp - r0 * .22, rho) * rB;
+    } else if (sp < 4.5) {                                                                     // crystal: a faceted prism drawn to a point, smaller crystals standing out of it, a girdle
+      float N = 5. + floor(uPlan.y * 3.99), fa = 3.14159 / N, a = mod(phi + fa, 2. * fa) - fa;
+      float Rc = r0 * .6 * (1. - .12 * hh) * min(1., (1. - hh) / .22);
+      d2 = rho * cos(a) - Rc * sB + (sB > .001 ? 0. : 1.);
+      float g2 = gp * 2.2, r2 = floor(z / g2 + .5), z2 = (fract(z / g2 + .5) - .5) * g2, ca = 2.0944, pa5 = mod(phi + r2 * 1.9 + ca * .5, ca) - ca * .5, tt = pa5 * rho;
+      float al = rho * .82 + z2 * .57, pe = -rho * .57 + z2 * .82, Ls = r0 * (.75 + .45 * gTr.y + .3 * uPlan.z);
+      float sat = max(max(abs(pe), abs(tt) * .87 + abs(pe) * .5) - r0 * .12 * min(1., rB * 3.) * (1. - clamp(al / Ls, 0., 1.) * .92), al - Ls);
+      d2 = min(d2, sat + (rB > .001 ? 0. : 1.));
+      d2 = min(d2, max(abs(z - L * .42) - r0 * .05, rho * cos(a) - Rc * 1.22 * cB) + (cB > .001 ? 0. : 1.));
+      if (pB > .001) d2 = min(d2, max(abs(z - L * .2) - r0 * .035, rho * cos(a) - Rc * 1.14 * pB));
+      gSeam = smoothstep(.16, 0., fa - abs(a)) * sB * .8;
+    } else if (gTr2.z > .5) {                                                                  // medusa, the bell: a thin dome with ribs, a frilled rim, a lobed heart inside
+      float Rb = r0 * 1.18, prof = Rb * sqrt(max(1. - z / L, 0.)), rib = pow(.5 + .5 * cos(phi * (6. + 2. * floor(uPlan.y * 2.99))), 6.);
+      d2 = abs(rho - prof) * .7 - r0 * (.028 + .04 * rib * rB) * sB + (sB > .001 ? 0. : 1.);
+      float tc = r0 * .055 * cB;
+      d2 = smin(d2, length(vec2(rho - Rb * (1. + .06 * sin(phi * 16. + uT * 2.)), z - r0 * .06)) - tc + (tc > 1e-4 ? 0. : 1.), r0 * .04);
+      if (pB > .001) d2 = min(d2, length(pa - ba * .38) - r0 * .3 * pB * (1. + .25 * cos(phi * 4.)));
+      gSeam = rib * sB * .8;
+    } else {                                                                                   // medusa, a tentacle: a waving strand of beads with a ribbon along it and a lure at the end
+      float x2 = x - r0 * .34 * hh * sin(z * 3. / r0 + uT * 1.1 + gTr2.x * 6.), y2 = y - r0 * .34 * hh * cos(z * 2.3 / r0 - uT * .9), ro2 = length(vec2(x2, y2));
+      d2 = ro2 - r0 * .07 * (1. - .5 * hh) * sB + (sB > .001 ? 0. : 1.);
+      float bd5 = r0 * (.15 + .06 * uPlan.z) * min(1., rB * 3.) * (1. - .5 * hh);
+      d2 = smin(d2, length(vec2(ro2, zc)) - bd5 + (bd5 > 1e-4 ? 0. : 1.), r0 * .05);
+      d2 = min(d2, max(abs(y2) - r0 * .012 * cB, abs(x2) - r0 * .32 * (1. - hh)) + (cB > .001 ? 0. : 1.));
+      if (pB > .001) d2 = smin(d2, length(vec3(x2, y2, z - L)) - r0 * .2 * pB, r0 * .05);
+      gSeam = smoothstep(gp * .3, 0., abs(zc)) * rB;
+    }
+    return max(d2, max(-z, z - L) - r0 * .04);
+  }
   float vst = gVb.x;                                                                           // vertebrae: round beads, thin stacked discs, or long waisted bones
   float seg = r0 * mix(.52, .2, gTr2.x) * (vst > 1.5 ? 1.75 : vst > .5 ? .62 : 1.), sv = abs(sin(z * 3.14159 / seg));
   float vp = vst > 1.5 ? .46 + .6 * (1. - sv) * (1. - sv) : vst > .5 ? .5 + .56 * pow(sv, .22) : .6 + .4 * sqrt(sv);
@@ -312,11 +376,12 @@ void main() {
           if (ab > .01) {
             float e = .035, nl = clamp((bodyL(bpa + lF * e, bba, br0) - bd) / e, 0., 1.), nv = clamp((bodyL(bpa - rdF * e, bba, br0) - bd) / e, 0., 1.); shv = dustLo(q + lF * .32); lastSh = shv; float shB = exp(-shv * 5.);
             vec3 hv = normalize(lF - rdF); float wet = pow(clamp((bodyL(bpa + hv * e, bba, br0) - bd) / e, 0., 1.), 48.) * (.3 + .7 * n3(q * 4.3 + vec3(0., -uT * .22, uT * .1))) * (.35 + shB * .65);   // it is wet: small sharp highlights that slide over it
-            vec3 alb = mix(vec3(.15, .14, .17), tint, .2);                      // dark, glossy, like wet bone
-            vec3 lb = alb * (uKey * nl * (.35 + shB * .65) * 2.2 + uAmb * .16) + pow(1. - nv, 2.5) * (uAmb * .7 + uKey * .45) * (.45 + shB * .55) + tint * .05
+            vec3 alb = mix(vec3(.15, .14, .17), tint, .2 + .45 * uMat.y);        // dark, glossy, like wet bone; or coloured metal
+            alb = mix(alb, vec3(.34, .15, .07) * (.55 + .9 * n3(q * 9.)), uMat.w * smoothstep(.38, .7, n3(q * 3.1 + 5.)));   // or eaten by rust, in patches
+            vec3 lb = alb * (uKey * nl * (.35 + shB * .65) * 2.2 + uAmb * .16) + pow(1. - nv, 2.5) * (uAmb * .7 + uKey * .45) * (.45 + shB * .55) * (1. + uMat.y * .9) + tint * (.05 + uMat.z * (.22 + .5 * pow(1. - nv, 1.5)))
                     + tint * seam * (.4 + max(0., rip) * 2.6 + ring * 2.2 + uAud.w * .9)           // its seams glow, and carry the sound
                     + vec3(1., .84, .58) * front * 2.4                                               // white-hot where it is being built
-                    + vec3(1., .97, .92) * wet * 1.5 + (tint * .5 + vec3(.55, .28, .18)) * bloom * (.3 + seam);
+                    + vec3(1., .97, .92) * wet * 1.5 * mix(.2, 1.35, uMat.x) + (tint * .5 + vec3(.55, .28, .18)) * bloom * (.3 + seam);
             Dz += T * ab * t; Wz += T * ab; C += T * ab * lb; T *= 1. - ab;
             if (T < .02) break;
           }
@@ -574,7 +639,7 @@ function nebInit(cv) {
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uTrait', 'uTrait2', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine', 'uEvP', 'uEvI', 'uFil', 'uFilC', 'uVar', 'uVar2', 'uPulse', 'uScar', 'uDof']) NEB.U[n] = n;
+  for (const n of ['uRes', 'uCenter', 'uT', 'uTan', 'uDist', 'uSeed', 'uCam', 'uNoise', 'uPole', 'uAxis', 'uCol', 'uTrait', 'uTrait2', 'uVoid', 'uWave', 'uWaveAmp', 'uStar', 'uAud', 'uLife', 'uLight', 'uKey', 'uAmb', 'uB', 'uFrame', 'uRip', 'uReson', 'uTouch', 'uForm', 'uGy', 'uDiscN', 'uDiscU', 'uDiscV', 'uDisc', 'uRing', 'uProg', 'uSweep', 'uWaveK', 'uWaveN', 'uFood', 'uSym', 'uBuild', 'uFract', 'uFine', 'uEvP', 'uEvI', 'uFil', 'uFilC', 'uVar', 'uVar2', 'uPulse', 'uScar', 'uDof', 'uPlan', 'uMat']) NEB.U[n] = n;
   NEB.gl = gl; NEB.nz = r;
 }
 /* Three off-screen targets at the render resolution: this frame, and two that take turns holding the running blend. */
@@ -677,6 +742,7 @@ function nebFrame(c, t, mouse, onScreen) {
 
   // the pillars: one per limb, eased toward where they should be so feeding and training make it grow and morph
   const limbs = c.limbs && c.limbs.length > 1 ? c.limbs : null, K = n ? Math.min(6, Math.max(2, limbs ? limbs.length : 0) + (n > 12 ? 1 : 0)) : 1;
+  const look = c.look || null, plan = look ? look.plan | 0 : 0, fg = c.finger && c.finger.length >= 8 ? c.finger : [hash(c.slug + 'f0'), hash(c.slug + 'f1'), hash(c.slug + 'f2'), 1, hash(c.slug + 'f4'), 0, .2, .5];   // its species and colours; and what it has learned (until it trains, numbers from its name stand in)
   const N = fx.neb || (fx.neb = { slots: [...Array(6)].map(() => ({ p: [0, 0, 0], a: [0, 1, 0], len: .3, rad: .3, col: [.5, .3, .8], w: 0, ring: 0, tr: [.2, .3, .3, .3, .4, .5], pu: [0, 0, .1], pv: 0, po: [0, 0, 0], pw: [0, 0, 0], pt: [0, 0, 0] })), fresh: true });
   const pointer = mouse ? unproj(L.sx, L.sy, dist) : null;
   // mood: an untrained or struggling creature is restless and twitchy; as it learns, its movement slows and becomes assured
@@ -706,11 +772,40 @@ function nebFrame(c, t, mouse, onScreen) {
         2 + Math.floor(clamp(S_.dyn * .8 + hv(11) * .7, 0, .999) * 4), (hv(12) < .5 ? -1 : 1) * (1.2 + 2 * S_.bpm + hv(13) * .8)]; }
     if (j === 0) { tp[0] = wn[0] * .1; ta[0] = an[0] * .2; ta[1] += .9; }                       // the first limb is the spine, on the midline
     else { tp[0] = Math.abs(tp[0]) + .28; ta[0] = Math.abs(ta[0]) + .2; }                          // the others come in mirrored pairs
+    let lenK = 1, radK = 1; s.role = 0;
+    if (n && plan === 1) {                                                                         // bloom: petals opening from one heart
+      tp[0] = j ? .1 + Math.abs(base[0]) * .12 : 0; tp[1] = -.25 + wn[1] * .1; tp[2] = base[2] * .12;
+      ta = j ? [Math.abs(base[0]) * 1.3 + .45 + an[0] * .3, .3 + base[1] * .55 + an[1] * .3, base[2] * 1.3 + an[2] * .3] : [an[0] * .15, 1, an[2] * .25];
+      for (let k = 0; k < 3; k++) ta[k] += s.po[k]; lenK = .85; radK = 1.15;
+    } else if (n && plan === 2) {                                                                  // shell: each limb grows from the tip of the one before, curling inward
+      const pv = j ? N.slots[j - 1] : null, a = 1.25 + j * (1.0 + .25 * fg[1]);
+      for (let k = 0; k < 3; k++) tp[k] = pv && isFinite(pv.len) ? pv.p[k] + pv.a[k] * pv.len * .96 : [0, -1.0, -.35][k];
+      tp[0] = j ? Math.max(.02, Math.abs(tp[0])) : 0;
+      ta = [.05 * j + an[0] * .12, Math.sin(a) + an[1] * .15, Math.cos(a) + an[2] * .15];
+      for (let k = 0; k < 3; k++) ta[k] += s.po[k] * .5; lenK = Math.pow(.86, j) * 1.05; radK = Math.pow(.88, j) * 1.1;
+    } else if (n && plan === 3) {                                                                  // coral: a trunk, and branches leaving it higher and higher up
+      if (j) { const t0 = N.slots[0], u0 = .22 + .6 * (j / Math.max(1, K - 1)) * (.8 + .2 * fg[2]);
+        for (let k = 0; k < 3; k++) tp[k] = (isFinite(t0.len) ? t0.p[k] + t0.a[k] * t0.len * u0 : 0) + wn[k] * .08;
+        tp[0] = Math.abs(tp[0]) + .12;
+        ta = [.75 + Math.abs(base[0]) * .5 + an[0] * .3, .85 + an[1] * .3, base[2] * .9 + an[2] * .3];
+        for (let k = 0; k < 3; k++) ta[k] += s.po[k]; lenK = 1.05; radK = .8; }
+      else { lenK = 1.15; radK = 1.0; }
+    } else if (n && plan === 4) {                                                                  // crystal: straight shafts fanning up out of one cluster
+      tp[0] = j ? .12 + Math.abs(base[0]) * .28 : 0; tp[1] = -.85 + wn[1] * .05; tp[2] = base[2] * .3;
+      ta = [j ? .25 + Math.abs(base[0]) * .75 : 0, 1, j ? base[2] * .8 : .05];
+      for (let k = 0; k < 3; k++) ta[k] += an[k] * .06 + s.po[k] * .25; lenK = j ? .95 : 1.08; radK = j ? .8 : 1;
+    } else if (n && plan === 5) {                                                                  // medusa: a bell above, tentacles trailing below
+      if (!j) { tp[0] = 0; tp[1] = .25 + wn[1] * .1 + .1 * Math.sin(t * .9); tp[2] = wn[2] * .1; ta = [an[0] * .1, 1, an[2] * .1]; lenK = .5; radK = 1.75; s.role = 1; }
+      else { const a = j * 2.4 + fg[0] * 3, R = .5 + .12 * (j % 2);
+        tp[0] = Math.abs(Math.cos(a)) * R + .12; tp[1] = .3 + .1 * Math.sin(t * .9); tp[2] = Math.sin(a) * R;
+        ta = [.12 + an[0] * .35, -1, Math.sin(a) * .2 + an[2] * .35];
+        for (let k = 0; k < 3; k++) ta[k] += s.po[k]; lenK = 1.3; radK = .55; }
+    }
     if (pointer && L.curious > .05) for (let k = 0; k < 3; k++) ta[k] += (pointer[k] - tp[k]) * .2 * L.curious;       // it leans toward you when curious
     const al = Math.hypot(ta[0], ta[1], ta[2]) || 1; ta = ta.map(v => v / al);
-    const tl = n ? (1.1 + 2.0 * d.growth + .5 * clamp(d.minutes / 30, 0, 1)) * (.55 + .9 * Math.sqrt(share)) * (1 + .06 * (L.breath - .5)) * (.72 + .75 * S_.bright) * (1.2 - .42 * S_.low) * (.86 + .28 * S_.loud) : .5;
-    const trd = (n ? (.4 + .5 * Math.sqrt(share)) * (.7 + .85 * S_.low) * (1.12 - .4 * S_.bright) * (.86 + .28 * S_.loud) : .45) * (1 + (au ? au.bass * .38 : 0) + kick * .1) * (1 - .05 * L.startle) * (1 + s.ring * .22 * Math.sin(t * 19)) * (1 + .07 * (L.breath - .5));
-    const tc = hsl2rgb(hueOf(limb ? limb.mean.bright : d.bright) + (limb ? 0 : j * 24) + noise(t * .02 + j + sd) * 14, .72, .56), tw = on ? (limb || !limbs ? 1 : .6) : 0, e = N.fresh ? 1 : ease;
+    const tl = n ? (1.1 + 2.0 * d.growth + .5 * clamp(d.minutes / 30, 0, 1)) * (.55 + .9 * Math.sqrt(share)) * (1 + .06 * (L.breath - .5)) * (.72 + .75 * S_.bright) * (1.2 - .42 * S_.low) * (.86 + .28 * S_.loud) * lenK : .5;
+    const trd = (n ? (.4 + .5 * Math.sqrt(share)) * (.7 + .85 * S_.low) * (1.12 - .4 * S_.bright) * (.86 + .28 * S_.loud) * radK : .45) * (1 + (au ? au.bass * .38 : 0) + kick * .1) * (1 - .05 * L.startle) * (1 + s.ring * .22 * Math.sin(t * 19)) * (1 + .07 * (L.breath - .5));
+    const tc = hsl2rgb((look ? look.hue + (S_.bright - .5) * 46 + j * 9 : hueOf(limb ? limb.mean.bright : d.bright) + (limb ? 0 : j * 24)) + noise(t * .02 + j + sd) * 14, look ? .8 : .72, .56), tw = on ? (limb || !limbs ? 1 : .6) : 0, e = N.fresh ? 1 : ease;
     for (let k = 0; k < 3; k++) { if (!isFinite(s.p[k])) s.p[k] = tp[k]; if (!isFinite(s.a[k])) s.a[k] = ta[k]; if (!isFinite(s.col[k])) s.col[k] = tc[k];
       s.p[k] += (tp[k] - s.p[k]) * e; s.a[k] += (ta[k] - s.a[k]) * e; s.col[k] += (tc[k] - s.col[k]) * e; }
     if (!isFinite(s.len)) s.len = tl; if (!isFinite(s.rad)) s.rad = trd; if (!isFinite(s.w)) s.w = 0;
@@ -729,7 +824,7 @@ function nebFrame(c, t, mouse, onScreen) {
     if (spill > .05) N.slots.forEach(s => { if (s.w > .3) { s.pu = [0, spill * .8, .11]; s.pv = 1.15; s.ring = Math.max(s.ring, spill * .5); } }); }
   const pole = new Float32Array(24), axis = new Float32Array(24), col = new Float32Array(24), trA = new Float32Array(24), trB = new Float32Array(24), vA = new Float32Array(24), vB = new Float32Array(24), puA = new Float32Array(24);
   N.slots.forEach((s, j) => { vA.set(s.va || [0, 0, 0, -.9], j * 4); vB.set(s.vb || [0, 0, 3, 2.2], j * 4); puA.set([s.pu[0], s.pu[1], s.pu[2], 0], j * 4); });
-  N.slots.forEach((s, j) => { pole.set([s.p[0], s.p[1], s.p[2], s.rad], j * 4); axis.set([s.a[0], s.a[1], s.a[2], s.len], j * 4); col.set([s.col[0], s.col[1], s.col[2], s.w < .01 ? 0 : s.w], j * 4); trA.set([s.tr[0], s.tr[1], s.tr[2], s.tr[3]], j * 4); trB.set([s.tr[4], s.tr[5], 0, 0], j * 4); });
+  N.slots.forEach((s, j) => { pole.set([s.p[0], s.p[1], s.p[2], s.rad], j * 4); axis.set([s.a[0], s.a[1], s.a[2], s.len], j * 4); col.set([s.col[0], s.col[1], s.col[2], s.w < .01 ? 0 : s.w], j * 4); trA.set([s.tr[0], s.tr[1], s.tr[2], s.tr[3]], j * 4); trB.set([s.tr[4], s.tr[5], s.role || 0, 0], j * 4); });
 
   // voids: wandering cavities
   const nv = n ? 1 + (K > 2 ? 1 : 0) + (K > 4 ? 1 : 0) : 0, voids = new Float32Array(12), vlist = [];
@@ -761,9 +856,12 @@ function nebFrame(c, t, mouse, onScreen) {
     star.set([(s.p[0] + s.a[0] * s.len * u + o[0] * .25) * (k % 2 ? -1 : 1), s.p[1] + s.a[1] * s.len * u + o[1] * .25, s.p[2] + s.a[2] * s.len * u + o[2] * .25,
       (.55 + .3 * hh + .2 * noise(t * 1.3 + k * 9) + (au ? au.high * .8 : 0)) * (newest ? .25 + .75 * Math.abs(noise(t * 7)) : 1)], k * 4); }
 
-  const hue = hueOf(d.bright) + noise(t * .02 + sd) * 16 + (au ? (au.high - au.bass) * 40 : 0), lw = nvec(t * .05, sd + 200);
+  const hue = (look ? look.hue : hueOf(d.bright)) + noise(t * .02 + sd) * 16 + (au ? (au.high - au.bass) * 40 : 0), lw = nvec(t * .05, sd + 200);
   const light = [lw[0] * 3.2 + (pointer ? pointer[0] * .5 * L.curious : 0), 3 + lw[1] * 1.2 + (pointer ? pointer[1] * .5 * L.curious : 0), lw[2] * 3.2 + 1.5];
-  const key = hsl2rgb(hue + 30, .35, .82), amb = hsl2rgb(hue + 50 + d.seed * 140, .85, .5);
+  const key = hsl2rgb(hue + 30, .35, .82), amb = look ? hsl2rgb(look.hue2 + noise(t * .015 + sd + 7) * 18, .85, .5) : hsl2rgb(hue + 50 + d.seed * 140, .85, .5);   // its own second colour fills the space around it
+  { const R = c.rel || {}, g = (k, dflt) => R[k] == null ? dflt : R[k];                              // what it is made of, from how its food sounds next to the others
+    gl.uniform4f(U.uPlan, plan, fg[1], fg[2], fg[4]);
+    gl.uniform4f(U.uMat, look ? clamp(1.15 - g('dist', .5) * .8 - g('noise', .4) * .4, 0, 1) : .82, look ? clamp(g('attack', .3) * .6 + g('bright', .3) * .5 - .15, 0, 1) : 0, look ? clamp(g('tonal', .3) * .55 + g('voice', .3) * .35 - .1, 0, 1) : 0, look ? clamp(g('dist', .4) * .7 + g('noise', .4) * .5 - .45, 0, 1) : 0); }
   const turb = sm('turb', (n ? (1 - d.learned) * (d.epochs ? .45 : .7) : .5) + (d.digesting ? .4 : 0)) + lv * .9 + L.startle * .8 + trn * .15;
   gl.uniform2f(U.uRes, W, H); gl.uniform2f(U.uCenter, cx * sc + jx, (ch - cy) * sc + jy);
   gl.uniform1f(U.uT, fx.clock); gl.uniform1f(U.uTan, tan); gl.uniform1f(U.uDist, dist); gl.uniform1f(U.uSeed, d.seed * 40);

@@ -16,10 +16,11 @@
 <header id="bar">
   <div class="brand"><img id="orb" src="/web/icon.png" alt=""><span id="word"></span></div>
   <div class="patch">
-    <input id="patch-name" placeholder="circuit name" spellcheck="false">
-    <button id="patch-save" title="Save this wiring under that name">save</button>
-    <select id="patch-load" title="Load a saved circuit"></select>
-    <button id="patch-clear" title="Remove every module">clear</button>
+    <button id="patch-open" title="Your circuits: open, new, duplicate, delete">circuits ▾</button>
+    <input id="patch-name" placeholder="untitled circuit" spellcheck="false" title="This circuit's name. Type a new one and press Enter to rename it.">
+    <span id="patch-dirty" title="Changed since it was last saved" hidden>●</span>
+    <button id="patch-save" title="Save this circuit (⌘S)">save</button>
+    <div id="patch-pop" hidden></div>
   </div>
   <div class="grow"></div>
   <button id="btn-chat" title="Talk to Claude: it can build, tweak and run the circuit for you (⌘K)">✦ claude</button>

@@ -623,6 +623,19 @@ def create_app():
     def patches():
         return sorted(p.stem for p in PATCHES_DIR.glob("*.json") if p.stem != "autosave")
 
+    @app.get("/api/patches_info")
+    def patches_info():
+        out = []
+        for p in PATCHES_DIR.glob("*.json"):
+            if p.stem == "autosave":
+                continue
+            try:
+                n = len(json.loads(p.read_text()).get("nodes") or {})
+            except Exception:
+                n = 0
+            out.append({"name": p.stem, "modules": n, "when": p.stat().st_mtime})
+        return sorted(out, key=lambda x: -x["when"])
+
     @app.get("/api/patches/{name}")
     def get_patch(name: str):
         f = patch_file(name)
@@ -635,7 +648,13 @@ def create_app():
 
     @app.delete("/api/patches/{name}")
     def del_patch(name: str):
-        patch_file(name).unlink(missing_ok=True)
+        f = patch_file(name)
+        if f.exists():                                        # to the Trash, not gone
+            dst, n = Path.home() / ".Trash" / f"{name}.zvoid-circuit.json", 1
+            while dst.exists():
+                n += 1
+                dst = Path.home() / ".Trash" / f"{name} {n}.zvoid-circuit.json"
+            f.rename(dst)
         return {"ok": True}
 
     return app, engines

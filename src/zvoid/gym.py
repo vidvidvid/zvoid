@@ -64,6 +64,14 @@ def _view(c: dict) -> dict:
     slug = c["slug"]
     c = dict(c, trained=adapter_path(slug) is not None,
              minutes=round(sum(f.get("secs", 0) for f in c.get("food", [])) / 60, 2))
+    try:
+        pop = _population()
+        c["rel"] = pop.get("rel", {}).get(slug) or {}
+        if not c.get("look"):
+            c["look"] = (json.loads((_dir(slug) / "creature.json").read_text()).get("look")) if pop.get("ready") else None
+        c["finger"] = finger(slug)
+    except Exception:
+        c["rel"], c["finger"] = {}, []
     c["training"] = dict({k: v for k, v in _train.items() if k != "proc"}) if _train["slug"] == slug else None
     if c["training"] and c["training"]["state"] == "running":
         tr = c["training"]
@@ -178,10 +186,10 @@ def features(wav: Path) -> dict:
     info = sf.info(str(wav))
     sr, total = info.samplerate, info.frames
     n = min(total, sr * 90)
-    y, _ = sf.read(str(wav), start=max(0, (total - n) // 2), frames=n, dtype="float32", always_2d=True)
-    y = y.mean(axis=1)
+    y2, _ = sf.read(str(wav), start=max(0, (total - n) // 2), frames=n, dtype="float32", always_2d=True)
+    y = y2.mean(axis=1)
     if len(y) < 2048:
-        return {"secs": round(total / sr, 2)}
+        return {"secs": round(total / sr, 2), "fv": FEATURES_V}
     hop, win = 512, 2048
     frames = np.lib.stride_tricks.sliding_window_view(y, win)[::hop] * np.hanning(win)
     mag = np.abs(np.fft.rfft(frames, axis=1))
@@ -195,7 +203,43 @@ def features(wav: Path) -> dict:
     fps = sr / hop
     lo, hi = int(fps * 60 / 180), int(fps * 60 / 60)                # look for a beat between 60 and 180 bpm
     bpm = 60 * fps / (lo + int(np.argmax(ac[lo:hi]))) if hi < len(ac) and hi > lo else 120
+    # what genre is made of (version 2): these tell a band from a beat-maker where the six numbers below cannot
+    more = {}
+    try:
+        band = (freqs >= 200) & (freqs < 5000)
+        P = mag[:, band] ** 2 + 1e-10
+        loudf = rms > rms.mean() * .5                                            # judge the frames where something is playing
+        flat = np.exp(np.log(P).mean(axis=1)) / P.mean(axis=1)
+        more["tonal"] = float(np.clip(1 - np.sqrt(flat[loudf].mean()) * 1.8, 0, 1))                       # clear pitches (1) or noise and hits (0)
+        raw = np.lib.stride_tricks.sliding_window_view(y, win)[::hop]
+        crest = 20 * np.log10(np.abs(raw).max(axis=1)[loudf] / (np.sqrt((raw ** 2).mean(axis=1))[loudf] + 1e-9) + 1e-9)
+        more["dist"] = float(np.clip((15 - crest.mean()) / 9, 0, 1))                                      # squashed and distorted (1) or open and dynamic (0)
+        more["steady"] = float(np.clip((ac[lo:hi].max() / (ac[0] + 1e-9) - .15) / .6, 0, 1)) if hi < len(ac) and hi > lo else .3   # a beat like a machine (1) or loose (0)
+        cb = (freqs >= 80) & (freqs < 2000)
+        pc = (np.round(12 * np.log2(freqs[cb] / 440.0)) % 12).astype(int)
+        chroma = np.stack([(mag[:, cb][:, pc == k] ** 2).sum(axis=1) for k in range(12)], axis=1)
+        avg = chroma[loudf].mean(axis=0)
+        avg = avg / (avg.sum() + 1e-12)
+        more["harm"] = float(np.clip((-(avg * np.log(avg + 1e-12)).sum() / np.log(12) - .7) / .28, 0, 1))  # few notes (0) or all twelve (1)
+        env = np.sqrt((mag[:, (freqs >= 300) & (freqs < 3400)] ** 2).sum(axis=1))
+        env = env - env.mean()
+        ms = np.abs(np.fft.rfft(env * np.hanning(len(env)))) ** 2
+        mf = np.fft.rfftfreq(len(env), 1 / fps)
+        more["voice"] = float(np.clip(ms[(mf >= 3) & (mf < 8)].sum() / (ms[(mf >= .5) & (mf < 20)].sum() + 1e-12) * 2.2, 0, 1))   # the mid band moves at the speed of syllables
+        fx_ = np.maximum(0, np.diff(mag, axis=0)).sum(axis=1)
+        more["attack"] = float(np.clip(np.percentile(fx_, 97) / (np.median(fx_) + 1e-9) / 14, 0, 1))      # sharp hits (1) or everything swells (0)
+        cen = (mag * freqs).sum(axis=1) / (mag.sum(axis=1) + 1e-9)
+        more["change"] = float(np.clip(cen[loudf].std() / (cen[loudf].mean() + 1e-9) * 1.6, 0, 1))        # the colour of the sound keeps changing (1) or holds (0)
+        if y2.shape[1] >= 2:
+            mid_, side = (y2[:, 0] + y2[:, 1]) / 2, (y2[:, 0] - y2[:, 1]) / 2
+            more["wide"] = float(np.clip(np.sqrt((side ** 2).mean()) / (np.sqrt((mid_ ** 2).mean()) + 1e-9) * 1.6, 0, 1))
+        else:
+            more["wide"] = 0.0
+        more = {k: (round(v, 4) if np.isfinite(v) else .3) for k, v in more.items()}
+    except Exception:
+        more = {}
     return {
+        "fv": FEATURES_V, **more,
         "secs": round(total / sr, 2),
         "loud": float(np.clip(rms.mean() * 4, 0, 1)),
         "dyn": float(np.clip(rms.std() / (rms.mean() + 1e-9), 0, 1.5)),
@@ -206,6 +250,143 @@ def features(wav: Path) -> dict:
         "noise": float(np.clip(np.mean(np.abs(np.diff(np.sign(y)))) / 2 * 6, 0, 1)),
         "bpm": round(float(bpm), 1),
     }
+
+
+def remeasure():
+    """Tracks fed before the newer measurements existed are measured again, quietly, one creature at a time."""
+    for f in sorted(CREATURES_DIR.glob("*/creature.json")):
+        try:
+            c = json.loads(f.read_text())
+            todo = [x["name"] for x in c.get("food", []) if x.get("fv") != FEATURES_V]
+            if not todo:
+                continue
+            new = {}
+            for name in todo:
+                src = _dir(c["slug"]) / "food" / name
+                try:
+                    new[name] = {k: v for k, v in features(src).items() if k in EXTRA_KEYS or k == "fv"} if src.exists() else {"fv": FEATURES_V}
+                except Exception:
+                    new[name] = {"fv": FEATURES_V}
+            with _lock:                                       # merge into whatever the file holds by now: it may have been trained or fed meanwhile
+                c = json.loads(f.read_text())
+                for x in c.get("food", []):
+                    if x["name"] in new:
+                        x.update(new[x["name"]])
+                _save(c)
+        except Exception as ex:
+            print(f"[gym] could not re-measure {f.parent.name}: {ex}", flush=True)
+    _pop.clear()
+
+
+def finger(slug: str) -> list[float]:
+    """A fingerprint of what a creature has learned: eight numbers read from the adapter itself (how strongly each depth
+    of the model was changed, and how). Two creatures fed alike still differ here, and it shifts as one trains on."""
+    ad = adapter_path(slug)
+    f = ad / "adapter_model.safetensors" if ad else None
+    if not f or not f.exists():
+        return []
+    key = (str(f), f.stat().st_mtime)
+    if _fingers.get(slug, (None,))[0] == key:
+        return _fingers[slug][1]
+    out = []
+    try:
+        with open(f, "rb") as fh:
+            n = int.from_bytes(fh.read(8), "little")
+            head = json.loads(fh.read(n))
+            base = 8 + n
+            norms = []
+            for name, t in sorted(head.items()):
+                if name == "__metadata__" or "lora_B" not in name:
+                    continue
+                a, b = t["data_offsets"]
+                fh.seek(base + a)
+                raw = fh.read(b - a)
+                dt = t["dtype"]
+                x = (np.frombuffer(raw, "<f4") if dt == "F32" else np.frombuffer(raw, "<f2").astype("f4") if dt == "F16"
+                     else (np.frombuffer(raw, "<u2").astype("<u4") << 16).view("<f4") if dt == "BF16" else None)
+                if x is not None and len(x):
+                    norms.append((float(np.sqrt((x.astype("f8") ** 2).mean())), float(np.abs(x).max())))
+        if norms:
+            v = np.array([a for a, _ in norms])
+            parts = np.array([p.mean() for p in np.array_split(v, 6)])                 # from the model's first layers to its last
+            parts = (parts - parts.min()) / (parts.max() - parts.min() + 1e-12)   # its own profile: where it changed most and least
+            peaky = float(np.clip(np.mean([m / (a + 1e-12) for a, m in norms]) / 12, 0, 1))
+            out = [round(float(x), 4) for x in [*parts, float(np.clip(np.log10(v.mean() + 1e-9) / 3 + 1.1, 0, 1)), peaky]]
+    except Exception:
+        out = []
+    _fingers[slug] = (key, out)
+    return out
+
+
+PLANS = ("vertebrate", "bloom", "shell", "coral", "crystal", "medusa")
+_pop: dict = {}
+
+
+def _population() -> dict:
+    """How every creature measures, next to the others. A trait only says something when it is compared: all four of the
+    first creatures had almost the same bass and brightness, so the differences that exist are stretched to the full range."""
+    if _pop and time.time() - _pop.get("at", 0) < 8:
+        return _pop
+    cs = []
+    for f in sorted(CREATURES_DIR.glob("*/creature.json")):
+        try:
+            cs.append(json.loads(f.read_text()))
+        except Exception:
+            continue
+    cs.sort(key=lambda c: c.get("born", ""))
+    keys = (*LIMB_KEYS, *EXTRA_KEYS)
+    means = {}
+    for c in cs:
+        food = [x for x in c.get("food", []) if "low" in x]
+        w = np.array([x.get("secs") or 1 for x in food], float)
+        means[c["slug"]] = {k: float(np.average([x.get(k, .3 if k != "bpm" else 110) for x in food], weights=w)) for k in keys} if food else None
+    have = [m for m in means.values() if m]
+    rel = {}
+    for slug, m in means.items():
+        if not m:
+            rel[slug] = {}
+            continue
+        r = {}
+        for k in keys:
+            vals = np.array([x[k] for x in have])
+            sd = vals.std()
+            z = (m[k] - vals.mean()) / sd if len(have) >= 3 and sd > 1e-6 else 0.0
+            absolute = float(np.clip((m[k] - 60) / 120 if k == "bpm" else m[k], 0, 1))
+            r[k] = round(float(np.clip(.5 + z * .32, 0, 1)) * .75 + absolute * .25 if len(have) >= 3 else absolute, 3)   # mostly how it compares, a little of what it is
+        rel[slug] = r
+    # a species and a colour, given once and kept: who a creature is should not flip when another one hatches
+    ready = all(x.get("fv") == FEATURES_V for c in cs for x in c.get("food", []))
+    if ready:
+        used_plans = [c["look"]["plan"] for c in cs if c.get("look")]
+        used_hues = [c["look"]["hue"] for c in cs if c.get("look")]
+        for c in cs:
+            r = rel.get(c["slug"])
+            if c.get("look") or not r:
+                continue
+            g = lambda k: r.get(k, .5)
+            h = int.from_bytes(c["slug"].encode()[:4].ljust(4, b"z"), "little") % 1000 / 1000
+            score = [g("steady") * .6 + (1 - g("tonal")) * .3 + g("low") * .3,                       # vertebrate: driven by a beat
+                     g("tonal") * .5 + g("wide") * .4 + (1 - g("dist")) * .3,                        # bloom: lush, clean, harmonic
+                     g("harm") * .4 + g("change") * .45 + (1 - g("steady")) * .3,                    # shell: restless, always turning into something else
+                     g("voice") * .5 + g("dyn") * .4 + g("tonal") * .2,                              # coral: grown around a voice
+                     g("bright") * .5 + g("attack") * .4 + g("dist") * .3,                           # crystal: bright, hard, sharp
+                     (1 - g("attack")) * .4 + (1 - g("bpm")) * .4 + g("wide") * .2 + (1 - g("loud")) * .2]   # medusa: slow and soft
+            cap = int(np.ceil(len(have) / len(PLANS)))                                               # no species is used twice while another is still free
+            order = sorted(range(len(PLANS)), key=lambda i: -(score[i] + (h * 7 % 1) * .04 * i))
+            plan = next((i for i in order if used_plans.count(i) < cap), order[0])
+            want = (g("dist") * .1 + (1 - g("bright")) * .25 + g("harm") * .35 + g("voice") * .3 + h * .25) % 1 * 360
+            gap = 360 / (len(have) + 1) * .8
+            hue = min((want + k * 12 for k in range(30)), key=lambda x: (0 if all(min(abs(x % 360 - u), 360 - abs(x % 360 - u)) >= gap for u in used_hues) else 1, abs(x - want))) % 360
+            c["look"] = {"plan": plan, "species": PLANS[plan], "hue": round(hue, 1), "hue2": round((hue + 110 + h * 140) % 360, 1)}
+            used_plans.append(plan)
+            used_hues.append(c["look"]["hue"])
+            with _lock:
+                cur = json.loads((_dir(c["slug"]) / "creature.json").read_text())
+                cur["look"] = c["look"]
+                _save(cur)
+    _pop.clear()
+    _pop.update(at=time.time(), rel=rel, ready=ready)
+    return _pop
 
 
 def feed(slug: str, src: Path, name: str) -> dict:
@@ -231,6 +412,9 @@ def feed(slug: str, src: Path, name: str) -> dict:
 
 
 LIMB_KEYS = ("low", "bright", "dyn", "noise", "bpm", "loud")
+EXTRA_KEYS = ("tonal", "dist", "steady", "harm", "voice", "attack", "change", "wide")   # measured since version 2; they shape the look, not the limbs
+FEATURES_V = 2
+_fingers: dict = {}
 
 
 def _describe(m: dict) -> list[str]:

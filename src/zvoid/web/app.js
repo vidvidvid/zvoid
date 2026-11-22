@@ -45,7 +45,8 @@ const nodeEls = new Map();
 let saveT;
 function save() {
   clearTimeout(saveT);
-  saveT = setTimeout(() => api('/api/patches/autosave', { method: 'PUT', json: S }).catch(() => {}), 400);
+  saveT = setTimeout(() => api('/api/patches/autosave', { method: 'PUT', json: { ...S, name: PATCH.name, sig: PATCH.sig } }).catch(() => {}), 400);   // the open circuit, with its name and what it looked like when last saved
+  if (typeof patchMark === 'function') patchMark();
 }
 function status(msg) { $('#status').textContent = msg; }
 function toast(msg, err) {
@@ -724,27 +725,72 @@ async function libraryOpen(body) {
 
 async function refreshEngines() { try { for (const e of await api('/api/engines')) ENG[e.id] = e; } catch {} }
 
-/* ---------- patches ---------- */
-async function refreshPatches() {
-  const names = await api('/api/patches'), s = $('#patch-load');
-  s.replaceChildren(h('option', { value: '' }, 'load…'), ...names.map(n => h('option', { value: n }, n)), h('option', { value: '__demo' }, 'demo circuit'));
+/* ---------- circuits: one open at a time, with a name, like a document ---------- */
+const PATCH = { name: '', sig: '', list: [] };
+const patchSig = () => JSON.stringify([S.nodes, S.cables]);
+function patchMark() {                                  // show whether the open circuit differs from what was saved
+  const dirty = !!PATCH.name && patchSig() !== PATCH.sig, unsaved = !PATCH.name && Object.keys(S.nodes).length > 0;
+  $('#patch-dirty').hidden = !(dirty || unsaved); $('#patch-save').classList.toggle('hot', dirty || unsaved);
+  if (document.activeElement !== $('#patch-name')) $('#patch-name').value = PATCH.name;
 }
-function loadPatch(p) {
+async function refreshPatches() { try { PATCH.list = await api('/api/patches_info'); } catch (e) { PATCH.list = []; } if (!$('#patch-pop').hidden) patchPop(); }
+function loadPatch(p, name) {
   for (const id of Object.keys(S.nodes)) dropPlayers(id);
   nodeEls.forEach(e => e.remove()); nodeEls.clear(); for (const k of Object.keys(R)) delete R[k];
   S = { nodes: p.nodes || {}, cables: (p.cables || []).filter(c => p.nodes[c.from.node] && p.nodes[c.to.node]), view: p.view || { x: 80, y: 90, k: 1 } };
-  applyView(); Object.values(S.nodes).forEach(renderNode); select(null); save();
+  PATCH.name = name != null ? name : (p.name || ''); PATCH.sig = name != null ? patchSig() : (p.sig || '');
+  applyView(); Object.values(S.nodes).forEach(renderNode); select(null); save(); patchMark();
 }
-$('#patch-save').onclick = async () => {
-  const name = $('#patch-name').value.trim(); if (!/^[\w\- ]{1,40}$/.test(name)) return toast('give the circuit a simple name first', true);
-  await api('/api/patches/' + encodeURIComponent(name), { method: 'PUT', json: S }); toast('saved “' + name + '”'); refreshPatches();
-};
-$('#patch-load').onchange = async e => {
-  const v = e.target.value; e.target.value = ''; if (!v) return;
-  if (v === '__demo') { loadPatch(demoPatch()); return fit(); }
-  const p = await api('/api/patches/' + encodeURIComponent(v)); if (p) { loadPatch(p); $('#patch-name').value = v; }
-};
-$('#patch-clear').onclick = () => { if (Object.keys(S.nodes).length && confirm('Remove every module from the canvas? Your generated files stay in the library.')) loadPatch({ nodes: {}, cables: [] }); };
+const patchOk = name => /^[\w\- ]{1,40}$/.test(name);
+async function patchSave(as) {                          // save under its name; a circuit without one asks for it first
+  const name = (as != null ? as : PATCH.name || $('#patch-name').value).trim();
+  if (!name) { $('#patch-name').focus(); return toast('give the circuit a name, then press Enter'); }
+  if (!patchOk(name)) return toast('names can use letters, numbers, spaces and dashes (up to 40)', true);
+  if (name !== PATCH.name && PATCH.list.some(x => x.name === name) && !confirm(`Replace the saved circuit “${name}”?`)) return;
+  await api('/api/patches/' + encodeURIComponent(name), { method: 'PUT', json: S });
+  PATCH.name = name; PATCH.sig = patchSig(); save(); patchMark(); toast('saved “' + name + '”'); refreshPatches();
+}
+async function patchRename(to) {
+  to = to.trim(); const from = PATCH.name;
+  if (!to || to === from) return patchMark();
+  if (!from) return patchSave(to);
+  if (!patchOk(to)) { patchMark(); return toast('names can use letters, numbers, spaces and dashes (up to 40)', true); }
+  if (PATCH.list.some(x => x.name === to)) { patchMark(); return toast(`there is already a circuit called “${to}”`, true); }
+  await api('/api/patches/' + encodeURIComponent(to), { method: 'PUT', json: S }); await api('/api/patches/' + encodeURIComponent(from), { method: 'DELETE' });
+  PATCH.name = to; PATCH.sig = patchSig(); save(); patchMark(); toast(`renamed to “${to}”`); refreshPatches();
+}
+const patchLeave = () => !(PATCH.name ? patchSig() !== PATCH.sig : Object.keys(S.nodes).length) || confirm(PATCH.name ? `“${PATCH.name}” has changes that are not saved. Leave it anyway?` : 'This circuit has never been saved. Leave it anyway?');
+async function patchOpen(name) {
+  if (name === PATCH.name || !patchLeave()) return;
+  if (name === '__demo') { loadPatch(demoPatch(), ''); PATCH.sig = ''; fit(); }
+  else { const p = await api('/api/patches/' + encodeURIComponent(name)); if (!p) return toast('that circuit is gone', true); loadPatch(p, name); }
+  patchMark(); $('#patch-pop').hidden = true;
+}
+function patchNew() { if (!patchLeave()) return; loadPatch({ nodes: {}, cables: [] }, ''); PATCH.sig = ''; patchMark(); $('#patch-pop').hidden = true; $('#patch-name').focus(); }
+async function patchDuplicate() {
+  let base = (PATCH.name || 'circuit') + ' copy', name = base, n = 1; while (PATCH.list.some(x => x.name === name)) name = `${base} ${++n}`;
+  await patchSave(name.slice(0, 40));
+}
+async function patchDelete(name) {
+  await api('/api/patches/' + encodeURIComponent(name), { method: 'DELETE' }); toast(`“${name}” moved to the Trash`);
+  if (name === PATCH.name) { PATCH.name = ''; PATCH.sig = ''; save(); patchMark(); }
+  refreshPatches();
+}
+function patchPop() {
+  const pop = $('#patch-pop'), when = t => { const d = new Date(t * 1000), now = new Date(), same = d.toDateString() === now.toDateString(); return same ? d.toTimeString().slice(0, 5) : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+  pop.replaceChildren(
+    h('div', { class: 'pp-acts' }, h('button', { onclick: patchNew }, '+ new'), h('button', { title: 'Save a copy of the open circuit under a new name', disabled: !Object.keys(S.nodes).length, onclick: patchDuplicate }, 'duplicate'), h('button', { title: 'A small example to start from', onclick: () => patchOpen('__demo') }, 'demo')),
+    PATCH.list.length ? h('div', { class: 'pp-list' }, PATCH.list.map(x => h('div', { class: 'pp-row' + (x.name === PATCH.name ? ' cur' : ''), onclick: () => patchOpen(x.name) },
+      h('b', {}, x.name), h('small', {}, `${x.modules} module${x.modules === 1 ? '' : 's'} · ${when(x.when)}`),
+      h('button', { title: 'Move to the Trash', onclick: e => { e.stopPropagation(); patchDelete(x.name); } }, '×'))))
+      : h('p', { class: 'pp-empty' }, 'No saved circuits yet. Name this one and press save.'));
+}
+$('#patch-open').onclick = async e => { e.stopPropagation(); const pop = $('#patch-pop'); pop.hidden = !pop.hidden; if (!pop.hidden) { patchPop(); refreshPatches(); } };
+addEventListener('click', e => { const pop = $('#patch-pop'); if (!pop.hidden && !pop.contains(e.target)) pop.hidden = true; });
+$('#patch-save').onclick = () => patchSave();
+$('#patch-name').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') { e.target.blur(); } else if (e.key === 'Escape') { e.target.value = PATCH.name; e.target.blur(); } });
+$('#patch-name').addEventListener('blur', e => patchRename(e.target.value));
+addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 's') { e.preventDefault(); patchSave(); } });
 function demoPatch() {
   const has = id => ENG[id], nodes = {}, cables = [];
   const add = (id, type, x, y, params = {}) => { if (type === 'sample' || has(type)) nodes[id] = { id, type, x, y, params, adv: false, result: null }; };
@@ -787,7 +833,7 @@ function applyActions(actions) {
       else if (a.op === 'remove') { const n = N(a.node); if (n) removeNode(n.id); done.push(['− module', 1]); }
       else if (a.op === 'run') { const n = N(a.node); if (!n) throw new Error('no module ' + a.node); toRun.push(n.id); done.push(['run ' + n.type, 1]); }
       else if (a.op === 'run_all') { runEverything = true; done.push(['run circuit', 1]); }
-      else if (a.op === 'clear') { loadPatch({ nodes: {}, cables: [] }); done.push(['clear', 1]); }
+      else if (a.op === 'clear') { loadPatch({ nodes: {}, cables: [], name: PATCH.name, sig: PATCH.sig }); done.push(['clear', 1]); }
     } catch (err) { done.push([String(err.message || err), 0]); }
   }
   // lay new modules out: right of what feeds them, otherwise in a free column
@@ -842,5 +888,9 @@ addEventListener('resize', drawCables);
   const saved = await api('/api/patches/autosave').catch(() => null);
   if (saved && saved.nodes && Object.keys(saved.nodes).length) loadPatch(saved);
   else { loadPatch(demoPatch()); requestAnimationFrame(fit); }
+  if (!PATCH.name && Object.keys(S.nodes).length) (async () => {                 // an open circuit from before circuits had names here: if it matches a saved one, it is that one
+    await refreshPatches(); const sig = patchSig();
+    for (const x of PATCH.list) { try { const p = await api('/api/patches/' + encodeURIComponent(x.name)); if (p && JSON.stringify([p.nodes || {}, p.cables || []]) === sig) { PATCH.name = x.name; PATCH.sig = sig; save(); break; } } catch (e) {} }
+    patchMark(); })();
   status('ready_');
 })();
