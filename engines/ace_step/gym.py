@@ -33,6 +33,52 @@ def latest_checkpoint(out: Path):
     return max(cps)[1] if cps else None
 
 
+def _mend_resume(send):
+    """ACE-Step's trainer says "Resumed from epoch N" but does not put the saved weights back: the file names them
+    "...lora_A.weight" and the live model calls them "...lora_A.default.weight", and the mismatch is skipped in silence.
+    So every continued session quietly started learning from nothing. This puts the weights back under the right names,
+    right after the trainer's own attempt, and refuses to go on if they still do not fit."""
+    import os
+    from acestep.training_v2 import trainer_helpers as th
+
+    orig = th.resume_checkpoint
+
+    def resume_checkpoint(trainer, resume_path, optimizer, scheduler):
+        got = yield from orig(trainer, resume_path, optimizer, scheduler)
+        from safetensors.torch import load_file
+
+        d = resume_path if os.path.isdir(resume_path) else os.path.dirname(resume_path)
+        if os.path.isdir(os.path.join(d, "adapter")):
+            d = os.path.join(d, "adapter")
+        f = os.path.join(d, "adapter_model.safetensors")
+        if not os.path.exists(f):
+            return got
+        dec = trainer.module.model.decoder
+        dec = getattr(dec, "_forward_module", dec)
+        live = dec.state_dict()
+        sd = {}
+        for k, v in load_file(f).items():
+            for k2 in (k, k.replace(".lora_A.weight", ".lora_A.default.weight").replace(".lora_B.weight", ".lora_B.default.weight")):
+                if k2 in live and tuple(live[k2].shape) == tuple(v.shape):
+                    sd[k2] = v.to(live[k2].dtype)
+                    break
+        want = sum(1 for k in live if ".lora_A." in k or ".lora_B." in k)
+        if not sd or len(sd) < want:
+            raise RuntimeError(f"What it had learned does not fit the model being trained ({len(sd)} of {want} parts). Its capacity setting must match the one it was trained with.")
+        dec.load_state_dict(sd, strict=False)
+        send(type="stage", stage="load", msg=f"it remembers what it learned ({len(sd)} parts put back)")
+        return got
+
+    th.resume_checkpoint = resume_checkpoint
+    for name in ("trainer_fixed", "trainer_basic_loop"):
+        try:
+            mod = __import__(f"acestep.training_v2.{name}", fromlist=["x"])
+            if hasattr(mod, "resume_checkpoint"):
+                mod.resume_checkpoint = resume_checkpoint
+        except Exception:
+            pass
+
+
 def main():
     cdir = Path(sys.argv[1])
     opt = json.loads(Path(sys.argv[2][1:]).read_text(encoding="utf-8") if sys.argv[2].startswith("@") else sys.argv[2])   # '@file' reads the options from a file
@@ -97,6 +143,7 @@ def main():
     send(type="stage", stage="load", msg=f"waking the model on {train_cfg.device}…")
     model = load_decoder_for_training(checkpoint_dir=train_cfg.checkpoint_dir, variant=train_cfg.model_variant,
                                       device=train_cfg.device, precision=train_cfg.precision)
+    _mend_resume(send)
     trainer = FixedLoRATrainer(model, adapter_cfg, train_cfg)
     send(type="stage", stage="train", msg="training…")
     for u in trainer.train():

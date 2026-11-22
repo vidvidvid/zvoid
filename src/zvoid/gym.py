@@ -602,6 +602,24 @@ def lineage(c: dict) -> bool:
     return fresh
 
 
+def bred_start(c: dict):
+    """A bred creature's first training session starts from what its parents gave it, not from nothing. The trainer only
+    continues from a checkpoint, so the inherited adapter is laid down as one ("epoch 0"). The trainer plays an adapter
+    at twice the strength the merge was stored at, which is exactly each parent at full strength. Returns the adapter's
+    size if this was done."""
+    lora = _dir(c["slug"]) / "lora"
+    final = lora / "final"
+    if not c.get("parents") or c.get("history") or any((lora / "checkpoints").glob("epoch_*")) or not (final / "adapter_model.safetensors").exists():
+        return None
+    cfg = json.loads((final / "adapter_config.json").read_text())
+    cp = lora / "checkpoints" / "epoch_0_bred"
+    cp.mkdir(parents=True, exist_ok=True)
+    shutil.copy(final / "adapter_model.safetensors", cp / "adapter_model.safetensors")
+    (cp / "adapter_config.json").write_text(json.dumps(dict(cfg, lora_alpha=cfg["r"] * 2), indent=2))
+    c["bred_epochs"], c["epochs"] = c.get("epochs", 0), 0  # its own count starts now; what it inherited is remembered apart
+    return int(cfg["r"])
+
+
 def bred_boost(params: dict) -> dict:
     """A bred creature that has not trained since holds each parent at half strength: play it at double."""
     slug = (params.get("creature") or "").strip()
@@ -946,6 +964,10 @@ def train(slug: str, opt: dict, before=None) -> dict:
         more = max(1, int(opt.get("epochs", 100)))
         fresh = bool(opt.get("fresh"))
         lora = _dir(slug) / "lora"
+        if not fresh:
+            r0 = bred_start(c)
+            if r0:
+                opt = dict(opt, rank=r0)                   # it has to keep the size its parents gave it
         if not fresh and not any((lora / "checkpoints").glob("epoch_*")) and c["epochs"]:
             c["history"], c["epochs"] = [], 0          # an earlier session died before its first checkpoint: nothing to resume
         if not fresh:
