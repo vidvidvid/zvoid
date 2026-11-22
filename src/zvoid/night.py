@@ -180,7 +180,7 @@ def ideas(creatures: list[str], count: int, direction: str, rng, merges_only=())
                       "The whole collection is ONE passage that never ends: each piece begins in the state the one before it ended in. "
                       + (f'The first of these must start in "{out[-1].get("ends", "depth")}", where the last one stopped.\n' if out else "The first may start anywhere.\n")
                       + ("Already planned, so do not repeat their feelings:\n" + "\n".join(f'- {x["title"]}: {x["idea"]} ({x["bpm"]} bpm, {x["creature"]}, {x.get("starts")} → {x.get("ends")})' for x in out) + "\n" if out else "")
-                      + 'For each: a short title of invented words, creature, creature2, creature3, creature4, "idea" (one plain sentence: the feeling, and what makes this one different), "starts" and "ends" (peak, depth or void), caption, lyrics, bpm, duration.')
+                      + 'For each: a short title (invented words, now and then with one Slovenian or English word; give every title a different shape and sound: one word, three words, a command, a question, a repeated syllable; never twenty two-word names with the same hard consonants), creature, creature2, creature3, creature4, "idea" (one plain sentence: the feeling, and what makes this one different), "starts" and "ends" (peak, depth or void), caption, lyrics, bpm, duration.')
             got = chat.think(HOUSE, prompt, IDEAS_SCHEMA, 420).get("songs") or []
             if not got:
                 break

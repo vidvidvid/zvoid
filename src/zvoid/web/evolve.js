@@ -82,7 +82,10 @@ async function evoSheet() {                              // the night's own note
   try {
     if (!EVO.outRoot) { const m = (LIB.items && LIB.items.length ? LIB.items : await api('/api/made')).find(x => x.path.includes('/outputs/')); if (m) EVO.outRoot = m.path.split('/outputs/')[0] + '/outputs'; }
     if (!EVO.outRoot) return;
-    const r = await fetch(fileUrl(`${EVO.outRoot}/_night/${EVO.night.id}/collection.json`), { cache: 'no-store' }); if (r.ok) EVO.sheet = await r.json();
+    const r = await fetch(fileUrl(`${EVO.outRoot}/_night/${EVO.night.id}/collection.json`), { cache: 'no-store' }); if (!r.ok) return;
+    const sh = await r.json(), nm = await fetch(fileUrl(`${EVO.outRoot}/_night/${EVO.night.id}/names.json`), { cache: 'no-store' }).then(q => q.ok ? q.json() : {}).catch(() => ({}));
+    (sh.ideas || []).forEach((x, i) => { x.name = nm[i + 1] || x.title; });                       // names given afterwards; the night itself keeps using its own
+    EVO.sheet = sh;
   } catch (e) {}
 }
 /* The night as a small vivarium. The creatures float in a ring in the dark, each a glowing body of its own species and
@@ -144,6 +147,112 @@ function nightForm(g, x, y, R, plan, hue, hue2, t, sd, a0, span, e) {
     g.restore();
   }
 }
+/* The night is painted by a shader of its own: every body is a cloud of light shaped by its species, every filament a
+   thread of glowing gas, all bent by one slow field so nothing has a hard edge. (Without WebGL 2 it falls back to drawn lines.) */
+const NIGHT_FRAG = `#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform float uT; uniform int uNB, uNF;
+uniform vec4 uB0[96], uB1[96], uB2[96], uB3[96];
+uniform vec4 uF0[48], uF1[48], uF2[48];
+out vec4 o;
+float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f); return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y); }
+float fbm(vec2 p) { float a = .5, s = 0.; for (int i = 0; i < 4; i++) { s += a * vn(p); p = p * 2.03 + vec2(17.1, 9.2); a *= .5; } return s; }
+vec3 body(vec2 p, vec4 b0, vec4 b1, vec4 b2, vec4 b3, vec2 w) {
+  float R = b0.z; vec2 d = p - b0.xy;
+  if (length(d) > R * 3.4) return vec3(0.);
+  float turb = b2.w, sd = b1.y, beat = b3.w;
+  d += w * R * (.5 + turb * 1.1);
+  float r = length(d) / R, th = atan(d.y, d.x), a = th - b1.z;
+  vec2 dir = d / max(length(d), .001);
+  int plan = int(floor(b1.x + .5));
+  float n1 = fbm(d / R * 2.2 + sd * 31. + vec2(0., uT * .12)), n2 = fbm(d / R * 5. + sd * 17. - vec2(uT * .2, 0.));
+  float core = exp(-r * r * 6.), halo = exp(-r * 1.6) * (.25 + .75 * n1), s = 0.;
+  vec2 l = vec2(cos(b1.z) * d.x + sin(b1.z) * d.y, -sin(b1.z) * d.x + cos(b1.z) * d.y) / R;
+  if (plan == 1) {
+    float n = 5. + floor(sd * 4.);
+    float pet = pow(abs(cos(a * n * .5 + (n1 - .5) * 1.6 + sin(uT * .3 + sd * 9.) * .3)), 2.5);
+    s = pet * exp(-pow(r - .6, 2.) * 4.5) * 1.3 + pow(abs(cos(a * n * .5)), 24.) * exp(-r * 2.) * .5;
+  } else if (plan == 2) {
+    s = smoothstep(.45, 1., sin(log(r + .05) * 7. - a + uT * .4 + n1)) * exp(-r * 1.5) * 1.4;
+  } else if (plan == 3) {
+    float q = 1. - abs(2. * fbm(dir * (2.4 + floor(r * 2.) * 1.3) + vec2(r * .3) + sd * 9. + (n1 - .5) * .5) - 1.);
+    s = pow(q, 5.) * exp(-pow(max(r - .25, 0.), 2.) * 1.8) * 1.7 * smoothstep(.04, .3, r) + pow(n2, 4.) * exp(-pow(r - 1., 2.) * 6.) * 3.;
+  } else if (plan == 4) {
+    float n = 6. + floor(sd * 3.);
+    float ray = pow(abs(cos(a * n * .5 + uT * .03)), 50.), ray2 = pow(abs(cos(a * n + 1. + uT * .03)), 80.);
+    s = (ray * exp(-r * 1.2) * 1.8 + ray2 * exp(-r * 2.4) * 1.) * (.7 + .3 * sin(uT * 1.3 + sd * 20. + r * 6.));
+    core *= 1.7;
+  } else if (plan == 5) {
+    float bell = exp(-pow((length(vec2(l.y, l.x * 1.2)) - .5) * 6., 2.)) * smoothstep(-.1, .15, l.x);
+    float tn = pow(abs(cos(l.y * 9. + sin(l.x * 6. + uT * 1.5) * .9)), 8.) * exp(-pow(l.y * 1.8, 2.)) * smoothstep(.1, -.2, l.x) * exp(l.x * .9);
+    s = bell * 1.3 + tn * 1.;
+  } else if (plan == 0) {
+    float y0 = sin(l.x * 3. + uT * 1.2 + sd * 9.) * .1, ends = smoothstep(1.15, .75, abs(l.x)), yy = l.y - y0;
+    float spine = exp(-pow(yy * 9., 2.)) * ends;
+    float rib = pow(abs(sin((l.x + abs(yy) * .4) * 9.)), 7.) * exp(-pow(max(abs(yy) - .6 * cos(clamp(l.x, -1.1, 1.1) * 1.35), 0.) * 7., 2.)) * ends;
+    s = spine * 1.5 + rib * .75;
+  } else {
+    s = pow(n2, 3.) * exp(-r * 1.6) * 4.; core *= .5;
+  }
+  if (b1.w < 6.) { float da = abs(atan(sin(a), cos(a))), win = smoothstep(b1.w * .5 + .45, b1.w * .5 - .15, da); s *= win; halo *= .35 + .65 * win; }
+  float I = (core * (1. + beat * 1.3) + halo * .5 + s * (.55 + n2 * 1.1)) * b0.w;
+  vec3 c = mix(b2.rgb, b3.rgb, clamp(n1 * 1.5 - .4 + r * .3, 0., 1.));
+  return c * I + vec3(1., .96, .98) * core * core * .55 * b0.w * (1. + beat);
+}
+vec3 fil(vec2 p, vec4 f0, vec4 f1, vec4 f2, vec2 w) {
+  vec2 ab = f0.zw - f0.xy; float L = max(length(ab), 1.); vec2 dir = ab / L, nrm = vec2(-dir.y, dir.x), q = p - f0.xy + w * 16.;
+  float u = dot(q, dir) / L; if (u < -.03 || u > 1.03) return vec3(0.);
+  float env = sin(clamp(u, 0., 1.) * 3.14159);
+  float off = (f2.x * L + (vn(vec2(u * 3. + f2.y * 13.7, uT * .35)) - .5) * 26.) * env;
+  float d = dot(q, nrm) - off; if (abs(d) > 46.) return vec3(0.);
+  float gas = vn(vec2(u * 16. - uT * .5, f2.y * 5.));
+  float line = exp(-d * d / 2.5) * .8 + exp(-abs(d) / 8.) * .3 * (.3 + gas);
+  float bead = pow(.5 + .5 * cos(6.2832 * 3. * (u - uT * f2.z) + f2.y * 6.), 20.) * exp(-d * d / 26.) * f2.w * 1.8;
+  float ends = smoothstep(0., .08, u) * smoothstep(1., .92, u);
+  return f1.rgb * (line * f1.a + bead) * ends;
+}
+void main() {
+  vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) / uRes.x * 1000.;
+  vec2 w = vec2(fbm(p * .011 + vec2(uT * .05, 3.)), fbm(p * .011 + vec2(7., -uT * .045))) - .47;
+  vec3 c = vec3(.10, .07, .2) * pow(fbm(p * .004 + w * .9 + uT * .01), 3.) * 1.1;
+  vec2 g = floor(p / 8.); float st = h21(g);
+  if (st > .986) { vec2 sp = (g + .5 + (vec2(h21(g + 3.), h21(g + 7.)) - .5) * .7) * 8.; float dd = length(p - sp); c += vec3(.7, .76, 1.) * exp(-dd * dd * 1.1) * (.35 + .3 * sin(uT * .8 + st * 700.)); }
+  for (int i = 0; i < 48; i++) { if (i >= uNF) break; c += fil(p, uF0[i], uF1[i], uF2[i], w); }
+  for (int i = 0; i < 96; i++) { if (i >= uNB) break; c += body(p, uB0[i], uB1[i], uB2[i], uB3[i], w); }
+  c = 1. - exp(-c * 1.3);
+  o = vec4(c + vec3(.016, .014, .032), 1.);
+}`;
+let NIGHTGL;
+function nightGL() {
+  if (NIGHTGL !== undefined) return NIGHTGL;
+  NIGHTGL = null;
+  try {
+    const canvas = document.createElement('canvas'), gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
+    if (!gl || gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS) < 600) return null;
+    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, '#version 300 es\nin vec2 a; void main() { gl_Position = vec4(a, 0., 1.); }')); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, NIGHT_FRAG)); gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0); gl.useProgram(prog);
+    const U = {}; ['uRes', 'uT', 'uNB', 'uNF', 'uB0', 'uB1', 'uB2', 'uB3', 'uF0', 'uF1', 'uF2'].forEach(k => { U[k] = gl.getUniformLocation(prog, k); });
+    canvas.addEventListener('webglcontextlost', () => { NIGHTGL = undefined; });
+    NIGHTGL = { canvas, gl, U, b: [0, 1, 2, 3].map(() => new Float32Array(96 * 4)), f: [0, 1, 2].map(() => new Float32Array(48 * 4)) };
+  } catch (e) { console.warn('night shader: ' + e.message); NIGHTGL = null; }
+  return NIGHTGL;
+}
+/* B: bodies as rows of sixteen numbers, F: filaments as rows of twelve */
+function nightPaint(G, cw, ch, t, B, F) {
+  const gl = G.gl; if (G.canvas.width !== cw || G.canvas.height !== ch) { G.canvas.width = cw; G.canvas.height = ch; }
+  const nb = Math.min(96, B.length), nf = Math.min(48, F.length);
+  for (let i = 0; i < nb; i++) for (let k = 0; k < 4; k++) G.b[k].set(B[i].slice(k * 4, k * 4 + 4), i * 4);
+  for (let i = 0; i < nf; i++) for (let k = 0; k < 3; k++) G.f[k].set(F[i].slice(k * 4, k * 4 + 4), i * 4);
+  gl.viewport(0, 0, cw, ch); gl.uniform2f(G.U.uRes, cw, ch); gl.uniform1f(G.U.uT, t % 3600); gl.uniform1i(G.U.uNB, nb); gl.uniform1i(G.U.uNF, nf);
+  gl.uniform4fv(G.U.uB0, G.b[0]); gl.uniform4fv(G.U.uB1, G.b[1]); gl.uniform4fv(G.U.uB2, G.b[2]); gl.uniform4fv(G.U.uB3, G.b[3]);
+  gl.uniform4fv(G.U.uF0, G.f[0]); gl.uniform4fv(G.U.uF1, G.f[1]); gl.uniform4fv(G.U.uF2, G.f[2]);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
 function evoNightMap(N0, sh0) {
   const W = NIGHT_W, H = NIGHT_H, cx = W / 2, cy = H / 2 - 14, ideas = (sh0 && sh0.ideas) || [], who = (N0.creatures || (sh0 && sh0.creatures) || []);
   const look = c => { const x = EVO.creatures.find(q => q.slug === c); return (x && x.look) || { plan: Math.floor(hash(c + 'p') * 6), hue: hash(c) * 360, hue2: hash(c + '2') * 360 }; };
@@ -157,7 +266,7 @@ function evoNightMap(N0, sh0) {
     for (let j = i + 1; j < pos.length; j++) { const dx = pos[j][0] - pos[i][0], dy = pos[j][1] - pos[i][1], d = Math.hypot(dx, dy) || 1; if (d < 62) { const f = (62 - d) / d / 2; pos[i][0] -= dx * f; pos[i][1] -= dy * f; pos[j][0] += dx * f; pos[j][1] += dy * f; } }
     for (const c in P) { const ex = pos[i][0] - P[c][0], ey = pos[i][1] - P[c][1], ed = Math.hypot(ex, ey) || 1; if (ed < 98) { pos[i][0] = P[c][0] + ex / ed * 98; pos[i][1] = P[c][1] + ey / ed * 98; } }
     pos[i][0] = Math.min(W - 50, Math.max(50, pos[i][0])); pos[i][1] = Math.min(H - 74, Math.max(30, pos[i][1])); }
-  const cv = document.createElement('canvas'); cv.className = 'night-map'; const g = cv.getContext('2d');
+  const box = document.createElement('div'); box.className = 'night-map'; const cv = document.createElement('canvas'), g = cv.getContext('2d'), GL = nightGL(); if (GL) box.append(GL.canvas); box.append(cv);
   const mono = (getComputedStyle(document.documentElement).getPropertyValue('--mono') || '').trim() || 'Menlo, monospace';
   const stars = Array.from({ length: 110 }, (_, i) => [hash('sx' + i) * W, hash('sy' + i) * H, .4 + hash('sr' + i) * 1.1, hash('sp' + i) * 6.28]);
   let hot = -1;
@@ -181,42 +290,58 @@ function evoNightMap(N0, sh0) {
     ((sh && sh.songs) || []).forEach(e => { done[e.n] = e; });
     const cur = /song (\d+) of/.exec(N.msg || ''), carv = /“([^”]+)”/.exec(N.phase === 'chiselling' ? N.msg || '' : ''), au = audioLevels(), lv = au ? au.level : 0;
     g.setTransform(cw / W, 0, 0, cw / W, 0, 0); g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, W, H); g.globalCompositeOperation = 'lighter';
-    for (const s of stars) { g.fillStyle = `rgba(190,200,255,${.12 + .2 * (.5 + .5 * Math.sin(t * .8 + s[3]))})`; g.beginPath(); g.arc(s[0], s[1], s[2], 0, 7); g.fill(); }
+    const B = [], F = [], rgb = (hu, l = .6) => hsl2rgb(hu, .95, l);
+    if (!GL) for (const s of stars) { g.fillStyle = `rgba(190,200,255,${.12 + .2 * (.5 + .5 * Math.sin(t * .8 + s[3]))})`; g.beginPath(); g.arc(s[0], s[1], s[2], 0, 7); g.fill(); }
     const glow = {}; who.forEach(c => { glow[c] = 0; });
     const state = ideas.map((x, i) => { const e = done[i + 1], making = N.running && N.phase !== 'chiselling' && cur && +cur[1] === i + 1; return { e, st: e && e.path ? 'done' : making ? 'making' : 'wait', carving: !!(carv && carv[1] === x.title), playing: !!(e && e.path && LIB.playing === e.path) }; });
     /* filaments, and the light that runs along them */
     ideas.forEach((x, i) => { const [px, py, cs] = pos[i], s = state[i], on = hot === i;
-      cs.forEach((c, k) => { const pts = fil(P[c], [px, py], t, i * 7 + k), a = s.st === 'wait' ? .05 : s.st === 'making' ? .5 : s.playing ? .45 + lv * .4 : .16;
+      cs.forEach((c, k) => {
+        if (s.st === 'making') glow[c] += .5; if (s.carving) glow[c] += .3; if (s.playing) glow[c] += .3 + lv;
+        if (GL) { const sp = s.st === 'making' ? .3 : s.carving ? .7 : s.playing ? -.4 : 0;
+          F.push([P[c][0], P[c][1], px, py, ...rgb(L[c].hue, .62), (s.st === 'wait' ? .12 : s.st === 'making' ? .9 : s.playing ? .7 + lv * .6 : .34) + (on ? .6 : 0), (hash('b' + (i * 7 + k)) - .5) * .3, hash('f' + i + '.' + k), sp, sp ? (s.playing ? .5 + lv * 1.5 : 1) : 0]); return; }
+        const pts = fil(P[c], [px, py], t, i * 7 + k), a = s.st === 'wait' ? .05 : s.st === 'making' ? .5 : s.playing ? .45 + lv * .4 : .16;
         g.beginPath(); pts.forEach((p, q) => q ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.strokeStyle = col(c, 62, Math.min(1, a + (on ? .4 : 0))); g.lineWidth = s.st === 'making' || s.playing ? 1.5 : 1; g.stroke();
-        if (s.st === 'making') { glow[c] += .5; for (let b = 0; b < 3; b++) { const p = along(pts, (t * .32 + b / 3 + k * .11) % 1); dot(p[0], p[1], 9, col(c, 78, .95)); } }
-        if (s.carving) { glow[c] += .3; const p = along(pts, (t * .7 + k * .3) % 1); dot(p[0], p[1], 7, 'rgba(230,250,255,.9)'); }
-        if (s.playing) { glow[c] += .3 + lv; for (let b = 0; b < 2; b++) { const p = along(pts, 1 - (t * .45 + b / 2 + k * .17) % 1); dot(p[0], p[1], 6 + lv * 8, col(c, 80, .8)); } } }); });
+        if (s.st === 'making') for (let b = 0; b < 3; b++) { const p = along(pts, (t * .32 + b / 3 + k * .11) % 1); dot(p[0], p[1], 9, col(c, 78, .95)); }
+        if (s.carving) { const p = along(pts, (t * .7 + k * .3) % 1); dot(p[0], p[1], 7, 'rgba(230,250,255,.9)'); }
+        if (s.playing) for (let b = 0; b < 2; b++) { const p = along(pts, 1 - (t * .45 + b / 2 + k * .17) % 1); dot(p[0], p[1], 6 + lv * 8, col(c, 80, .8)); } }); });
     /* the creatures */
     who.forEach((c, i) => { const [x, y] = P[c], lk = L[c], sd = hash(c + 'seed'), e = .95 + Math.min(.6, glow[c] * .5) + .08 * Math.sin(t * .9 + i), R = 46 * (1 + .05 * Math.sin(t * .7 + i * 2) + Math.min(.2, glow[c] * .12));
-      nightGlow(g, x, y, R, lk.hue, lk.hue2, t, sd, e); nightForm(g, x, y, R, lk.plan | 0, lk.hue, lk.hue2, t, sd, -Math.PI / 2 + sd * 6.28, 7, e); });
+      if (GL) B.push([x, y, R * 1.1, e * .9, lk.plan | 0, sd, -Math.PI / 2 + sd * 6.28 + Math.sin(t * .2 + sd * 9) * .25, 7, ...rgb(lk.hue), 0, ...rgb(lk.hue2, .62), 0]);
+      else { nightGlow(g, x, y, R, lk.hue, lk.hue2, t, sd, e); nightForm(g, x, y, R, lk.plan | 0, lk.hue, lk.hue2, t, sd, -Math.PI / 2 + sd * 6.28, 7, e); } });
     /* the pieces */
     ideas.forEach((x, i) => { const [px, py, cs] = pos[i], s = state[i], on = hot === i, sd = hash(x.title), k = cs.length || 1;
-      if (s.st === 'wait') { for (let m = 0; m < 5; m++) { const a = t * (.25 + m * .06) + m * 1.3 + sd * 6, c = cs[m % k]; dot(px + Math.cos(a) * (5 + m * 1.6), py + Math.sin(a * 1.2) * (4 + m), 3.2, col(c, 70, on ? .8 : .35)); } }
+      if (s.st === 'wait') {
+        if (GL) B.push([px, py, 13, on ? .9 : .42, -1, sd, 0, 7, ...rgb(L[cs[0]].hue), 0, ...rgb(L[cs[k - 1]].hue), 0]);
+        else for (let m = 0; m < 5; m++) { const a = t * (.25 + m * .06) + m * 1.3 + sd * 6, c = cs[m % k]; dot(px + Math.cos(a) * (5 + m * 1.6), py + Math.sin(a * 1.2) * (4 + m), 3.2, col(c, 70, on ? .8 : .35)); } }
       else if (s.st === 'making') { const R = 15 + 3 * Math.sin(t * 5);
-        cs.forEach((c, q) => { nightGlow(g, px + noise(t * 2.3 + q * 9) * 5, py + noise(t * 2.1 + q * 4 + 3) * 5, R * .8, L[c].hue, L[c].hue2, t * 4, sd + q * .3, .9); nightForm(g, px, py, R * (.5 + .5 * Math.abs(noise(t * 1.4 + q * 5))), L[c].plan | 0, L[c].hue, L[c].hue2, t * 3, sd, q / k * 6.2832 + t * .6, 6.2832 / k * .7, .5 + .5 * Math.abs(noise(t * 3 + q))); });
-        dot(px, py, 10 + 5 * Math.sin(t * 7), 'rgba(255,255,255,.75)'); }
-      else { const score = (s.e.score || {}).total || .5, beat = Math.exp(-((t * (x.bpm || 120) / 60) % 1) * 5), R = (13 + 9 * score) * (1 + .1 * beat + (s.playing ? lv * .5 : 0) + (on ? .12 : 0)), e = .8 + .3 * beat + (s.playing ? .4 : 0);
-        cs.forEach((c, q) => { const a0 = Math.atan2(P[c][1] - py, P[c][0] - px); nightGlow(g, px + Math.cos(a0) * R * .25, py + Math.sin(a0) * R * .25, R * .62, L[c].hue, L[c].hue2, t, sd + q * .3, e * .8); nightForm(g, px, py, R, L[c].plan | 0, L[c].hue, L[c].hue2, t, sd + q * .21, k === 1 ? a0 + Math.PI : a0, k === 1 ? 7 : Math.min(1.5, 5 / k), e); });
-        dot(px, py, 5 + 4 * beat, `rgba(255,255,255,${.6 + .4 * beat})`);
-        (s.e.carving || []).forEach((c, q) => { const a = q * .7 + t * .3; dot(px + Math.cos(a) * (R + 7), py + Math.sin(a) * (R + 7), c.kept ? 4.5 : 2.5, c.by && L[c.by] ? col(c.by, 75, c.kept ? .95 : .4) : `rgba(255,255,255,${c.kept ? .95 : .3})`); });
-        if (s.playing && au) { g.beginPath(); for (let q = 0; q <= 96; q++) { const a = q / 96 * 6.2832, r = R + 12 + au.wave[(q * 5) % 512] * 14; q ? g.lineTo(px + Math.cos(a) * r, py + Math.sin(a) * r) : g.moveTo(px + Math.cos(a) * r, py + Math.sin(a) * r); } g.closePath(); g.strokeStyle = 'rgba(46,230,214,.75)'; g.lineWidth = 1.2; g.stroke(); }
+        if (GL) cs.forEach((c, q) => B.push([px, py, 26 + 5 * Math.sin(t * 5 + q), .75 + .25 * Math.sin(t * 7 + q * 2), L[c].plan | 0, sd + q * .21, q / k * 6.2832 + t * .6, k === 1 ? 7 : 6.2832 / k * .8, ...rgb(L[c].hue), 1, ...rgb(L[c].hue2, .62), .5 + .5 * Math.sin(t * 9)]));
+        else { cs.forEach((c, q) => { nightGlow(g, px + noise(t * 2.3 + q * 9) * 5, py + noise(t * 2.1 + q * 4 + 3) * 5, R * .8, L[c].hue, L[c].hue2, t * 4, sd + q * .3, .9); nightForm(g, px, py, R * (.5 + .5 * Math.abs(noise(t * 1.4 + q * 5))), L[c].plan | 0, L[c].hue, L[c].hue2, t * 3, sd, q / k * 6.2832 + t * .6, 6.2832 / k * .7, .5 + .5 * Math.abs(noise(t * 3 + q))); });
+          dot(px, py, 10 + 5 * Math.sin(t * 7), 'rgba(255,255,255,.75)'); } }
+      else { const score = (s.e.score || {}).total || .5, beat = Math.exp(-((t * (x.bpm || 120) / 60) % 1) * 5), R = ((GL ? 17 : 13) + (GL ? 10 : 9) * score) * (1 + .1 * beat + (s.playing ? lv * .5 : 0) + (on ? .12 : 0)), e = .8 + .3 * beat + (s.playing ? .4 : 0);
+        cs.forEach((c, q) => { const a0 = Math.atan2(P[c][1] - py, P[c][0] - px);
+          if (GL) B.push([px, py, R, e * (k > 1 ? .6 : .75), L[c].plan | 0, sd + q * .21, k === 1 ? a0 + Math.PI : a0, k === 1 ? 7 : Math.min(1.7, 5.4 / k), ...rgb(L[c].hue), 0, ...rgb(L[c].hue2, .62), beat / k]);
+          else { nightGlow(g, px + Math.cos(a0) * R * .25, py + Math.sin(a0) * R * .25, R * .62, L[c].hue, L[c].hue2, t, sd + q * .3, e * .8); nightForm(g, px, py, R, L[c].plan | 0, L[c].hue, L[c].hue2, t, sd + q * .21, k === 1 ? a0 + Math.PI : a0, k === 1 ? 7 : Math.min(1.5, 5 / k), e); } });
+        if (!GL) dot(px, py, 5 + 4 * beat, `rgba(255,255,255,${.6 + .4 * beat})`);
+        const orbit = GL ? R * .9 + 8 : R + 7;
+        (s.e.carving || []).forEach((c, q) => { const a = q * .7 + t * .3; dot(px + Math.cos(a) * orbit, py + Math.sin(a) * orbit, c.kept ? 5 : 2.8, c.by && L[c.by] ? col(c.by, 75, c.kept ? .95 : .4) : `rgba(255,255,255,${c.kept ? .95 : .3})`); });
+        g.shadowColor = 'rgba(120,240,255,.9)'; g.shadowBlur = 12;
+        if (s.playing && au) { g.beginPath(); for (let q = 0; q <= 96; q++) { const a = q / 96 * 6.2832, r = R + 14 + au.wave[(q * 5) % 512] * 14; q ? g.lineTo(px + Math.cos(a) * r, py + Math.sin(a) * r) : g.moveTo(px + Math.cos(a) * r, py + Math.sin(a) * r); } g.closePath(); g.strokeStyle = 'rgba(46,230,214,.6)'; g.lineWidth = 1; g.stroke(); }
         if (s.carving) { const tick = Math.floor(t / .28), fr = (t / .28) % 1;
           for (let b = 0; b < 2; b++) { const a = hash('l' + tick + b) * 6.2832, sx = px + Math.cos(a) * 80, sy = py + Math.sin(a) * 60; g.beginPath(); g.moveTo(sx, sy);
-            for (let q = 1; q < 7; q++) g.lineTo(sx + (px - sx) * q / 7 + (hash('j' + tick + b + q) - .5) * 16, sy + (py - sy) * q / 7 + (hash('k' + tick + b + q) - .5) * 16); g.lineTo(px, py); g.strokeStyle = `rgba(215,245,255,${.9 * (1 - fr)})`; g.lineWidth = 1.3; g.stroke(); }
-          dot(px, py, 22 * (1 - fr) + 6, 'rgba(220,245,255,.6)'); } }
+            for (let q = 1; q < 7; q++) g.lineTo(sx + (px - sx) * q / 7 + (hash('j' + tick + b + q) - .5) * 16, sy + (py - sy) * q / 7 + (hash('k' + tick + b + q) - .5) * 16); g.lineTo(px, py); g.strokeStyle = `rgba(215,245,255,${.9 * (1 - fr)})`; g.lineWidth = 1.1; g.stroke(); }
+          dot(px, py, 22 * (1 - fr) + 6, 'rgba(220,245,255,.6)'); }
+        g.shadowBlur = 0; }
     });
+    if (GL) nightPaint(GL, Math.round(cw * .75), Math.round(ch * .75), t, B, F);
     /* words */
-    g.globalCompositeOperation = 'source-over'; g.textAlign = 'center';
+    g.globalCompositeOperation = 'source-over'; g.textAlign = 'center'; g.shadowColor = 'rgba(4,4,12,.95)'; g.shadowBlur = 5;
     who.forEach(c => { const [x, y] = P[c]; g.font = `600 12px ${mono}`; g.fillStyle = col(c, 76, .95); g.fillText(c.replace(/-/g, ' ').toUpperCase().split('').join(' '), x, y + (y > cy ? 74 : -62)); });
-    ideas.forEach((x, i) => { const [px, py] = pos[i], s = state[i], on = hot === i, r = s.st === 'wait' ? 10 : 13 + 9 * (((s.e || {}).score || {}).total || .5);
-      g.font = `${on || s.playing ? 600 : 400} 10.5px ${mono}`; g.fillStyle = on || s.playing ? '#fff' : s.st === 'wait' ? 'rgba(120,116,150,.75)' : 'rgba(205,202,228,.92)'; g.fillText(x.title, px, py + r + 16); });
+    ideas.forEach((x, i) => { const [px, py] = pos[i], s = state[i], on = hot === i, r = s.st === 'wait' ? 10 : (GL ? 17 : 13) + (GL ? 10 : 9) * (((s.e || {}).score || {}).total || .5);
+      g.font = `${on || s.playing ? 600 : 400} 10.5px ${mono}`; g.fillStyle = on || s.playing ? '#fff' : s.st === 'wait' ? 'rgba(120,116,150,.75)' : 'rgba(205,202,228,.92)'; g.fillText(x.name || x.title, px, py + r + 16); });
+    g.shadowBlur = 0;
     if (hot >= 0 && ideas[hot]) { const x = ideas[hot], e = done[hot + 1], cs = pos[hot][2], words = String(x.idea || '').split(' '), lines = ['']; words.forEach(w => { if ((lines[lines.length - 1] + ' ' + w).length > 44) lines.push(w); else lines[lines.length - 1] = (lines[lines.length - 1] + ' ' + w).trim(); });
-      const head = `${String(hot + 1).padStart(2, '0')} · ${x.title} · ${x.bpm} bpm`, body = lines.slice(0, 5).map((l, q) => l + (q === 4 && lines.length > 5 ? '…' : '')), carved = e && e.carving && e.carving.length ? `${e.carving.filter(c => c.kept).length} of ${e.carving.length} carvings kept` : '';
+      const head = `${String(hot + 1).padStart(2, '0')} · ${x.name || x.title} · ${x.bpm} bpm`, body = lines.slice(0, 5).map((l, q) => l + (q === 4 && lines.length > 5 ? '…' : '')), carved = e && e.carving && e.carving.length ? `${e.carving.filter(c => c.kept).length} of ${e.carving.length} carvings kept` : '';
       g.textAlign = 'left'; g.font = `600 12px ${mono}`; let bw = g.measureText(head).width; g.font = `10.5px ${mono}`; [cs.map(c => c.replace(/-/g, ' ')).join(' × '), ...body, carved].forEach(l => { bw = Math.max(bw, g.measureText(l).width); });
       const bh = 44 + body.length * 14 + (carved ? 16 : 0), bx = Math.min(W - bw - 30, Math.max(6, pos[hot][0] + 30)), by = Math.min(H - bh - 34, Math.max(6, pos[hot][1] - bh / 2));
       g.fillStyle = 'rgba(8,8,18,.9)'; g.strokeStyle = 'rgba(120,116,170,.5)'; g.lineWidth = 1; g.beginPath(); g.rect(bx, by, bw + 24, bh); g.fill(); g.stroke();
@@ -232,7 +357,7 @@ function evoNightMap(N0, sh0) {
       g.textAlign = 'center'; g.fillStyle = '#e9e7f5'; g.fillText(N.running ? (N.phase === 'chiselling' ? 'chiselling' : `making ${N.made}/${N.count}`) : 'finished', Math.min(W - 150, Math.max(110, X(now))), y - 9); }
   };
   requestAnimationFrame(frame);
-  return cv;
+  return box;
 }
 function evoNightView() {                               // tonight, piece by piece: who plays it, what it is, and where it has got to
   const N = EVO.night || {}, sh = EVO.sheet && EVO.sheet.id === N.id ? EVO.sheet : null, ideas = (sh && sh.ideas) || [], done = {}, cur = /song (\d+) of/.exec(N.msg || '');
@@ -248,7 +373,7 @@ function evoNightView() {                               // tonight, piece by pie
       return h('div', { class: 'night-row' + (path ? ' done' : making ? ' making' : '') + (path && LIB.playing === path ? ' playing' : '') },
         h('span', { class: 'night-n' }, String(n).padStart(2, '0')),
         path ? h('button', { class: 'evo-pp', data: { path }, title: 'Play / stop', onclick: () => libPlay({ path, kind: 'audio', size: 5e7 }) }, LIB.playing === path ? '■' : '▶') : h('span', { class: 'night-dot' }, making ? '◌' : '·'),
-        h('div', { class: 'night-what' }, h('b', {}, x.title, h('em', {}, `${x.bpm} bpm`)), h('small', { class: 'night-who' }, who(x)), h('small', { title: x.idea }, x.idea)),
+        h('div', { class: 'night-what' }, h('b', {}, x.name || x.title, h('em', {}, `${x.bpm} bpm`)), h('small', { class: 'night-who' }, who(x)), h('small', { title: x.idea }, x.idea)),
         path ? libWave({ path, kind: 'audio', size: 5e7 }) : h('span', { class: 'night-wait' }, making ? 'being made now…' : 'waiting'),
         h('small', { class: 'night-carve', title: tried ? (e.carving || []).map(c => `${c.kept ? 'kept' : 'not kept'}: ${c.from}–${c.to}s${c.by ? ' by ' + c.by : ''} · ${c.why || ''}`).join('\n') : '' }, tried ? `${kept} of ${tried} carvings kept` : '')); })));
 }
