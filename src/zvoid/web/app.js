@@ -612,20 +612,32 @@ function libMark() {                                   // playing or not: mark t
   document.querySelectorAll('#lib-list .lib-row').forEach(r => { const on = r.dataset.path === LIB.playing; found = found || on; if (on !== r.classList.contains('playing')) { r.classList.toggle('playing', on); const b = r.querySelector('button.lib-pp'); if (b) b.textContent = on ? '■' : '▶'; const w = r.querySelector('.lib-wave'); if (w) libWaveDraw(w); } });
   if (!found) libraryDraw();
 }
-function libPlay(it, at) {                           // at: where to start, 0..1 through the clip (a click on its waveform)
-  if (!LIB.audio) { LIB.audio = new Audio(); LIB.audio.onended = () => { LIB.playing = null; libMark(); }; try { ac().createMediaElementSource(LIB.audio).connect(bus()); } catch {} }
-  const A = LIB.audio, seek = () => { if (at != null && isFinite(A.duration)) { A.currentTime = clamp(at, 0, .999) * A.duration; LIB.jump = true; } };
-  if (LIB.playing === it.path && at == null) { A.pause(); LIB.playing = null; }
-  else if (LIB.playing === it.path) seek();
-  else { ac().resume(); A.src = fileUrl(it.path); if (at != null) A.addEventListener('loadedmetadata', seek, { once: true }); A.play().catch(e => toast('could not play that: ' + e.message, true)); LIB.playing = it.path; }
-  libMark();
+/* the library's player. A clip is read into memory and started from there, so it sounds the instant you click and its position is known exactly (the browser's own streaming player was slow to start in the app's window, and vague about where it was) */
+function libPos() { const p = LIB.p; if (!p || !p.buf) return [0, 0]; const d = p.buf.duration; return [p.paused ? p.off : Math.min(d, p.off + ac().currentTime - p.t0), d]; }
+function libHalt() { const p = LIB.p; if (p && p.src) { const src = p.src; p.src = null; src.onended = null; try { src.stop(); } catch {} } }
+function libStop() { libHalt(); LIB.p = null; LIB.playing = null; }
+function libStart(off) {
+  const p = LIB.p, c = ac(); libHalt();
+  const src = c.createBufferSource(); src.buffer = p.buf; src.connect(bus());
+  src.onended = () => { if (LIB.p === p && p.src === src) { libStop(); libMark(); } };
+  p.off = clamp(off, 0, Math.max(0, p.buf.duration - .02)); p.t0 = c.currentTime; p.paused = false; p.src = src; src.start(0, p.off);
 }
+async function libPlay(it, at) {                     // at: where to start, 0..1 through the clip (a click on its waveform)
+  ac().resume();
+  if (LIB.playing === it.path && at == null) { libStop(); return libMark(); }
+  if (LIB.playing === it.path && LIB.p && LIB.p.buf) { libStart(clamp(at, 0, .999) * LIB.p.buf.duration); return libMark(); }
+  libStop(); LIB.playing = it.path; const p = LIB.p = { path: it.path, buf: null, src: null, t0: 0, off: 0, paused: false, want: at }; libMark();
+  try { const buf = await loadBuf(it.path); for (const k of bufs.keys()) { if (bufs.size <= 24) break; if (k !== it.path) bufs.delete(k); }   // keep the last couple of dozen clips ready, not all of them
+    if (LIB.p !== p) return; p.buf = buf; libStart(p.want != null ? clamp(p.want, 0, .999) * buf.duration : 0); libMark(); }
+  catch (e) { if (LIB.p === p) { libStop(); libMark(); toast('could not play that: ' + (e.message || e), true); } }
+}
+function libWarm(it) { if (it.kind === 'audio' && it.size < 6e7 && !bufs.has(it.path)) loadBuf(it.path).catch(() => {}); }   // the pointer is on a clip: get it ready, so a click plays at once
 /* The waveform of a clip: click anywhere on it to play from there. What has played is lit; a line follows your pointer. */
 function libWaveDraw(cv) {
   const pk = LIB.peaks.get(cv.dataset.path), dpr = devicePixelRatio || 1, w = cv.clientWidth, hgt = cv.clientHeight; if (!w) return;
   if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(hgt * dpr); }
   const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, hgt);
-  const mid = hgt / 2, on = LIB.playing === cv.dataset.path, A = LIB.audio, prog = on && A && A.duration ? clamp((LIB.est != null ? LIB.est : A.currentTime) / A.duration, 0, 1) : -1;
+  const mid = hgt / 2, on = LIB.playing === cv.dataset.path, pd = on ? libPos() : [0, 0], prog = on && pd[1] ? clamp(pd[0] / pd[1], 0, 1) : -1;
   if (!pk || !pk.hi) { g.fillStyle = '#26243a'; g.fillRect(0, mid - .5, w, 1); return; }
   const n = pk.hi.length, bw = 2, gap = 1, cols = Math.floor(w / (bw + gap)), top = Math.max(.05, ...pk.hi.map(Math.abs), ...pk.lo.map(Math.abs));
   for (let c = 0; c < cols; c++) { const i0 = Math.floor(c / cols * n), i1 = Math.max(i0 + 1, Math.floor((c + 1) / cols * n)); let lo = 0, hi = 0; for (let i = i0; i < i1; i++) { lo = Math.min(lo, pk.lo[i]); hi = Math.max(hi, pk.hi[i]); }
@@ -643,20 +655,8 @@ function libWave(it) {
   requestAnimationFrame(() => libWaveDraw(cv));
   return cv;
 }
-{ let t0 = 0, at = 0, seen = -1, ticks = 0, prev = 0, debt = 0;     // the playhead: drawn every frame, and carried by the clock between the player's own time reports, which arrive in coarse steps
-  const step = () => { requestAnimationFrame(step);
-    const A = LIB.audio; if (!LIB.playing || !A) { LIB.est = null; seen = -1; ticks = 0; return; }
-    const now = performance.now(), ct = A.currentTime, live = !A.paused && !A.seeking && A.readyState >= 3;
-    if (seen < 0 || ct < seen - .05 || LIB.jump || A.seeking) { t0 = ct; at = now; ticks = LIB.jump && live ? 2 : 0; prev = ct; debt = 0; LIB.jump = false; }   // just started, or you jumped: take the player's word
-    else if (!live) { ticks = 0; debt = 0; if (Math.abs(ct - prev) > .5) prev = ct; }                   // paused or buffering: the bar stays exactly where it is
-    else {
-      if (ct !== seen) { ticks++; if (ticks === 2) { t0 = Math.abs(ct - prev) > .5 ? ct : Math.max(prev, ct); at = now; } }                               // the clock only starts once the player's time has really begun to move: sound comes out a moment after "play"
-      if (ticks < 2) prev = Math.abs(ct - prev) > .5 ? ct : Math.max(prev, ct);
-      else { let est = t0 + (now - at) / 1000;
-        if (Math.abs(est - ct) > 1.5) { est = ct; t0 = ct; at = now; prev = ct; debt = 0; }                         // far apart: something really jumped, so take the player's word
-        else { if (ct !== seen) debt += (ct - est) * .08; const adj = clamp(debt, -.004, .004); t0 += adj; debt -= adj; est += adj; }                   // otherwise the clock is trusted: the player's reports hang back and bunch up, above all in the first second, while the sound itself runs on evenly. Lean toward them slowly: no stopping, no stepping back
-        prev = Math.max(prev, est); } }
-    seen = ct; LIB.est = Math.max(0, prev);
+{ const step = () => { requestAnimationFrame(step);     // the playhead, every frame
+    if (!LIB.playing || !LIB.p || !LIB.p.buf || LIB.p.paused) return;
     if (!LIB.cv || !LIB.cv.isConnected || LIB.cv.dataset.path !== LIB.playing) LIB.cv = [...document.querySelectorAll('.lib-wave')].find(c => c.dataset.path === LIB.playing) || null;
     if (LIB.cv) libWaveDraw(LIB.cv); };
   requestAnimationFrame(step); }
@@ -678,7 +678,7 @@ function libPreview(it) {                           // a still or a video, large
 }
 async function libTrash(it) {                        // one click: it goes to the Trash at once. Cmd+Z brings it back.
   try { const r = await api('/api/made/trash', { json: { path: it.path } }); (LIB.undo || (LIB.undo = [])).push(r.undo); if (LIB.undo.length > 50) LIB.undo.shift();
-    LIB.items = LIB.items.filter(x => x.path !== it.path); if (LIB.playing === it.path) { LIB.audio.pause(); LIB.playing = null; } libraryDraw(); toast('moved to the Trash · ⌘Z to undo'); } catch (e) { toast('could not delete: ' + e.message, true); }
+    LIB.items = LIB.items.filter(x => x.path !== it.path); if (LIB.playing === it.path) libStop(); libraryDraw(); toast('moved to the Trash · ⌘Z to undo'); } catch (e) { toast('could not delete: ' + e.message, true); }
 }
 function libRename(it, el) {                           // the name becomes a text field: Enter saves, Esc cancels, empty = the automatic name again
   if (!el || el.querySelector('input')) return;
@@ -708,8 +708,8 @@ async function libUndo() {
   return true;
 }
 function libPause() {                                // space: pause and resume whatever the library is playing
-  const A = LIB.audio; if (!A || !LIB.playing) return false;
-  if (A.paused) A.play().catch(() => {}); else A.pause();
+  const p = LIB.p; if (!p || !p.buf || !LIB.playing) return false;
+  if (p.paused) libStart(p.off); else { const pos = libPos()[0]; libHalt(); p.off = pos; p.paused = true; }
   return true;
 }
 async function libStar(it) { it.star = !it.star; { const r = [...document.querySelectorAll('#lib-list .lib-row')].find(x => x.dataset.path === it.path), b = r && r.querySelector('.lib-star'); if (b && !LIB.stars) { b.classList.toggle('on', it.star); b.textContent = it.star ? '★' : '☆'; } else libraryDraw(); } try { await api('/api/made/star', { json: { path: it.path, on: it.star } }); } catch { it.star = !it.star; libraryDraw(); } }
@@ -736,7 +736,7 @@ function libraryDraw() {
       tiles.length && h('div', { class: 'lib-grid' }, tiles.map(it => h('div', { class: 'lib-tile' },
         h('button', { class: 'lib-thumb', title: 'Open', onclick: () => libPreview(it) }, h('img', { loading: 'lazy', src: '/api/thumb?path=' + encodeURIComponent(it.path) }), it.kind === 'video' && h('i', {}, it.source === 'film' ? '▶ film' : '▶ time-lapse')),
         h('div', { class: 'lib-what', title: it.name, ondblclick: e => libRename(it, e.currentTarget) }, it.title), h('div', { class: 'lib-meta' }, meta(it)), tools(it)))),
-      ...rows.map(it => h('div', { class: 'lib-row' + (LIB.playing === it.path ? ' playing' : ''), data: { path: it.path } },
+      ...rows.map(it => h('div', { class: 'lib-row' + (LIB.playing === it.path ? ' playing' : ''), data: { path: it.path }, onmouseenter: () => libWarm(it) },
         it.kind === 'audio' ? h('button', { class: 'lib-pp', title: 'Play / stop', onclick: () => libPlay(it) }, LIB.playing === it.path ? '■' : '▶') : h('span', { class: 'lib-pp midi' }, '♪'),
         h('div', { class: 'lib-text' }, h('div', { class: 'lib-what', title: it.title + '\n' + it.name + '\ndouble-click to rename', ondblclick: e => libRename(it, e.currentTarget) }, it.title), h('div', { class: 'lib-meta' }, meta(it))), it.kind === 'audio' ? libWave(it) : h('span'), tools(it)))];
   }).filter(Boolean));
