@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 
 from . import chat, gym, library
-from .paths import OUTPUTS_DIR
+from .paths import ENGINES_DIR, ENVS_DIR, OUTPUTS_DIR
 
 _state: dict = {}      # the one night shift that can run at a time
 
@@ -111,8 +111,8 @@ DIR = OUTPUTS_DIR / "_night"      # tries live here, outside the library; only t
 VEC = ("tonal", "dist", "steady", "harm", "voice", "attack", "change", "noise", "dyn", "low", "bright", "wide")
 
 IDEAS_SCHEMA = {"type": "object", "required": ["songs"], "properties": {"songs": {"type": "array", "items": {"type": "object",
-    "required": ["title", "creature", "idea", "caption", "lyrics", "bpm", "duration", "starts", "ends"],
-    "properties": {"title": {"type": "string"}, "creature": {"type": "string"}, "idea": {"type": "string"}, "caption": {"type": "string"},
+    "required": ["title", "creature", "creature2", "idea", "caption", "lyrics", "bpm", "duration", "starts", "ends"],
+    "properties": {"title": {"type": "string"}, "creature": {"type": "string"}, "creature2": {"type": "string"}, "idea": {"type": "string"}, "caption": {"type": "string"},
                    "starts": {"type": "string", "enum": ["peak", "depth", "void"]}, "ends": {"type": "string", "enum": ["peak", "depth", "void"]},
                    "lyrics": {"type": "string"}, "bpm": {"type": "integer"}, "duration": {"type": "integer"}}}}}}
 REVISE_SCHEMA = {"type": "object", "required": ["keep", "caption", "lyrics", "bpm", "note"],
@@ -169,13 +169,16 @@ def ideas(creatures: list[str], count: int, direction: str, rng) -> list[dict]:
         while len(out) < count:
             n = min(10, count - len(out))
             prompt = (f"Plan {n} songs for one collection of {count}. Direction from the artist: {direction or 'music nobody has heard before'}\n\n"
-                      "Creatures to use, spread evenly over the songs (one creature per song):\n" + "\n".join(_sides(c) for c in creatures) + "\n\n"
+                      "Creatures to use, spread evenly over the songs:\n" + "\n".join(_sides(c) for c in creatures) + "\n\n"
+                      + ("The creatures are meant to MIX. About half of the pieces are HYBRIDS, played through two creatures merged into one: for those, set creature2 to the second creature and begin the caption with one word of EACH "
+                         "(the first creature's word, then the second's). Choose pairs whose sounds would do something to each other, use every creature in at least one hybrid, and do not repeat a pair. "
+                         'For the other pieces set creature2 to "".\n\n' if len(creatures) > 1 else 'Set creature2 to "" for every piece.\n\n') +
                       "They are " + str(n) + " different FEELINGS and " + str(n) + " different ways of making a body move, not variations of one: vary the mechanism (see the list of essences), the tempo across the whole dance range, what rides on the beat (a voice, the low end, a noise, more drums), "
                       "how long it stays at the peak, in the depth and in the void, and how it gets from one to another (melting, or thrown). No two may share a tempo band, a carrier and a path.\n"
                       "The whole collection is ONE passage that never ends: each piece begins in the state the one before it ended in. "
                       + (f'The first of these must start in "{out[-1].get("ends", "depth")}", where the last one stopped.\n' if out else "The first may start anywhere.\n")
                       + ("Already planned, so do not repeat their feelings:\n" + "\n".join(f'- {x["title"]}: {x["idea"]} ({x["bpm"]} bpm, {x["creature"]}, {x.get("starts")} → {x.get("ends")})' for x in out) + "\n" if out else "")
-                      + 'For each: a short title of invented words, the creature, "idea" (one plain sentence: the feeling, and what makes this one different), "starts" and "ends" (peak, depth or void), caption, lyrics, bpm, duration.')
+                      + 'For each: a short title of invented words, creature, creature2, "idea" (one plain sentence: the feeling, and what makes this one different), "starts" and "ends" (peak, depth or void), caption, lyrics, bpm, duration.')
             got = chat.think(HOUSE, prompt, IDEAS_SCHEMA, 420).get("songs") or []
             if not got:
                 break
@@ -189,10 +192,12 @@ def ideas(creatures: list[str], count: int, direction: str, rng) -> list[dict]:
             x = dict(out[k])
             if x.get("creature") not in creatures:
                 x["creature"] = who
+            if x.get("creature2") not in creatures or x.get("creature2") == x["creature"]:
+                x["creature2"] = ""
             songs.append(_fit(x, rng))
         else:
             r = recipe(who, direction, rng)
-            songs.append(_fit({"title": r["name"], "creature": who, "idea": "drawn from the built-in palettes", "caption": r["params"]["caption"], "lyrics": r["params"]["lyrics"],
+            songs.append(_fit({"title": r["name"], "creature": who, "creature2": "", "idea": "drawn from the built-in palettes", "caption": r["params"]["caption"], "lyrics": r["params"]["lyrics"],
                                "bpm": r["params"]["bpm"], "duration": r["params"]["duration"]}, rng))
     return songs
 
@@ -202,6 +207,12 @@ def _fit(x: dict, rng) -> dict:
     c = gym._load(x["creature"])
     words = [l["trigger"] for l in c.get("limbs", [])] or [c.get("tag") or x["creature"]]
     cap = " ".join(str(x.get("caption") or "").split())
+    if x.get("creature2"):                                    # a hybrid answers to a word of each parent
+        c2 = gym._load(x["creature2"])
+        w2 = [l["trigger"] for l in c2.get("limbs", [])] or [c2.get("tag") or x["creature2"]]
+        if not any(w in cap for w in w2):
+            l2 = c2.get("limbs") or []
+            cap = (rng.choices(l2, weights=[max(1, l.get("count", 1)) for l in l2])[0]["trigger"] if l2 else w2[0]) + ", " + cap
     if not any(w in cap for w in words):
         limbs = c.get("limbs") or []
         cap = (rng.choices(limbs, weights=[max(1, l.get("count", 1)) for l in limbs])[0]["trigger"] if limbs else words[0]) + ", " + cap
@@ -550,11 +561,17 @@ CHISEL_SCHEMA = {"type": "object", "required": ["start", "end", "caption", "note
                  "properties": {"start": {"type": "number"}, "end": {"type": "number"}, "caption": {"type": "string"}, "note": {"type": "string"}}}
 
 
-def chisel_plan(song: dict, m: dict, tried: list, rng) -> dict:
+LENSES = ("the beat: where it falls apart, where the kick goes missing, where a body would stop moving",
+          "the extremes: a peak that is not overwhelming enough, a depth that is not heavy enough",
+          "the edges: a stretch that is a blur, a mass of sound with no separate, countable events",
+          "the passage: a change of state that is too orderly, or one that should melt and instead jolts")
+
+
+def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "") -> dict:
     """Which stretch of the song to carve next, and into what. Claude reads the song as a timeline; without it, the stretch
     with the fewest drum hits that has not been tried is given drums."""
     secs, hits, lev = float(m.get("secs") or song["duration"]), m.get("hits") or [], m.get("sections") or []
-    words = song["caption"].split(",")[0].strip()
+    words = _word(guest, rng) if guest else song["caption"].split(",")[0].strip()
     try:
         line = lambda arr: " ".join(f"{int(i * 5)}s:{v}" for i, v in enumerate(arr))
         prompt = (f'Song: "{song["title"]}" ({secs:.0f} seconds) for the creature {song["creature"]}. Its idea: {song["idea"]}\n\nCAPTION\n{song["caption"]}\n\nLYRICS (the plan it was made from)\n{song["lyrics"]}\n\n'
@@ -564,6 +581,8 @@ def chisel_plan(song: dict, m: dict, tried: list, rng) -> dict:
                   f'- a constant tone under everything: {m.get("hum")} dB at {m.get("hum_hz")} Hz (over 12 is a hum the artist hears); its quietest second is {m.get("floor")} dB below its loudest (-12 means it never lets go)\n'
                   f'- how defined its structure measures: {m.get("definition")} of 1. Drums overall: {m["attack"]} (the artist wants 0.2 or more). In the 5-second timeline, a stretch with real drums reads about 0.2 to 0.4, and under 0.1 means none.\n'
                   + ("- stretches already reworked, do not pick these again: " + ", ".join(f"{a:.0f}-{b:.0f}s" for a, b in tried) + "\n" if tried else "")
+                  + (f"\nThis time look especially at {lens}." if lens else "")
+                  + (f"\nFor this stretch ANOTHER CREATURE takes over: {_sides(guest)}. Write the stretch for what that creature would do with it, so the piece becomes a meeting of the two." if guest else "")
                   + "\nPick ONE stretch of 12 to 30 seconds to make again, the one whose remaking would most help the piece as dance music that reaches extremes: a stretch where the beat falls apart or the kick goes missing (unless that is a planned void), a peak that is not overwhelming enough, a depth that is not heavy enough, "
                   "a stretch that is merely in-between, or a peak whose drums are missing. Do not add silences: only if the plan itself has a void section and the timeline shows that it is not empty may that one be made emptier. "
                   f'Give start and end in seconds, and a caption for JUST that stretch: it must begin with "{words}", then say concretely what plays there (which drums and how, the low end, the voices, the noise). '
@@ -584,6 +603,51 @@ def chisel_plan(song: dict, m: dict, tried: list, rng) -> dict:
                 "note": "by rule: the stretch with the fewest drum hits gets drums (Claude did not answer: " + str(ex)[:60] + ")"}
 
 
+def hybrid(a: str, b: str, d: Path) -> str:
+    """Two creatures merged into one adapter, made on the spot (nothing is trained): each is in it at half strength, so a
+    hybrid is played at double. Returns the folder of the merged adapter."""
+    pa, pb = gym.adapter_path(a), gym.adapter_path(b)
+    if not pa or not pb:
+        raise RuntimeError("both creatures must be trained")
+    out = d / "hybrids" / ("hy_" + re.sub(r"[^0-9A-Za-z]", "_", a + "__" + b))
+    if not (out / "adapter_model.safetensors").exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run([str(ENVS_DIR / "ace_step" / "bin" / "python"), str(ENGINES_DIR / "ace_step" / "breed.py"), str(pa), str(pb), str(out)], capture_output=True, text=True, timeout=300)
+        if r.returncode or not (out / "adapter_model.safetensors").exists():
+            raise RuntimeError("could not merge the two creatures: " + (r.stdout or r.stderr or "").strip()[-200:])
+    return str(out)
+
+
+def _word(slug: str, rng) -> str:
+    c = gym._load(slug)
+    limbs = c.get("limbs") or []
+    return rng.choices(limbs, weights=[max(1, l.get("count", 1)) for l in limbs])[0]["trigger"] if limbs else (c.get("tag") or slug)
+
+
+def rebuild(d: Path, sheet: dict) -> list:
+    """The finished pieces of a collection, read back from disk, so that chiselling can go on after the app was closed or the
+    time ran out. Each piece's plan is in the library next to it, and its untouched take is in the collection's folder."""
+    done = []
+    for e in sheet.get("songs", []):
+        path = e.get("path")
+        if not path or not Path(path).exists():
+            continue
+        raw = d / "as made" / Path(path).name
+        meta = Path(path).parent / "meta.json"
+        if not raw.exists() or not meta.exists():
+            continue
+        p = json.loads(meta.read_text()).get("params") or {}
+        song = {"title": e["title"], "creature": p.get("creature") or e.get("creature"), "idea": e.get("idea", ""), "caption": p.get("caption", ""), "lyrics": p.get("lyrics", "[Instrumental]"),
+                "bpm": int(p.get("bpm") or 140), "duration": int(float(p.get("duration") or 150))}
+        e.setdefault("carving", [])
+        at = p.get("creature_at") if p.get("creature_at") and Path(str(p.get("creature_at"))).exists() else ""
+        done.append({"title": e["title"], "m": measure(str(raw)), "n": e["n"], "path": path, "raw": str(raw), "song": song, "sc": None, "strength": float(p.get("creature_strength") or 1.6) / (2 if at else 1), "at": at, "entry": e,
+                     "tried": [(c["from"], c["to"]) for c in e["carving"]][-3:], "misses": 0, "carved": 0})
+    for s_ in done:
+        s_["sc"] = score(s_["m"], [o for o in done if o is not s_])
+    return done
+
+
 def status() -> dict:
     s = {k: v for k, v in _state.items() if k not in ("job", "stop")}
     return s or {"running": False}
@@ -596,7 +660,7 @@ def stop():
             _state["job"]["cancel"] = True
 
 
-def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, direction: str = "", tries: int = 1, name: str = "", hours: float = 0) -> dict:
+def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, direction: str = "", tries: int = 1, name: str = "", hours: float = 0, resume: str = "") -> dict:
     """Make a collection. Every song starts as its own idea and gets up to `tries` goes: made, measured, revised, made again.
     The best go of each is the song; only those reach the library.
     With `hours`, it then keeps chiselling until that time is up: one stretch of one song is made again, and the change is
@@ -606,13 +670,19 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
     e = engines.get("ace_step")
     if not e or not e.installed:
         raise RuntimeError("ACE-Step is not installed")
+    old = None
+    if resume:                                                # carry on chiselling a collection that already exists
+        if not re.fullmatch(r"[a-z0-9]{6,16}", resume) or not (DIR / resume / "collection.json").exists():
+            raise FileNotFoundError("no such collection")
+        old = json.loads((DIR / resume / "collection.json").read_text())
+        creatures, name, direction = old.get("creatures") or creatures, old.get("name") or name, old.get("direction") or direction
     creatures = [c for c in ([creatures] if isinstance(creatures, str) else list(creatures or [])) if c and gym.adapter_path(c)]
     if not creatures:
         raise RuntimeError("pick at least one trained creature")
     count, tries = max(1, min(200, int(count))), max(1, min(8, int(tries)))
-    sid = uuid.uuid4().hex[:10]
+    sid = resume or uuid.uuid4().hex[:10]
     d = DIR / sid
-    d.mkdir(parents=True)
+    d.mkdir(parents=True, exist_ok=True)
     job = {"id": uuid.uuid4().hex[:12], "engine": "night shift", "state": "running", "msg": "starting", "frac": 0, "outputs": [], "info": {}, "error": None, "seed": None, "cancel": False}
     jobs[job["id"]] = job
     tag = (name.strip() or time.strftime("collection %Y-%m-%d"))[:50]
@@ -620,12 +690,15 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
     hours = max(0.0, min(16.0, float(hours or 0)))
     _state.update(running=True, id=sid, creatures=creatures, creature=creatures[0], count=count, tries=tries, made=0, thrown=0, msg="starting…", started=time.time(), songs=[], tag=tag,
                   job=job, stop=False, error=None, per=None, hours=hours, until=time.time() + hours * 3600 if hours else None, phase="making", carved=0, carves=0)
-    sheet = {"id": sid, "name": tag, "creatures": creatures, "direction": direction, "tries": tries, "started": time.strftime("%Y-%m-%d %H:%M:%S"), "songs": []}
+    sheet = old or {"id": sid, "name": tag, "creatures": creatures, "direction": direction, "tries": tries, "started": time.strftime("%Y-%m-%d %H:%M:%S"), "songs": []}
     save = lambda: (d / "collection.json").write_text(json.dumps(sheet, indent=1, ensure_ascii=False))
 
     def make(song, where: Path, strength: float, seed: int):
+        at = hybrid(song["creature"], song["creature2"], d) if song.get("creature2") else ""
         params = gym.bred_boost(coerce(e.spec, {"task": "text2music", "caption": song["caption"], "lyrics": song["lyrics"], "duration": song["duration"], "bpm": song["bpm"],
-                                                "thinking": True, "batch": 1, "seed": seed, "creature": song["creature"], "creature_strength": strength}))
+                                                "thinking": True, "batch": 1, "seed": seed, "creature": song["creature"], "creature_strength": min(4.0, strength * 2) if at else strength}))
+        if at:
+            params["creature_at"] = at
         outs = []
         for ev in e.run(params, where):
             if _state["stop"]:
@@ -646,16 +719,21 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
             pass
         rng, fails = random.Random(), 0
         try:
-            _state["msg"] = f"writing {count} different ideas…"
-            job.update(msg=_state["msg"])
-            plan = ideas(creatures, count, direction, rng)
-            sheet["ideas"] = [{k: x.get(k) for k in ("title", "creature", "idea", "bpm", "duration", "starts", "ends")} for x in plan]
-            save()
             done = []                                              # finished songs: {title, m}
+            if old:
+                _state["msg"] = "reading the collection back…"
+                plan, done = [], rebuild(d, sheet)
+                _state.update(made=len(done), count=len(done), songs=[{"n": s_["n"], "name": s_["title"], "path": s_["path"], "creature": s_["song"]["creature"], "idea": s_["song"]["idea"]} for s_ in done])
+            else:
+                _state["msg"] = f"writing {count} different ideas…"
+                job.update(msg=_state["msg"])
+                plan = ideas(creatures, count, direction, rng)
+                sheet["ideas"] = [{k: x.get(k) for k in ("title", "creature", "creature2", "idea", "bpm", "duration", "starts", "ends")} for x in plan]
+                save()
             for n, song in enumerate(plan, 1):
                 if _state["stop"] or _state["error"]:
                     break
-                entry = {"n": n, "title": song["title"], "creature": song["creature"], "idea": song["idea"], "tries": []}
+                entry = {"n": n, "title": song["title"], "creature": song["creature"], "creature2": song.get("creature2", ""), "idea": song["idea"], "tries": []}
                 best, strength = None, round(rng.uniform(1.45, 1.85), 2)
                 t = 0
                 while t < tries and not _state["stop"]:
@@ -718,22 +796,34 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                                              "params": best["params"], "outputs": [{"path": str(dst), "kind": "audio", "label": best["song"]["title"]}],
                                              "info": {"idea": best["song"]["idea"], "score": best["sc"]}, "seconds": 0})
                     done.append({"title": best["song"]["title"], "m": best["m"], "n": n, "path": str(dst), "raw": str(raw), "song": best["song"], "sc": best["sc"], "strength": strength, "entry": entry,
+                                 "at": best["params"].get("creature_at") or "",
                                  "tried": [], "misses": 0, "carved": 0})
                     first = d / "first takes"                       # the piece before any carving
                     first.mkdir(exist_ok=True)
                     shutil.copy(raw, first / dst.name)
                     entry.update(path=str(dst), score=best["sc"], carving=[])
                     _state["made"] = len(done)
-                    _state["songs"].append({"n": n, "name": best["song"]["title"], "path": str(dst), "creature": best["song"]["creature"], "idea": best["song"]["idea"]})
+                    _state["songs"].append({"n": n, "name": best["song"]["title"], "path": str(dst), "creature": best["song"]["creature"] + (" × " + best["song"]["creature2"] if best["song"].get("creature2") else ""), "idea": best["song"]["idea"]})
                     _state["per"] = round((time.time() - _state["started"]) / len(done), 1)
                 sheet["songs"].append(entry)
                 save()
             # ---- the rest of the night: chisel. One stretch of one song is made again; it is kept only if the song measures as more defined
-            rnd = 0
-            while hours and not _state["stop"] and not _state["error"] and time.time() < _state["until"]:
-                live = [s_ for s_ in done if s_["misses"] < 3 and s_["carved"] < 12]
-                if not live:
-                    break
+            rnd, cycle, idle_cycles = 0, 0, 0
+            while hours and done and not _state["stop"] and not _state["error"] and time.time() < _state["until"]:
+                live = [s_ for s_ in done if s_["misses"] < 3 and s_["carved"] < 6]
+                if not live:                                       # every piece has settled under this way of looking: look again another way, for as long as the night lasts
+                    if _state["carved"] == _state.get("carved_at_cycle", -1):
+                        idle_cycles += 1
+                        if idle_cycles >= len(LENSES):             # a whole turn of every way of looking without one improvement: it is as carved as this can make it
+                            break
+                    else:
+                        idle_cycles = 0
+                    _state["carved_at_cycle"] = _state["carved"]
+                    cycle += 1
+                    for s_ in done:
+                        s_.update(misses=0, carved=0, tried=s_["tried"][-2:])
+                    continue
+                _state["lens"] = LENSES[cycle % len(LENSES)]
                 rnd += 1
                 _state["phase"] = "chiselling"
                 for s_ in sorted(live, key=lambda q: q["sc"]["total"]):             # the least defined first
@@ -744,13 +834,18 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     job.update(msg=base, frac=min(.99, (time.time() - _state["started"]) / max(1, _state["until"] - _state["started"])))
                     where = d / f"s{s_['n']:02d}_t{uuid.uuid4().hex[:6]}"
                     try:
-                        cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng)
+                        others_ = [c_ for c_ in creatures if c_ not in (s_["song"]["creature"], s_["song"].get("creature2"))]
+                        guest = rng.choice(others_) if others_ and rng.random() < .4 else ""      # now and then another creature carves the stretch: the creatures meet inside a piece
+                        cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, LENSES[cycle % len(LENSES)], guest)
                         s_["tried"].append((cp["start"], cp["end"]))
                         _state["msg"] = base + f" · remaking {cp['start']:.0f}–{cp['end']:.0f}s"
                         where.mkdir()
                         params = gym.bred_boost(coerce(e.spec, {"task": "repaint", "src_audio": s_["raw"], "repaint_start": cp["start"], "repaint_end": cp["end"], "caption": cp["caption"],
                                                                 "lyrics": s_["song"]["lyrics"], "duration": round(float(s_["m"].get("secs") or s_["song"]["duration"]), 1), "thinking": False, "batch": 1,
-                                                                "seed": rng.randint(1, 2 ** 31 - 1), "creature": s_["song"]["creature"], "creature_strength": s_["strength"]}))
+                                                                "seed": rng.randint(1, 2 ** 31 - 1), "creature": guest or s_["song"]["creature"],
+                                                                "creature_strength": 1.6 if guest else (min(4.0, s_["strength"] * 2) if s_.get("at") else s_["strength"])}))
+                        if s_.get("at") and not guest:
+                            params["creature_at"] = s_["at"]
                         outs = []
                         for ev in e.run(params, where):
                             if ev[0] != "progress":
@@ -762,7 +857,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         m2 = None if why else measure(outs[0]["path"])
                         sc2 = None if why else score(m2, [o for o in done if o is not s_])
                         better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .002
-                        s_["entry"]["carving"].append({"round": rnd, "from": cp["start"], "to": cp["end"], "why": cp["note"], "kept": better, "broken": why or None,
+                        s_["entry"]["carving"].append({"round": rnd, "from": cp["start"], "to": cp["end"], "why": cp["note"], "by": guest or "", "kept": better, "broken": why or None,
                                                        "before": s_["sc"]["total"], "after": sc2["total"] if sc2 else None, "definition": [s_["sc"]["definition"], sc2["definition"] if sc2 else None]})
                         if better:
                             shutil.copy(outs[0]["path"], s_["raw"])             # the working copy is now the carved one,
@@ -788,7 +883,8 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                 try:
                     _state["msg"] = "joining them into one piece…"
                     label = f"{tag} · the whole passage as one"
-                    run = library.new_run_dir("ace_step", label)
+                    run = Path(sheet["river"]) if sheet.get("river") and Path(sheet["river"]).is_dir() else library.new_run_dir("ace_step", label)
+                    sheet["river"] = str(run)
                     secs = river([s_["path"] for s_ in sorted(done, key=lambda q: q["n"])], str(run / "the whole passage.wav"))
                     library.write_meta(run, {"engine": "ace_step", "engine_name": "night shift", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "label": label, "params": {},
                                              "outputs": [{"path": str(run / "the whole passage.wav"), "kind": "audio", "label": "the whole passage"}], "info": {"seconds": round(secs)}, "seconds": 0})

@@ -278,6 +278,11 @@ def create_app():
         who = body.get("creatures") or [str(body.get("creature") or "")]
         return evo(night.start, engines, jobs, _coerce, who, int(body.get("count") or 10), str(body.get("direction") or ""), int(body.get("tries") or 1), str(body.get("name") or ""), float(body.get("hours") or 0))
 
+    @app.post("/api/night/resume")
+    def night_resume(body: dict):
+        """Carry on chiselling a collection that already exists, for some more hours."""
+        return evo(night.start, engines, jobs, _coerce, [], 0 or 1, "", 1, "", float(body.get("hours") or 8), str(body.get("id") or ""))
+
     @app.post("/api/night/stop")
     def night_stop():
         night.stop()
