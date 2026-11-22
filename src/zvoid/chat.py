@@ -49,6 +49,11 @@ ACTIONS (applied in order):
 - run_all: {{op}}  re-run the whole circuit.
 - clear: {{op}}  remove everything.
 
+LOOPS (two module types that are not engines; add them like any other)
+- "loop": sends a sound round a chain several times. Inputs: "in" (the starting sound), "back" (the end of the chain). Outputs: "each" (the sound of the current pass: wire it into the first module of the chain) and "out" (the result after the last pass). Params: passes (1-16), drift (-0.1..0.1, added per pass to cover_noise_strength of the ACE-Step modules inside; negative wanders further each pass).
+  To build one: connect start -> loop "in"; loop "each" -> first module of the chain; last module of the chain -> loop "back" (connect that one last). Run the loop module, not the modules inside it.
+- "choose": takes up to four sounds (inputs "a","b","c","d") and passes one on (output "out"). Param mode: "ask me" (the run stops until the user picks) or "random". Inside a loop with several variations wired into it, this lets the user breed a sound: each pass makes variations, they pick, the pick goes round again.
+
 RULES
 - Only use engine ids, parameter names, choices and ports listed below. Stay inside min/max.
 - Input ports are the params of type "audio". Output ports are listed per engine; a sample's output port is "out".

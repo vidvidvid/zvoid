@@ -31,10 +31,24 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* ---------- state ---------- */
-const COLORS = { sample: '#e9e7f5', ace_step: '#ff2d9b', musicgen: '#a43cff', stable_audio: '#ff9d2e', demucs: '#2ee6d6', basic_pitch: '#b6ff3c' };
-const GLYPHS = { sample: '◌', ace_step: '◈', musicgen: '◉', stable_audio: '◬', demucs: '⫶', basic_pitch: '⌁' };
+const COLORS = { sample: '#e9e7f5', ace_step: '#ff2d9b', musicgen: '#a43cff', stable_audio: '#ff9d2e', demucs: '#2ee6d6', basic_pitch: '#b6ff3c', loop: '#ffe14a', choose: '#7dffb0' };
+const GLYPHS = { sample: '◌', ace_step: '◈', musicgen: '◉', stable_audio: '◬', demucs: '⫶', basic_pitch: '⌁', loop: '⟲', choose: '◇' };
+/* modules that live in the window, not in an engine. A loop sends a sound round a chain again and again: wire a start into
+   "in", "each" into the first module of the chain, and the end of the chain into "back". A choose stops the run and lets
+   you pick which of several sounds goes on. Together they breed a sound on the canvas, with any recipe. */
+const LOCAL = {
+  loop: { id: 'loop', name: 'loop', tab: 'loop', kind: 'tool', local: true, installed: true, outputs: ['each', 'out'], params: [
+    { name: 'in', type: 'audio', label: 'start', help: 'The sound the first pass begins from.' },
+    { name: 'back', type: 'audio', label: 'back', help: 'Wire the end of the chain in here. What arrives becomes the start of the next pass.' },
+    { name: 'passes', type: 'slider', min: 1, max: 16, step: 1, default: 4, help: 'How many times the sound goes round the chain.' },
+    { name: 'drift', type: 'slider', min: -.1, max: .1, step: .01, default: 0, label: 'keep the source: change per pass', help: 'Added to "keep the source sound" of every ACE-Step module in the loop, each pass. Negative: it wanders further every time. Positive: it settles.' }] },
+  choose: { id: 'choose', name: 'choose', tab: 'choose', kind: 'tool', local: true, installed: true, outputs: ['out'], params: [
+    { name: 'a', type: 'audio' }, { name: 'b', type: 'audio' }, { name: 'c', type: 'audio' }, { name: 'd', type: 'audio' },
+    { name: 'mode', type: 'choice', choices: ['ask me', 'random'], default: 'ask me', help: 'ask me: the run stops here until you pick the one that lives. random: it picks by itself, so a loop can run unattended.' }] },
+};
+const isBack = c => c.to.port === 'back' && S.nodes[c.to.node] && S.nodes[c.to.node].type === 'loop';   // the cable that closes a loop
 const color = t => COLORS[t] || `hsl(${[...t].reduce((a, c) => a + c.charCodeAt(0) * 7, 0) % 360} 90% 65%)`;
-let ENG = {};                                   // engine specs by id
+let ENG = Object.assign({}, LOCAL);              // engine specs by id (and the window's own modules)
 let S = { nodes: {}, cables: [], view: { x: 80, y: 90, k: 1 } };
 const R = {};                                   // runtime status per node: {state, msg, frac, jobId, error}
 let sel = null;                                 // {node} or {cable}
@@ -190,6 +204,7 @@ function outNames(n) {
 }
 function outFile(n, name) {
   if (n.type === 'sample') return n.file ? { path: n.file.path, kind: 'audio', name: n.file.name } : null;
+  if (n.type === 'loop') return (name === 'each' ? n.cur : n.final) || null;
   const res = n.result && n.result.outputs; if (!res || !res.length) return null;
   if (name === 'midi') return res.find(o => o.kind === 'midi') || null;
   const names = outNames(n);
@@ -219,7 +234,15 @@ function _drawCables() {
     const live = R[c.to.node] && R[c.to.node].state === 'running';
     g.setAttribute('class', 'cable' + (sel && sel.cable === c.id ? ' sel' : '') + (live ? ' live' : ''));
     g.style.setProperty('--c', color(S.nodes[c.from.node].type));
-    for (const cls of ['hit', 'core', 'flow']) { const p = document.createElementNS(NS, 'path'); p.setAttribute('class', cls); p.setAttribute('d', curve(a, b)); g.append(p); }
+    let d = curve(a, b);
+    if (isBack(c)) {                              // the cable that closes a loop runs back underneath everything it loops over
+      let low = Math.max(a.y, b.y); const L = S.nodes[c.to.node];
+      for (const i of [L.id, ...loopBody(L).ids]) { const e = nodeEls.get(i), nd = S.nodes[i]; if (e && nd) low = Math.max(low, nd.y + e.offsetHeight); }
+      const yb = low + 46, r = 70;
+      d = `M${a.x},${a.y} C${a.x + r},${a.y} ${a.x + r},${yb} ${a.x - 10},${yb} L${b.x + 10},${yb} C${b.x - r},${yb} ${b.x - r},${b.y} ${b.x},${b.y}`;
+      g.setAttribute('class', g.getAttribute('class') + ' back');
+    }
+    for (const cls of ['hit', 'core', 'flow']) { const p = document.createElementNS(NS, 'path'); p.setAttribute('class', cls); p.setAttribute('d', d); g.append(p); }
     g.firstChild.addEventListener('mousedown', e => { e.stopPropagation(); select({ cable: c.id }); });
     g.firstChild.addEventListener('dblclick', e => { e.stopPropagation(); removeCable(c.id); });
     svg.append(g);
@@ -230,15 +253,25 @@ function _drawCables() {
 function removeCable(id) { const c = S.cables.find(c => c.id === id); S.cables = S.cables.filter(c => c.id !== id); if (c && S.nodes[c.to.node]) renderNode(S.nodes[c.to.node]); drawCables(); save(); }
 function connect(from, to) {
   if (from.node === to.node) return;
-  if (upstream(from.node).has(to.node)) return toast('that would make a loop', true);
+  const closing = to.port === 'back' && S.nodes[to.node] && S.nodes[to.node].type === 'loop';
+  if (!closing && upstream(from.node).has(to.node)) return toast('that would make a loop: use a loop module, and wire the end of the chain into its “back”', true);
+  if (closing && !upstream(from.node).has(to.node)) return toast('“back” takes the end of a chain that starts at this loop’s “each”', true);
   S.cables = S.cables.filter(c => !(c.to.node === to.node && c.to.port === to.port));
   S.cables.push({ id: uid(), from, to });
   renderNode(S.nodes[to.node]); drawCables(); save();
 }
-function upstream(id, seen = new Set()) {
-  for (const c of S.cables) if (c.to.node === id && !seen.has(c.from.node)) { seen.add(c.from.node); upstream(c.from.node, seen); }
+function upstream(id, seen = new Set()) {         // everything a module depends on. The cable that closes a loop is not followed, or it would go round forever
+  for (const c of S.cables) if (c.to.node === id && !isBack(c) && !seen.has(c.from.node)) { seen.add(c.from.node); upstream(c.from.node, seen); }
   return seen;
 }
+function loopBody(L) {                            // the modules a loop goes round: after its "each", before its "back"
+  const back = S.cables.find(c => c.to.node === L.id && c.to.port === 'back'); if (!back) return { back: null, ids: new Set() };
+  const down = new Set(), q = S.cables.filter(c => c.from.node === L.id && c.from.port === 'each').map(c => c.to.node);
+  while (q.length) { const i = q.pop(); if (i === L.id || down.has(i)) continue; down.add(i); for (const c of S.cables) if (c.from.node === i && !isBack(c)) q.push(c.to.node); }
+  const up = upstream(back.from.node); up.add(back.from.node);
+  return { back, ids: new Set([...down].filter(i => up.has(i))) };
+}
+const inALoop = id => Object.values(S.nodes).some(n => n.type === 'loop' && loopBody(n).ids.has(id));
 function startCable(e, nodeId, dir, port, kind) {
   e.stopPropagation(); e.preventDefault();
   let from = dir === 'out' ? { node: nodeId, port } : null;
@@ -323,6 +356,7 @@ function renderNode(n) {
   const title = isS ? 'sample' : spec ? (spec.tab || spec.name) : n.type + ' (missing)';
   const go = !isS && spec && h('button', { class: 'go', title: 'Run this module (shift-click: re-run everything upstream too)' }, r.state === 'running' ? '■' : '▸');
   if (go) go.onclick = ev => { ev.stopPropagation(); (R[n.id] || {}).state === 'running' ? stopNode(n.id) : runNode(n.id, new Map(), ev.shiftKey).catch(() => {}); };
+  const loc = !!(spec && spec.local), extraKeep = [];
   const where = !isS && spec && spec.far && h('button', { class: 'where' + (spec.where === 'pc' ? ' pc' : ''), title: (spec.where === 'pc' ? `Runs on ${spec.far.name}.` : 'Runs on this Mac.') + ` Click to switch. This sets where every ${spec.tab || spec.name} module runs.`, onclick: ev => { ev.stopPropagation(); engineWhere(n.type); } }, spec.where === 'pc' ? 'PC' : 'Mac');
   const head = h('div', { class: 'node-head' }, h('span', { class: 'glyph' }, GLYPHS[n.type] || '✦'), h('span', { class: 'node-title' }, title), where, go,
     h('button', { title: 'Remove', onclick: ev => { ev.stopPropagation(); removeNode(n.id); } }, '×'));
@@ -346,18 +380,24 @@ function renderNode(n) {
     }
     const rest = (spec.params || []).filter(p => p.type !== 'audio');
     for (const p of rest.filter(p => !p.advanced)) body.append(control(n, p));
-    const adv = rest.filter(p => p.advanced);
+    if (n.type === 'loop') { const lb = loopBody(n); body.append(h('div', { class: 'local-note' }, !S.cables.some(k => k.to.node === n.id && k.to.port === 'in') ? 'Wire a starting sound into “start”.' : !lb.back ? 'Wire “each” into the first module of your chain, and the end of the chain into “back”.' : `Goes round ${lb.ids.size} module${lb.ids.size === 1 ? '' : 's'}, ${n.params.passes || 4} time${(n.params.passes || 4) == 1 ? '' : 's'}.`)); }
+    if (n.type === 'choose') {
+      if (n.asking && r.state === 'running') body.append(h('div', { class: 'choose-ask' }, h('b', {}, 'which one lives?'), ...n.asking.map(o => { extraKeep.push(o.f.path);
+        return h('div', { class: 'choose-opt' }, h('span', { class: 'lbl' }, o.port), player(n.id, o.f.path, c), h('button', { class: 'mini hot', title: 'This one goes on', onclick: ev => { ev.stopPropagation(); if (n._pick) n._pick(o); } }, 'pick ▸')); })));
+      else body.append(h('div', { class: 'local-note' }, 'Wire up to four sounds in. When the run gets here it stops and asks you which one goes on.'));
+    }
+    const adv = loc ? [] : rest.filter(p => p.advanced);
     const advBox = h('div', { class: 'adv', hidden: !n.adv });
     for (const p of adv) advBox.append(control(n, p));
     const extra = h('textarea', { rows: 1, spellcheck: 'false', placeholder: '{"any_model_kwarg": 1}' }); extra.value = n.params.extra || ''; extra.oninput = () => { n.params.extra = extra.value; save(); };
     advBox.append(h('label', { class: 'ctl', title: 'Raw JSON passed straight to the model call' }, h('span', { class: 'lbl' }, 'extra kwargs'), extra),
       h('div', { style: 'display:flex;gap:6px' }, h('button', { class: 'mini', onclick: () => api(`/api/engines/${n.type}/unload`, { method: 'POST' }).then(() => toast('model unloaded')) }, 'unload model'),
         spec.notes && h('button', { class: 'mini', onclick: () => openDrawer('tips', n.type) }, 'tips')));
-    body.append(h('button', { class: 'adv-toggle', onclick: () => { n.adv = !n.adv; renderNode(n); save(); } }, (n.adv ? '▾' : '▸') + ' advanced'), advBox);
+    if (!loc) body.append(h('button', { class: 'adv-toggle', onclick: () => { n.adv = !n.adv; renderNode(n); save(); } }, (n.adv ? '▾' : '▸') + ' advanced'), advBox);
   }
   e.append(body);
 
-  const outs = h('div', { class: 'outs' }), keep = [];
+  const outs = h('div', { class: 'outs' }), keep = extraKeep;
   for (const name of outNames(n)) {
     const f = outFile(n, name), midi = name === 'midi' || (f && f.kind === 'midi');
     const port = h('span', { class: 'port out' + (midi ? ' midi' : ''), data: { node: n.id, port: name }, onmousedown: ev => startCable(ev, n.id, 'out', name, midi ? 'midi' : 'audio') });
@@ -371,7 +411,10 @@ function renderNode(n) {
   e.append(outs);
   if (isS && n.file) outs.append(h('button', { class: 'mini', style: 'justify-self:start', onclick: () => pickFile(f => loadSample(n, f)) }, 'replace'));
   if (!isS) {
-    const foot = h('div', { class: 'node-foot' + (r.state === 'error' ? ' err' : '') }, h('span', { class: 'msg' }, r.msg || (n.result ? `done in ${n.result.info && n.result.info.seconds}s` : 'idle')));
+    const foot = h('div', { class: 'node-foot' + (r.state === 'error' ? ' err' : '') }, h('span', { class: 'msg' }, r.msg || (n.result ? (loc ? 'done' : `done in ${n.result.info && n.result.info.seconds}s`) : n.final ? 'done' : 'idle')));
+    const ps = n.passes || [];                    // inside a loop a module has a result from every pass: flick through them
+    if (ps.length > 1) { const cur = n.type === 'loop' ? ps.indexOf(n.final) : ps.indexOf(n.result);
+      foot.append(h('span', { class: 'passes', title: n.type === 'loop' ? 'The result of each pass. Click one to send that pass out.' : 'What this module made in each pass of the loop' }, 'pass', ...ps.map((x, i) => h('button', { class: i === cur ? 'on' : '', onclick: ev => { ev.stopPropagation(); if (n.type === 'loop') n.final = x; else n.result = x; renderNode(n); S.cables.filter(k => k.from.node === n.id && !isBack(k)).forEach(k => renderNode(S.nodes[k.to.node])); save(); } }, String(i + 1))))); }
     if (r.state === 'error') foot.firstChild.onclick = () => { foot.classList.toggle('open'); if (foot.classList.contains('open') && !foot.querySelector('pre')) foot.append(h('pre', {}, r.error || '')); drawCables(); };
     e.append(foot);
   }
@@ -452,11 +495,12 @@ function runNode(id, memo = new Map(), fresh = false) {
     if (n.type === 'sample') { if (!n.file) { toast('a sample module is empty', true); throw new Error('empty sample'); } return; }
     const spec = ENG[n.type]; if (!spec) throw new Error('unknown engine');
     if ((R[id] || {}).state === 'running') return;
+    if (n.type === 'loop') return runLoop(n, memo, fresh);
+    if (n.type === 'choose') return runChoose(n, memo, fresh);
     const ins = S.cables.filter(c => c.to.node === id);
     setStatus(id, { state: 'waiting', msg: ins.length ? 'waiting for upstream…' : 'starting…', frac: null, error: null });
-    try {
-      await Promise.all(ins.map(c => { const u = S.nodes[c.from.node]; return (u.type === 'sample' || fresh || !u.result) ? runNode(u.id, memo, fresh) : null; }));
-    } catch (err) { setStatus(id, { state: 'error', msg: 'upstream failed', error: String(err.message || err) }); renderNode(n); throw err; }
+    try { await feedInputs(ins, memo, fresh); }
+    catch (err) { setStatus(id, { state: 'error', msg: 'upstream failed', error: String(err.message || err) }); renderNode(n); throw err; }
     const params = Object.assign({}, n.params);
     for (const p of audioParams(spec)) {
       const c = ins.find(c => c.to.port === p.name), f = c && outFile(S.nodes[c.from.node], c.from.port);
@@ -486,6 +530,73 @@ function runNode(id, memo = new Map(), fresh = false) {
   memo.set(id, job);
   return job;
 }
+/* what a module needs before it can run. `fresh` is true (make everything upstream again) or the set of modules a loop is going round (make those again, leave the rest) */
+function feedInputs(ins, memo, fresh) {
+  return Promise.all(ins.map(c => { const u = S.nodes[c.from.node];
+    if (u.type === 'loop' && c.from.port === 'each') return loopFeed(u, memo, fresh);
+    const again = fresh === true || (fresh instanceof Set && fresh.has(u.id));
+    return (u.type === 'sample' || again || !outFile(u, c.from.port)) ? runNode(u.id, memo, fresh) : null; }));
+}
+async function loopFeed(L, memo, fresh) {           // a module inside a loop asks for the loop's current sound: in the middle of a pass it is there; otherwise it is the start
+  if (L._running) return;
+  const inC = S.cables.find(c => c.to.node === L.id && c.to.port === 'in'); if (!inC) throw new Error('the loop has no starting sound');
+  await feedInputs([inC], memo, fresh === true ? true : false);
+  if (!L.cur) { L.cur = outFile(S.nodes[inC.from.node], inC.from.port); renderNode(L); }
+}
+async function runLoop(L, memo, fresh) {
+  const id = L.id, fail = (msg, err) => { setStatus(id, { state: 'error', msg, error: err ? String(err.message || err) : '' }); renderNode(L); return new Error(msg); };
+  const { back, ids } = loopBody(L), inC = S.cables.find(c => c.to.node === id && c.to.port === 'in');
+  if (!inC) throw fail('wire a starting sound into “start”');
+  if (!back || !ids.size) throw fail('wire “each” into your chain, and the end of the chain into “back”');
+  setStatus(id, { state: 'waiting', msg: 'waiting for its starting sound…', frac: null, error: null, stop: false });
+  try { await feedInputs([inC], memo, fresh === true ? true : false); } catch (err) { throw fail('upstream failed', err); }
+  const start = outFile(S.nodes[inC.from.node], inC.from.port); if (!start || start.kind !== 'audio') throw fail('its starting sound is not audio');
+  const N = clamp(Math.round(+L.params.passes || 4), 1, 16), drift = +L.params.drift || 0, base = {};
+  ids.forEach(i => { const b = S.nodes[i]; b.passes = []; if (b.type === 'ace_step') base[i] = b.params.cover_noise_strength; });
+  L.passes = []; L.final = null; L._running = true;
+  try {
+    for (let p = 0; p < N; p++) {
+      if (R[id].stop) { const er = new Error('stopped'); er.cancelled = true; throw er; }
+      L.cur = p ? L.passes[p - 1] : start;
+      if (drift) for (const i in base) { S.nodes[i].params.cover_noise_strength = +clamp((+base[i] || 0) + drift * p, 0, .95).toFixed(2); }
+      setStatus(id, { state: 'running', msg: `pass ${p + 1} of ${N}`, frac: p / N }); renderNode(L); drawCables();
+      const m2 = new Map(); m2.set(id, Promise.resolve());
+      await runNode(back.from.node, m2, ids);
+      const f = outFile(S.nodes[back.from.node], back.from.port); if (!f || f.kind !== 'audio') throw new Error('the end of the chain gave no audio');
+      L.passes.push({ path: f.path, kind: 'audio', name: f.name || f.path.split('/').pop(), label: 'pass ' + (p + 1) });
+      ids.forEach(i => { const b = S.nodes[i]; if (b.result) (b.passes = b.passes || []).push(b.result); });
+    }
+    L.final = L.passes[L.passes.length - 1];
+    setStatus(id, { state: 'done', msg: `done · ${N} pass${N === 1 ? '' : 'es'}`, frac: 1 });
+  } catch (err) {
+    if (L.passes.length) L.final = L.passes[L.passes.length - 1];
+    setStatus(id, { state: err.cancelled ? 'idle' : 'error', msg: err.cancelled ? `stopped after ${L.passes.length} pass${L.passes.length === 1 ? '' : 'es'}` : `pass ${L.passes.length + 1} failed`, error: err.cancelled ? '' : String(err.message || err) });
+    throw err;
+  } finally {
+    L._running = false;
+    for (const i in base) if (S.nodes[i]) { if (base[i] === undefined) delete S.nodes[i].params.cover_noise_strength; else S.nodes[i].params.cover_noise_strength = base[i]; }
+    renderNode(L); ids.forEach(i => S.nodes[i] && renderNode(S.nodes[i])); S.cables.filter(c => c.from.node === id && c.from.port === 'out').forEach(c => renderNode(S.nodes[c.to.node])); save(); status('ready_');
+  }
+}
+async function runChoose(n, memo, fresh) {
+  const id = n.id, ins = S.cables.filter(c => c.to.node === id), fail = (msg, err) => { setStatus(id, { state: 'error', msg, error: err ? String(err.message || err) : '' }); renderNode(n); return new Error(msg); };
+  if (!ins.length) throw fail('wire some sounds into it');
+  setStatus(id, { state: 'waiting', msg: 'waiting for the sounds to choose from…', frac: null, error: null, stop: false });
+  try { await feedInputs(ins, memo, fresh); } catch (err) { throw fail('upstream failed', err); }
+  const opts = ins.map(c => ({ port: c.to.port, f: outFile(S.nodes[c.from.node], c.from.port) })).filter(o => o.f && o.f.kind === 'audio').sort((a, b) => a.port.localeCompare(b.port));
+  if (!opts.length) throw fail('none of its inputs is audio');
+  let got;
+  if ((n.params.mode || 'ask me') === 'random' || opts.length === 1) got = opts[Math.floor(Math.random() * opts.length)];
+  else {
+    n.asking = opts; setStatus(id, { state: 'running', msg: 'waiting for you: which one lives?', frac: null }); renderNode(n); toast('choose: pick the sound that goes on');
+    try { got = await new Promise((res, rej) => { n._pick = res; n._rej = rej; }); }
+    catch (err) { n.asking = null; setStatus(id, { state: 'idle', msg: 'stopped' }); renderNode(n); const er = new Error('stopped'); er.cancelled = true; throw er; }
+    n.asking = null;
+  }
+  n.result = { outputs: [{ path: got.f.path, kind: 'audio', name: got.f.name || got.f.path.split('/').pop(), label: 'out' }], info: { picked: got.port } };
+  setStatus(id, { state: 'done', msg: `picked ${got.port}`, frac: 1 });
+  renderNode(n); S.cables.filter(c => c.from.node === id && !isBack(c)).forEach(c => renderNode(S.nodes[c.to.node])); save();
+}
 /* ---------- the run panel: what the circuit is doing, step by step, and what came out ----------
    Every module that takes part in a run gets a line, in the order the sound flows: waiting, running (with its message, a bar,
    and which machine is doing it), done (with how long it took and its waveform, which you can click to listen), or failed
@@ -500,7 +611,7 @@ function runPanelTrack(id) {
   runPanelDraw();
 }
 function runPanelOrder() {                        // upstream first, so the list reads the way the sound flows
-  const ids = RUNP.ids.filter(i => S.nodes[i]), depth = {}, d = i => depth[i] != null ? depth[i] : (depth[i] = 0, depth[i] = 1 + Math.max(-1, ...S.cables.filter(c => c.to.node === i && S.nodes[c.from.node]).map(c => d(c.from.node))));
+  const ids = RUNP.ids.filter(i => S.nodes[i]), depth = {}, d = i => depth[i] != null ? depth[i] : (depth[i] = 0, depth[i] = 1 + Math.max(-1, ...S.cables.filter(c => c.to.node === i && S.nodes[c.from.node] && !isBack(c)).map(c => d(c.from.node))));
   return ids.sort((a, b) => d(a) - d(b) || S.nodes[a].y - S.nodes[b].y);
 }
 function runPanelDraw() {
@@ -510,8 +621,8 @@ function runPanelDraw() {
   if (!busy && !RUNP.done) { RUNP.done = true; RUNP.total = (performance.now() - RUNP.t0) / 1000; }
   if (!busy && RUNP.timer) { clearInterval(RUNP.timer); RUNP.timer = 0; }
   const name = i => { const nd = S.nodes[i], sp = ENG[nd.type] || {}, what = (nd.params && (nd.params.caption || nd.params.prompt)) || '', task = nd.params && nd.params.task && nd.params.task !== 'text2music' ? nd.params.task + ' · ' : ''; return [(sp.tab || sp.name || nd.type).toLowerCase(), task + what]; };
-  const firstAudio = i => ((S.nodes[i].result || {}).outputs || []).find(o => o.kind === 'audio');
-  const sinks = ids.filter(i => stOf(i) === 'done' && !S.cables.some(c => c.from.node === i) && firstAudio(i));
+  const firstAudio = i => S.nodes[i].type === 'loop' ? S.nodes[i].final : ((S.nodes[i].result || {}).outputs || []).find(o => o.kind === 'audio');
+  const sinks = ids.filter(i => stOf(i) === 'done' && !S.cables.some(c => c.from.node === i && !(S.nodes[i].type === 'loop' && c.from.port === 'each')) && firstAudio(i));
   const row = i => { const r = R[i] || {}, st = stOf(i), [eng, what] = name(i), sp = ENG[S.nodes[i].type] || {}, a = st === 'done' ? firstAudio(i) : null, outs = ((S.nodes[i].result || {}).outputs || []).length;
     return h('div', { class: 'runp-row ' + st, onclick: e => { if (e.target.closest('canvas,button')) return; select({ node: i }); const ne = nodeEls.get(i); if (ne) { const b = ne.getBoundingClientRect(); S.view.x += innerWidth / 2 - (b.left + b.width / 2); S.view.y += innerHeight / 2 - (b.top + b.height / 2); applyView(); } } },
       h('i', { class: 'runp-dot' }, st === 'done' ? '✓' : st === 'error' ? '✕' : st === 'running' ? '' : '·'),
@@ -538,10 +649,15 @@ function runPanelDraw() {
       return h('div', { class: 'runp-res' }, h('button', { class: 'runp-play', title: 'Play / stop', onclick: () => libPlay({ path: a.path }) }, '▶'), h('div', {}, h('div', { class: 'runp-name' }, h('b', {}, eng), h('span', {}, what)), libWave({ path: a.path }))); })) : '',
     h('div', { class: 'runp-list' }, ...ids.map(row)));   // '' and not null: a bare null handed to replaceChildren is printed as the word
 }
-function stopNode(id) { const r = R[id]; if (r && r.jobId) api(`/api/jobs/${r.jobId}/cancel`, { method: 'POST' }); }
+function stopNode(id) {
+  const r = R[id], n = S.nodes[id]; if (!r) return;
+  if (n && n.type === 'loop') { r.stop = true; loopBody(n).ids.forEach(stopNode); return; }       // it ends after the step it is on
+  if (n && n.type === 'choose') { if (n._rej) n._rej(new Error('stopped')); return; }
+  if (r.jobId) api(`/api/jobs/${r.jobId}/cancel`, { method: 'POST' });
+}
 async function runAll() {
   const b = $('#run-all'); if (b.classList.contains('busy')) return;
-  const ids = Object.values(S.nodes).filter(n => n.type !== 'sample').map(n => n.id);
+  const ids = Object.values(S.nodes).filter(n => n.type !== 'sample' && !inALoop(n.id)).map(n => n.id);   // what is inside a loop is run by its loop
   if (!ids.length) return toast('add a module first — double-click the void');
   b.classList.add('busy'); const memo = new Map();
   const res = await Promise.allSettled(ids.map(id => runNode(id, memo, true)));
@@ -764,7 +880,7 @@ async function engineWhere(id) {                        // switch an engine betw
   try { const r = await api(`/api/engines/${id}/where`, { json: { where: to } }); toast(`${e.tab || e.name} now runs on ${r.where === 'pc' ? e.far.name : 'this Mac'}`); } catch (x) { return toast(String(x.message || x), true); }
   await refreshEngines(); Object.values(S.nodes).filter(n => n.type === id).forEach(renderNode);
 }
-async function refreshEngines() { try { for (const e of await api('/api/engines')) ENG[e.id] = e; } catch {} }
+async function refreshEngines() { try { for (const e of await api('/api/engines')) ENG[e.id] = e; } catch {} Object.assign(ENG, LOCAL); }
 
 /* ---------- circuits: one open at a time, with a name, like a document ---------- */
 const PATCH = { name: '', sig: '', list: [] };
@@ -779,6 +895,7 @@ function loadPatch(p, name) {
   for (const id of Object.keys(S.nodes)) dropPlayers(id);
   nodeEls.forEach(e => e.remove()); nodeEls.clear(); for (const k of Object.keys(R)) delete R[k];
   S = { nodes: p.nodes || {}, cables: (p.cables || []).filter(c => p.nodes[c.from.node] && p.nodes[c.to.node]), view: p.view || { x: 80, y: 90, k: 1 } };
+  for (const n of Object.values(S.nodes)) { delete n.asking; delete n._running; }   // nothing is mid-run in a circuit that was just opened
   PATCH.name = name != null ? name : (p.name || ''); PATCH.sig = name != null ? patchSig() : (p.sig || '');
   applyView(); Object.values(S.nodes).forEach(renderNode); select(null); save(); patchMark();
 }
