@@ -3,6 +3,7 @@
   "tab": "Stable Audio",
   "tagline": "Stability's diffusion model for **loops, one-shots, drums, textures and FX** up to 47s at 44.1 kHz stereo. Can also make **variations of your audio** (audio-to-audio).",
   "python": "3.11",
+  "vram_mb": 8000,
   "requirements": [
     "torch",
     "diffusers>=0.32",

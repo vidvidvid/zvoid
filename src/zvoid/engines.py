@@ -132,6 +132,15 @@ class Engine:
             raise RuntimeError("The PC is not reachable right now. Check that it is on, or set this engine to run on this Mac (in “engines”).")
         if gym._train.get("state") in ("running", "stopping") and gym._train.get("remote"):
             raise RuntimeError("The PC is busy training a creature. Wait for it to finish, or set this engine to run on this Mac (in “engines”).")
+        others = [e for e in _ALL.values() if e is not self and e._far and e._proc is not None and e._proc.poll() is None]
+        if others:                                            # its graphics card holds one big model comfortably, not two: make room if it is short
+            try:
+                free = int(gym._ps(r, "nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits").strip().splitlines()[0])
+            except Exception:
+                free = 0
+            if free < int(self.spec.get("vram_mb", 9000)):
+                for e in others:
+                    e.stop()
         base = f"{r['dir']}\\app"
         gym._ps(r, f"New-Item -ItemType Directory -Force -Path {base}\\engines, {base}\\in, {base}\\out, {base}\\creatures | Out-Null")
         gym._tar_to(r, self.dir.parent, [self.id, "_common"], f"{base}\\engines")
@@ -139,7 +148,7 @@ class Engine:
         gym._tar_to(r, ENGINES_DIR.parent / "scripts" / "remote", ["run_engine.cmd"], base)
         home = gym._ps(r, "$env:USERPROFILE").strip()
         self._far = dict(r, base=f"{home}\\{r['dir']}\\app", rel=base)
-        self._proc = subprocess.Popen(gym._ssh_base(r) + [f"cmd /c {base}\\run_engine.cmd"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None, text=True, bufsize=1)
+        self._proc = subprocess.Popen(gym._ssh_base(r) + [f"{base}\\run_engine.cmd {self.id}"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None, text=True, bufsize=1)
         self._pump()
 
     def _far_params(self, params: dict, ctx_id: str) -> dict:
@@ -194,7 +203,7 @@ class Engine:
         if self._proc is not None and self._far:
             try:
                 from . import gym
-                gym._ps(self._far, "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'worker.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }", timeout=20)
+                gym._ps(self._far, "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'worker.py' -and $_.CommandLine -match 'engines.%s' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" % self.id, timeout=20)
             except Exception:
                 pass
         if self._proc is not None:
@@ -249,8 +258,12 @@ def _stream(cmd, log):
         raise RuntimeError(f"Command failed ({p.returncode}): {' '.join(cmd)}")
 
 
+_ALL: dict = {}
+
+
 def discover() -> dict[str, Engine]:
-    engines = {}
+    engines = _ALL
+    engines.clear()
     for d in sorted(ENGINES_DIR.iterdir()):
         spec_file = d / "engine.json"
         if d.is_dir() and spec_file.exists() and (d / "engine.py").exists():

@@ -40,7 +40,7 @@ def _pipe(model_id, device):
         _patch_noise()
 
         try:
-            pipe = StableAudioPipeline.from_pretrained(model_id, torch_dtype=torch.float32)
+            pipe = StableAudioPipeline.from_pretrained(model_id, torch_dtype=torch.float16 if str(device).startswith("cuda") else torch.float32)   # half precision on an NVIDIA card: about twice as fast, same sound
         except Exception as e:
             if "gated" in str(e).lower() or "401" in str(e) or "403" in str(e) or "access" in str(e).lower():
                 raise RuntimeError(
@@ -62,7 +62,7 @@ def _init_latents(pipe, wav, strength, steps, gen, device):
     n = min(w.shape[-1], length)
     audio[0, :, :n] = w[: audio.shape[1], :n]
     with torch.no_grad():
-        enc = pipe.vae.encode(audio.to(device)).latent_dist.sample(gen)
+        enc = pipe.vae.encode(audio.to(device, pipe.vae.dtype)).latent_dist.sample(gen)   # in the precision the model was loaded in
 
     sched = pipe.scheduler
     orig = sched.set_timesteps
@@ -79,7 +79,7 @@ def _init_latents(pipe, wav, strength, steps, gen, device):
     sched.set_timesteps = truncated  # pipeline calls it again; keep the truncation
     noise = torch.randn(enc.shape, generator=gen, device="cpu").to(device)
     latents = enc + noise * sigma
-    return latents / sched.init_noise_sigma, (lambda: setattr(sched, "set_timesteps", orig)), sr
+    return (latents / sched.init_noise_sigma).to(pipe.transformer.dtype), (lambda: setattr(sched, "set_timesteps", orig)), sr
 
 
 def run(p, ctx):

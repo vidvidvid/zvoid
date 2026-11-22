@@ -591,7 +591,7 @@ function openDrawer(kind, arg) {
           h('small', {}, 'models: ' + (e.disk || '?')), h('small', {}, e.license || ''),
           e.far && h('label', { style: 'display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)', title: 'Where this engine makes its sound. On the PC it uses that machine\'s graphics card: faster, and this Mac stays free.' }, 'runs on',
             (() => { const sel = h('select', {}, h('option', { value: 'mac' }, 'this Mac'), h('option', { value: 'pc', disabled: !e.far.reachable }, e.far.name + (e.far.reachable ? '' : ' (not reachable)'))); sel.value = e.where || 'mac';
-              sel.onchange = () => api(`/api/engines/${e.id}/where`, { json: { where: sel.value } }).then(r => { toast(r.where === 'pc' ? 'ACE-Step now runs on ' + e.far.name : 'ACE-Step now runs on this Mac'); draw(); }).catch(x => { toast(String(x.message || x), true); draw(); }); return sel; })()),
+              sel.onchange = () => api(`/api/engines/${e.id}/where`, { json: { where: sel.value } }).then(r => { toast(r.where === 'pc' ? e.name + ' now runs on ' + e.far.name : e.name + ' now runs on this Mac'); draw(); }).catch(x => { toast(String(x.message || x), true); draw(); }); return sel; })()),
           h('div', { class: 'acts' }, h('button', { onclick: async () => { await api(`/api/engines/${e.id}/install`, { method: 'POST' }); logs[e.id] = {}; draw(); } }, e.installed ? 'reinstall' : 'install'),
             e.running && h('button', { onclick: () => api(`/api/engines/${e.id}/unload`, { method: 'POST' }).then(draw) }, 'unload')),
           logs[e.id] && h('pre', { data: { log: e.id } }, logs[e.id].log || 'starting…'))));

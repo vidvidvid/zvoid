@@ -120,7 +120,7 @@ def create_app():
         creatures = gym.trained_slugs()
         far = gym.remote_status() if gym.remote() else {}
         return [dict(e.spec, id=e.id, installed=e.installed, running=e.running, where=e.where,
-                     far=({"name": far.get("name"), "reachable": far.get("reachable")} if far.get("configured") and e.id == "ace_step" else None),
+                     far=({"name": far.get("name"), "reachable": far.get("reachable")} if far.get("configured") and e.id in gym.remote_can() else None),
                      params=[dict(q, choices=[""] + creatures) if q.get("type") == "creature" else q for q in e.spec.get("params", [])],
                      env_size=env_size(e) if sizes else None,
                      installing=installs.get(e.id, {}).get("running", False)) for e in engines.values()]
@@ -129,8 +129,8 @@ def create_app():
     def engine_where(eid: str, body: dict):
         """Choose which machine an engine runs on: "mac" or "pc" (needs remote.json and the PC set up, see scripts/remote/)."""
         e, w = engine_or_404(eid), "pc" if body.get("where") == "pc" else "mac"
-        if w == "pc" and (eid != "ace_step" or not gym.remote()):
-            raise HTTPException(400, "Only ACE-Step can run on the PC, and the PC has to be set up first.")
+        if w == "pc" and (not gym.remote() or eid not in gym.remote_can()):
+            raise HTTPException(400, "This engine has not been set up on the PC yet.")
         if w != e.where:
             e.stop()
             e.where = w

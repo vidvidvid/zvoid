@@ -719,6 +719,12 @@ def remote() -> dict | None:
         return None
 
 
+def remote_can() -> list[str]:
+    """The engines that have been set up on the PC (their environment and models are there). remote.json lists them as "can"."""
+    r = remote() or {}
+    return list(r.get("can") or ["ace_step"]) if r else []
+
+
 def _ssh_base(r: dict) -> list[str]:
     return ["ssh", "-i", r["key"], "-o", "BatchMode=yes", "-o", "ConnectTimeout=6", "-o", "LogLevel=ERROR", "-o", "ServerAliveInterval=20", f"{r['user']}@{r['host']}"]
 

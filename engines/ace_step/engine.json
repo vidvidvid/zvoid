@@ -3,6 +3,7 @@
   "tab": "ACE-Step",
   "tagline": "Full tracks from tags (+ optional lyrics) — instrumentals or songs, up to 10 min. Also **cover** (restyle your track), **repaint** (redo a section), and with the base model **lego** (add an instrument to your track) and **complete** (arrange around your idea).",
   "python": "3.11",
+  "vram_mb": 12000,
   "requirements": [
     "ace-step @ git+https://github.com/ace-step/ACE-Step-1.5"
   ],
