@@ -168,7 +168,8 @@ def breed(a: str, b: str, name: str) -> dict:
                  settings=dict(ca.get("settings") or {}, rank=res.get("rank")))
         regroup(c)
         _save(c)
-        return _view(c)
+        lineage(_load(slug))
+        return _view(_load(slug))
     except Exception:
         shutil.rmtree(d, ignore_errors=True)
         raise
@@ -564,6 +565,58 @@ def _cut(src: Path, start: float, secs: float, sr: int = 44100) -> np.ndarray:
     return np.frombuffer(r.stdout[:len(r.stdout) // 8 * 8], dtype="<f4").reshape(-1, 2).copy()
 
 
+def lineage(c: dict) -> bool:
+    """For a bred creature: note which parent each of its tracks came from, and the word that parent learned for it.
+    The child's adapter is its parents' put together, so it answers to their words, not to the new ones it was given.
+    Returns True for a child that has not trained since it was bred (once it trains, it learns its own words)."""
+    if not c.get("parents"):
+        return False
+    fresh = not c.get("history")
+    if all("from" in f for f in c.get("food", [])) and c.get("lineage_v") == 1:
+        return fresh
+    parents = []
+    for name in c["parents"]:
+        try:
+            parents.append(_load(slugify(name)))
+        except Exception:
+            continue
+    where = {}
+    for pc in parents:
+        own = lineage(pc)                                     # a parent that was itself bred passes on its own parents' words
+        trig = {l["id"]: l["trigger"] for l in pc.get("limbs", [])}
+        for pf in pc.get("food", []):
+            src = str((_dir(pc["slug"]) / "food" / pf["name"]).resolve())
+            where[src] = (pc["slug"], pf.get("pwords") if own and pf.get("pwords") else [trig.get(pf.get("limb", 0), ""), pc.get("tag") or pc["slug"]])
+    for f in c.get("food", []):
+        src = str((_dir(c["slug"]) / "food" / f["name"]).resolve())
+        f["from"], f["pwords"] = where.get(src, ("", []))
+    styles = [x.strip() for x in (pc.get("style") or "" for pc in parents) if x.strip()]
+    if styles and (c.get("style") or "").strip() in [""] + styles:
+        c["style"] = ", ".join(dict.fromkeys(styles))[:300]
+    c["lineage_v"] = 1
+    c.setdefault("gain", 2.0)                                 # each parent is in it at half strength: this brings both back to full
+    with _lock:
+        cur = _load(c["slug"])
+        cur.update(food=c["food"], style=c["style"], lineage_v=1, gain=c["gain"])
+        _save(cur)
+    return fresh
+
+
+def bred_boost(params: dict) -> dict:
+    """A bred creature that has not trained since holds each parent at half strength: play it at double."""
+    slug = (params.get("creature") or "").strip()
+    if not slug:
+        return params
+    try:
+        c = _load(slug)
+        if c.get("parents") and not c.get("history"):
+            lineage(c)
+            return dict(params, creature_strength=float(params.get("creature_strength") or 1) * float(c.get("gain") or 2.0))
+    except Exception:
+        pass
+    return params
+
+
 def seed(slug: str, limb=None, dur: float = 14.0, mode: str = "", track: str = "") -> dict:
     """What the creature sings from: a passage of one of its own tracks, different every time. ACE-Step then plays it back
     through what the creature has learned, so a song starts from its food and not from a list of words.
@@ -574,13 +627,14 @@ def seed(slug: str, limb=None, dur: float = 14.0, mode: str = "", track: str = "
     "slice": one unbroken passage, as it is."""
     c = _load(slug)
     d = _dir(slug)
+    child = lineage(c)                                        # bred and not trained since: it sings from both parents at once
     food = [f for f in c["food"] if (d / "food" / f["name"]).exists()]
     mine = [f for f in food if limb is None or f.get("limb", 0) == limb] or food
     if not mine:
         raise RuntimeError("its tracks are gone (were the originals moved?)")
     rng = np.random.default_rng()
     sr, n = 44100, int(dur * 44100)
-    mode = mode if mode in ("groove", "slice") else ("groove" if rng.random() < .7 else "slice")
+    mode = "groove" if child else mode if mode in ("groove", "slice") else ("groove" if rng.random() < .7 else "slice")
 
     def passage(f, secs, tries=4):
         """The loudest of a few random stretches of a track, starting on its strongest hit."""
@@ -645,8 +699,19 @@ def seed(slug: str, limb=None, dur: float = 14.0, mode: str = "", track: str = "
                 moves.append("reversed beat")
             seg = out[r * m:(r + 1) * m]
             seg += x[:len(seg)]
+        other = [g for g in food if g.get("from") and g.get("from") != f.get("from")] if child else []
+        if other:                                                # a child: a loop of the same length from its other parent, laid over the first
+            g = other[int(rng.integers(len(other)))]
+            lp2 = passage(g, unit, tries=3)
+            if lp2 is not None:
+                lp2, gain = edge(lp2.copy()), float(rng.uniform(.65, .9))
+                for i0 in range(0, n, m):
+                    seg = out[i0:i0 + len(lp2)]
+                    seg += lp2[:len(seg)] * gain
+                used.append(g["name"])
+                moves.append("a loop from its other parent")
         others = [g for g in mine if g["name"] != f["name"]]
-        if others and rng.random() < .4:                         # a short figure from a sister track, repeating over it
+        if not other and others and rng.random() < .4:           # a short figure from a sister track, repeating over it
             g = others[int(rng.integers(len(others)))]
             fig = passage(g, beat * float(rng.choice([1, 2, 2, 4])), tries=3)
             if fig is not None:
@@ -671,7 +736,13 @@ def seed(slug: str, limb=None, dur: float = 14.0, mode: str = "", track: str = "
         old.unlink(missing_ok=True)
     path = sd / f"{slug}_seed_{time.strftime('%Y%m%d-%H%M%S')}_{int(rng.integers(1000)):03d}.wav"
     sf.write(path, out, sr, subtype="PCM_16")
-    return {"path": str(path), "tracks": used, "moves": moves, "bpm": round(bpm), "mode": mode}
+    words = []
+    if c.get("parents"):                                      # the words its parents learned for the tracks it is singing from
+        for name in used:
+            for w in next((x.get("pwords") or [] for x in c["food"] if x["name"] == name), []):
+                if w and w not in words:
+                    words.append(w)
+    return {"path": str(path), "tracks": used, "moves": moves, "bpm": round(bpm), "mode": mode, "words": words, "child": child, "style": c.get("style") or ""}
 
 
 def grain(slug: str, name: str) -> Path:

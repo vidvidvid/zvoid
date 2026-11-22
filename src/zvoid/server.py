@@ -176,6 +176,8 @@ def create_app():
         body = await request.json()
         e = engine_or_404(body.get("engine"))
         params = _coerce(e.spec, body.get("params") or {})
+        if e.id == "ace_step":
+            params = gym.bred_boost(params)
         lp = e.spec.get("label_param", "prompt")
         lv = params.get(lp)
         is_file = any(q["name"] == lp and q.get("type") in ("audio", "file") for q in e.spec.get("params", []))
