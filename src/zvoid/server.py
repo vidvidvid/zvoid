@@ -276,7 +276,7 @@ def create_app():
     @app.post("/api/night")
     def night_start(body: dict):
         who = body.get("creatures") or [str(body.get("creature") or "")]
-        return evo(night.start, engines, jobs, _coerce, who, int(body.get("count") or 10), str(body.get("direction") or ""), int(body.get("tries") or 1), str(body.get("name") or ""), float(body.get("hours") or 0))
+        return evo(night.start, engines, jobs, _coerce, who, int(body.get("count") or 10), str(body.get("direction") or ""), int(body.get("tries") or 1), str(body.get("name") or ""), float(body.get("hours") or 0), "", [str(c) for c in (body.get("merges_only") or [])])
 
     @app.post("/api/night/resume")
     def night_resume(body: dict):

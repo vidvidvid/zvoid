@@ -162,7 +162,7 @@ def _sides(slug: str) -> str:
     return f'{slug} — its words: ' + "; ".join(f'"{l["trigger"]}" ({", ".join(l["tags"])}, about {round(l["mean"]["bpm"])} bpm, {l["count"]} tracks)' for l in c.get("limbs", []))
 
 
-def ideas(creatures: list[str], count: int, direction: str, rng) -> list[dict]:
+def ideas(creatures: list[str], count: int, direction: str, rng, merges_only=()) -> list[dict]:
     """The collection's songs, as different from one another as they can be. Claude writes them; if it is not there, they are drawn from the built-in palettes."""
     out = []
     try:
@@ -172,6 +172,7 @@ def ideas(creatures: list[str], count: int, direction: str, rng) -> list[dict]:
                       "Creatures to use, spread evenly over the songs:\n" + "\n".join(_sides(c) for c in creatures) + "\n\n"
                       + ("The creatures are meant to MIX. More than half of the pieces are HYBRIDS, played through several creatures merged into one. Most hybrids are pairs (set creature2). "
                          + ("In every ten pieces, two are merges of THREE creatures (set creature2 and creature3)" + (" and one is a merge of FOUR (creature2, creature3 and creature4)" if len(creatures) > 3 else "") + ". " if len(creatures) > 2 else "")
+                         + (f"These creatures never play alone, they only appear inside merges, as a seasoning: {', '.join(merges_only)}. " if merges_only else "")
                          + "Begin a hybrid's caption with one word of EACH creature in it, in order. Choose combinations whose sounds would do something to each other, use every creature in at least one hybrid, and do not repeat a combination. "
                          'Leave the unused creature fields as "" (all three of them for a piece with a single creature).\n\n' if len(creatures) > 1 else 'Set creature2, creature3 and creature4 to "" for every piece.\n\n') +
                       "They are " + str(n) + " different FEELINGS and " + str(n) + " different ways of making a body move, not variations of one: vary the mechanism (see the list of essences), the tempo across the whole dance range, what rides on the beat (a voice, the low end, a noise, more drums), "
@@ -188,7 +189,8 @@ def ideas(creatures: list[str], count: int, direction: str, rng) -> list[dict]:
         print("[night] Claude could not write the ideas, using the built-in ones: " + str(ex)[:200], flush=True)
     songs = []
     for k in range(count):
-        who = creatures[k % len(creatures)]
+        solo = [c for c in creatures if c not in merges_only] or creatures
+        who = solo[k % len(solo)]
         if k < len(out):
             x = dict(out[k])
             if x.get("creature") not in creatures:
@@ -197,6 +199,12 @@ def ideas(creatures: list[str], count: int, direction: str, rng) -> list[dict]:
             for k in ("creature2", "creature3", "creature4"):
                 if x.get(k) in creatures and x[k] != x["creature"] and x[k] not in mix:
                     mix.append(x[k])
+            if not mix and x["creature"] in merges_only:      # this one only ever appears inside a merge: give it company
+                mix = [rng.choice([c for c in creatures if c != x["creature"] and c not in merges_only] or [c for c in creatures if c != x["creature"]])]
+            if mix and x["creature"] in merges_only and any(c not in merges_only for c in mix):   # and it does not lead: another creature goes first
+                lead = next(c for c in mix if c not in merges_only)
+                mix = [x["creature"]] + [c for c in mix if c != lead]
+                x["creature"] = lead
             x["mix"] = mix
             x["creature2"] = mix[0] if mix else ""
             songs.append(_fit(x, rng))
@@ -671,7 +679,7 @@ def stop():
             _state["job"]["cancel"] = True
 
 
-def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, direction: str = "", tries: int = 1, name: str = "", hours: float = 0, resume: str = "") -> dict:
+def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, direction: str = "", tries: int = 1, name: str = "", hours: float = 0, resume: str = "", merges_only=()) -> dict:
     """Make a collection. Every song starts as its own idea and gets up to `tries` goes: made, measured, revised, made again.
     The best go of each is the song; only those reach the library.
     With `hours`, it then keeps chiselling until that time is up: one stretch of one song is made again, and the change is
@@ -739,7 +747,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
             else:
                 _state["msg"] = f"writing {count} different ideas…"
                 job.update(msg=_state["msg"])
-                plan = ideas(creatures, count, direction, rng)
+                plan = ideas(creatures, count, direction, rng, [c for c in (merges_only or []) if c in creatures])
                 sheet["ideas"] = [{k: x.get(k) for k in ("title", "creature", "mix", "idea", "bpm", "duration", "starts", "ends")} for x in plan]
                 save()
             for n, song in enumerate(plan, 1):
