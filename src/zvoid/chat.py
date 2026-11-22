@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 
 SCHEMA = {
     "type": "object",
@@ -91,12 +92,25 @@ def _catalogue(engines) -> str:
     return "\n".join(out)
 
 
+def _claude():
+    """Where the Claude program is. Started from the Finder or the Dock, an app does not get the terminal's search path,
+    so the usual places are looked in as well: without this the copilot button vanished whenever the app was opened that way."""
+    exe = shutil.which("claude")
+    if exe:
+        return exe
+    home = Path.home()
+    for c in (home / ".local/bin/claude", home / ".claude/local/claude", Path("/opt/homebrew/bin/claude"), Path("/usr/local/bin/claude"), home / ".npm-global/bin/claude", home / ".bun/bin/claude"):
+        if c.exists():
+            return str(c)
+    return None
+
+
 def available() -> bool:
-    return shutil.which("claude") is not None
+    return _claude() is not None
 
 
 def ask(engines, name: str, message: str, patch: dict, session: str | None) -> dict:
-    exe = shutil.which("claude")
+    exe = _claude()
     if not exe:
         raise RuntimeError("The Claude Code CLI isn't installed. Get it from https://claude.com/claude-code, run `claude` once to log in, then try again.")
     prompt = f"CANVAS NOW\n{json.dumps(patch, ensure_ascii=False)}\n\nUSER\n{message}"

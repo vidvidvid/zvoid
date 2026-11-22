@@ -1,5 +1,5 @@
 #!/bin/bash
 # Opens Zvoid in its own window. Logs go to ~/Library/Logs/Zvoid.log
 HERE="$(cd "$(dirname "$0")/../../.." && pwd)"
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # opened from the Finder, an app does not get the terminal's search path
 cd "$HERE" && exec uv run --quiet zvoid >> "$HOME/Library/Logs/Zvoid.log" 2>&1
