@@ -65,8 +65,8 @@ function evoNightBox(trained, s) {
       h('div', { class: 'acts' }, h('button', { class: 'hot', disabled: !trained.length, title: 'Both machines are kept awake while it runs. Leave Zvoid open.', onclick: async () => {
         if (!EVO.nightWho.size) return toast('tick at least one creature', true);
         try { EVO.night = await api('/api/night', { json: { creatures: [...EVO.nightWho], count: +cnt.value || 20, tries: +tr.value || 2, hours: +hrs.value || 0, direction: dir.value } }); evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'make the collection ▸')),
-      N.msg && N.finished ? h('small', { title: N.msg }, N.msg) : null,
-      N.id ? h('div', { class: 'acts' }, h('button', { onclick: () => { EVO.showNight = true; evoDraw(); } }, 'show last night’s pieces')) : null);
+      N.msg && N.finished ? h('small', { title: N.msg }, N.msg) : '',
+      N.id ? h('div', { class: 'acts' }, h('button', { onclick: () => { EVO.showNight = true; evoDraw(); } }, 'show last night’s pieces')) : '');
   }
   return box;
 }
@@ -86,6 +86,7 @@ async function evoSheet() {                              // the night's own note
     const sh = await r.json(), nm = await fetch(fileUrl(`${EVO.outRoot}/_night/${EVO.night.id}/names.json`), { cache: 'no-store' }).then(q => q.ok ? q.json() : {}).catch(() => ({}));
     (sh.ideas || []).forEach((x, i) => { x.name = nm[i + 1] || x.title; });                       // names given afterwards; the night itself keeps using its own
     EVO.sheet = sh;
+    EVO.marks = await fetch('/api/night/marks?id=' + EVO.night.id, { cache: 'no-store' }).then(q => q.ok ? q.json() : null).catch(() => null);   // null until the app has been restarted with the marks in it
   } catch (e) {}
 }
 /* The night as a small vivarium. The creatures float in a ring in the dark, each a glowing body of its own species and
@@ -363,6 +364,10 @@ function evoNightMap(N0, sh0) {
   requestAnimationFrame(frame);
   return box;
 }
+/* Your verdict on a piece: more like this, or not this. Nothing can measure taste, so this is what the next night steers by. */
+async function evoMarkPiece(n, v) {
+  try { const N = EVO.night || {}, cur = (EVO.marks || {})[n] || 0; EVO.marks = await api('/api/night/mark', { json: { id: N.id, n, mark: cur === v ? 0 : v } }); evoDraw(); } catch (e) { toast(e.message, true); }
+}
 function evoNightView() {                               // tonight, piece by piece: who plays it, what it is, and where it has got to
   const N = EVO.night || {}, sh = EVO.sheet && EVO.sheet.id === N.id ? EVO.sheet : null, ideas = (sh && sh.ideas) || [], done = {}, cur = /song (\d+) of/.exec(N.msg || '');
   ((sh && sh.songs) || []).forEach(e => { done[e.n] = e; });
@@ -379,7 +384,10 @@ function evoNightView() {                               // tonight, piece by pie
         path ? h('button', { class: 'evo-pp', data: { path }, title: 'Play / stop', onclick: () => libPlay({ path, kind: 'audio', size: 5e7 }) }, LIB.playing === path ? '■' : '▶') : h('span', { class: 'night-dot' }, making ? '◌' : '·'),
         h('div', { class: 'night-what' }, h('b', {}, x.name || x.title, h('em', {}, `${x.bpm} bpm`)), h('small', { class: 'night-who' }, who(x)), h('small', { title: x.idea }, x.idea)),
         path ? libWave({ path, kind: 'audio', size: 5e7 }) : h('span', { class: 'night-wait' }, making ? 'being made now…' : 'waiting'),
-        h('small', { class: 'night-carve', title: tried ? (e.carving || []).map(c => `${c.kept ? 'kept' : 'not kept'}: ${c.from}–${c.to}s${c.by ? ' by ' + c.by : ''} · ${c.why || ''}`).join('\n') : '' }, tried ? `${kept} of ${tried} carvings kept` : '')); })));
+        h('small', { class: 'night-carve', title: tried ? (e.carving || []).map(c => `${c.kept ? 'kept' : 'not kept'}: ${c.from}–${c.to}s${c.by ? ' by ' + c.by : ''} · ${c.why || ''}`).join('\n') : '' }, tried ? `${kept} of ${tried} carvings kept` : ''),
+        path && EVO.marks ? h('span', { class: 'night-marks' },
+          h('button', { class: 'night-mark' + (EVO.marks[n] === 1 ? ' on' : ''), title: 'More like this: the next night moves toward it', onclick: () => evoMarkPiece(n, 1) }, 'more'),
+          h('button', { class: 'night-mark away' + (EVO.marks[n] === -1 ? ' on' : ''), title: 'Not this: the next night stays away from it', onclick: () => evoMarkPiece(n, -1) }, 'less')) : h('span', {})); })));
 }
 function evoMark() { document.querySelectorAll('#evo .evo-pp').forEach(b => { const on = b.dataset.path === LIB.playing; b.textContent = on ? '■' : '▶'; const box = b.closest('.evo-card, .evo-step, .night-row'); if (box) box.classList.toggle('playing', on); }); }
 

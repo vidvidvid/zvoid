@@ -283,6 +283,15 @@ def create_app():
         """Carry on chiselling a collection that already exists, for some more hours."""
         return evo(night.start, engines, jobs, _coerce, [], 0 or 1, "", 1, "", float(body.get("hours") or 8), str(body.get("id") or ""))
 
+    @app.get("/api/night/marks")
+    def night_marks(id: str = ""):
+        """What the artist marked in a collection: piece number -> 1 (more like this) or -1 (not this)."""
+        return night.marks_of(id)
+
+    @app.post("/api/night/mark")
+    def night_mark(body: dict):
+        return evo(night.mark, str(body.get("id") or ""), int(body.get("n") or 0), int(body.get("mark") or 0))
+
     @app.post("/api/night/stop")
     def night_stop():
         night.stop()

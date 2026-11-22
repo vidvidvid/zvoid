@@ -162,6 +162,74 @@ WHAT THE ARTIST HAS SAID ABOUT PIECES ALREADY MADE (steer by this):
 Every sound has an edge, as clear and sharp as a knife, and it is let go: released, never choked."""
 
 
+MARKS = DIR / "marks.json"     # what the artist marked after listening: "<collection>:<number>" -> the piece and +1 (more like this) or -1 (not this)
+
+
+def marks() -> dict:
+    try:
+        return dict(json.loads(MARKS.read_text()))
+    except Exception:
+        return {}
+
+
+def marks_of(sid: str) -> dict:
+    return {k.split(":")[1]: v.get("mark", 0) for k, v in marks().items() if k.startswith(sid + ":")}
+
+
+def mark(sid: str, n: int, v: int) -> dict:
+    """The artist's verdict on a finished piece: more like this (1), not this (-1), or no verdict (0). It is kept with
+    enough of the piece (who played it, its idea, what it was made from) for a later night to steer by."""
+    if not re.fullmatch(r"[a-z0-9]{6,16}", sid) or not (DIR / sid / "collection.json").exists():
+        raise FileNotFoundError("no such collection")
+    sheet, every, key = json.loads((DIR / sid / "collection.json").read_text()), marks(), f"{sid}:{int(n)}"
+    if not v:
+        every.pop(key, None)
+    else:
+        e = next((x for x in sheet.get("songs", []) if x.get("n") == int(n)), None)
+        if not e:
+            raise FileNotFoundError("that piece is not finished")
+        plan = (sheet.get("ideas") or [])[int(n) - 1] if len(sheet.get("ideas") or []) >= int(n) else {}
+        cap, names = "", {}
+        try:
+            cap = str((json.loads((Path(e["path"]).parent / "meta.json").read_text()).get("params") or {}).get("caption") or "")
+        except Exception:
+            pass
+        try:
+            names = json.loads((DIR / sid / "names.json").read_text())
+        except Exception:
+            pass
+        every[key] = {"mark": 1 if v > 0 else -1, "title": names.get(str(n)) or e.get("title", ""), "creatures": [c for c in [e.get("creature"), *(e.get("mix") or [])] if c], "idea": e.get("idea", ""),
+                      "bpm": plan.get("bpm"), "caption": cap[:400], "path": e.get("path"), "when": time.strftime("%Y-%m-%d %H:%M")}
+    MARKS.parent.mkdir(parents=True, exist_ok=True)
+    MARKS.write_text(json.dumps(every, indent=1, ensure_ascii=False))
+    return marks_of(sid)
+
+
+def taste() -> str:
+    """What the artist's ears have said so far, as a part of the brief for new plans: the pieces marked "more like this"
+    (a star in the library on a night's piece counts too) and the ones marked "not this"."""
+    every = marks()
+    try:
+        starred = library._stars()
+        for f in DIR.glob("*/collection.json"):
+            sh = json.loads(f.read_text())
+            for e in sh.get("songs", []):
+                key = f"{sh.get('id') or f.parent.name}:{e.get('n')}"
+                if e.get("path") in starred and key not in every:
+                    every[key] = {"mark": 1, "title": e.get("title", ""), "creatures": [c for c in [e.get("creature"), *(e.get("mix") or [])] if c], "idea": e.get("idea", ""), "bpm": None, "caption": ""}
+    except Exception:
+        pass
+    liked, away = [v for v in every.values() if v.get("mark", 0) > 0], [v for v in every.values() if v.get("mark", 0) < 0]
+    if not liked and not away:
+        return ""
+    line = lambda v: (f'- "{v.get("title", "")}" ({" × ".join(v.get("creatures") or [])}' + (f', {v["bpm"]} bpm' if v.get("bpm") else "") + f'): {v.get("idea", "")}'
+                      + (f' [made from: {v["caption"][:220]}]' if v.get("caption") else ""))
+    return ("WHAT THE ARTIST MARKED AFTER LISTENING (their ears are the only judge of taste; this outweighs anything that can be measured):\n"
+            + ("More like these. Work out what they have in common (which creatures and merges, what carries them, how they move, what their sounds are made of) and go further in that direction, without repeating any of them:\n"
+               + "\n".join(line(v) for v in liked[-12:]) + "\n" if liked else "")
+            + ("Not these. Work out what they share and stay away from it:\n" + "\n".join(line(v) for v in away[-12:]) + "\n" if away else "") + "\n")
+
+
 def _sides(slug: str) -> str:
     c = gym._load(slug)
     return f'{slug} — its words: ' + "; ".join(f'"{l["trigger"]}" ({", ".join(l["tags"])}, about {round(l["mean"]["bpm"])} bpm, {l["count"]} tracks)' for l in c.get("limbs", []))
@@ -185,6 +253,7 @@ def ideas(creatures: list[str], count: int, direction: str, rng, merges_only=())
                       "The whole collection is ONE passage that never ends: each piece begins in the state the one before it ended in. "
                       + (f'The first of these must start in "{out[-1].get("ends", "depth")}", where the last one stopped.\n' if out else "The first may start anywhere.\n")
                       + ("Already planned, so do not repeat their feelings:\n" + "\n".join(f'- {x["title"]}: {x["idea"]} ({x["bpm"]} bpm, {x["creature"]}, {x.get("starts")} → {x.get("ends")})' for x in out) + "\n" if out else "")
+                      + taste()
                       + 'For each: a short title (titles of the rave music of the future: invented words at the core, and around them, freely, numbers, symbols, a kanji or a few Arabic letters whose meaning fits, a file name, a time of day, a rare English or Slovenian word; give every title a different shape and sound, never twenty two-word names with the same hard consonants), creature, creature2, creature3, creature4, "idea" (one plain sentence: the feeling, and what makes this one different), "starts" and "ends" (peak, depth or void), caption, lyrics, bpm, duration.')
             got = chat.think(HOUSE, prompt, IDEAS_SCHEMA, 420).get("songs") or []
             if not got:
@@ -646,13 +715,21 @@ LENSES = ("release: the stretch that sounds most choked (muffled, squeezed, boxe
           "the passage: a change of state that is too orderly, or one that should melt and instead jolts")
 
 
-def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "") -> dict:
+def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "", history=None, learned=None) -> dict:
     """Which stretch of the song to carve next, and into what. Claude reads the song as a timeline; without it, the stretch
     with the fewest drum hits that has not been tried is given drums."""
     secs, hits, lev = float(m.get("secs") or song["duration"]), m.get("hits") or [], m.get("sections") or []
     words = _word(guest, rng) if guest else song["caption"].split(",")[0].strip()
     try:
         line = lambda arr: " ".join(f"{int(i * 5)}s:{v}" for i, v in enumerate(arr))
+        told = lambda c: f"{c['from']:.0f}-{c['to']:.0f}s {'KEPT' if c.get('kept') else 'thrown away'}" + (f" (by {c['by']})" if c.get("by") else "") + f": {str(c.get('why') or '')[:170]}"
+        hist = ""
+        if history:                                            # what carving has already done to this piece, so it builds on what worked
+            hist += "- carvings already tried on THIS piece (kept = the piece measured better afterwards):\n" + "\n".join("  · " + told(c) for c in history[-8:]) + "\n"
+        if learned:
+            hist += "- carvings on OTHER pieces tonight:\n" + "\n".join(f'  · "{t}" ' + told(c) for t, c in learned) + "\n"
+        if hist:
+            hist += "  Learn from these: make the KIND of change that was kept, and do not repeat the kind that was thrown away.\n"
         prompt = (f'Song: "{song["title"]}" ({secs:.0f} seconds) for the creature {song["creature"]}. Its idea: {song["idea"]}\n\nCAPTION\n{song["caption"]}\n\nLYRICS (the plan it was made from)\n{song["lyrics"]}\n\n'
                   "It exists as audio now. Nobody has heard it; this is what can be measured:\n"
                   f"- level in 5-second steps (dB below its loudest): {line(lev)}\n- drum hits in 5-second steps (0 none .. 1 hard): {line(hits)}\n"
@@ -660,6 +737,7 @@ def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: st
                   f'- a constant tone under everything: {m.get("hum")} dB at {m.get("hum_hz")} Hz (over 12 is a hum the artist hears); its quietest second is {m.get("floor")} dB below its loudest (-12 means it never lets go)\n'
                   f'- how defined its structure measures: {m.get("definition")} of 1. Drums overall: {m["attack"]} (the artist wants 0.2 or more). In the 5-second timeline, a stretch with real drums reads about 0.2 to 0.4, and under 0.1 means none.\n'
                   f'- how released it is: {m.get("air")} percent of its energy is above 6 kHz (0.5 is choked and muffled, 2 or more is open) and its stereo width is {m.get("width")} (0.25 is nearly mono, 0.4 is open)\n'
+                  + hist
                   + ("- stretches already reworked, do not pick these again: " + ", ".join(f"{a:.0f}-{b:.0f}s" for a, b in tried) + "\n" if tried else "")
                   + (f"\nThis time look especially at {lens}." if lens else "")
                   + (f"\nFor this stretch ANOTHER CREATURE takes over: {_sides(guest)}. Write the stretch for what that creature would do with it, so the piece becomes a meeting of the two." if guest else "")
@@ -924,7 +1002,9 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     try:
                         others_ = [c_ for c_ in creatures if c_ not in (s_["song"]["creature"], *(s_["song"].get("mix") or []), s_["song"].get("creature2"))]
                         guest = rng.choice(others_) if others_ and rng.random() < .4 else ""      # now and then another creature carves the stretch: the creatures meet inside a piece
-                        cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, LENSES[cycle % len(LENSES)], guest)
+                        seen = [(o["title"], c) for o in done if o is not s_ for c in o["entry"].get("carving", [])]
+                        cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, LENSES[cycle % len(LENSES)], guest, s_["entry"].get("carving", []),
+                                         [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:])
                         s_["tried"].append((cp["start"], cp["end"]))
                         _state["msg"] = base + f" · remaking {cp['start']:.0f}–{cp['end']:.0f}s"
                         where.mkdir()
@@ -945,7 +1025,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         m2 = None if why else measure(outs[0]["path"])
                         sc2 = None if why else score(m2, [o for o in done if o is not s_])
                         better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .002
-                        s_["entry"]["carving"].append({"round": rnd, "from": cp["start"], "to": cp["end"], "why": cp["note"], "by": guest or "", "kept": better, "broken": why or None,
+                        s_["entry"]["carving"].append({"round": rnd, "lens": LENSES[cycle % len(LENSES)].split(":")[0], "from": cp["start"], "to": cp["end"], "why": cp["note"], "by": guest or "", "kept": better, "broken": why or None,
                                                        "before": s_["sc"]["total"], "after": sc2["total"] if sc2 else None, "definition": [s_["sc"]["definition"], sc2["definition"] if sc2 else None]})
                         if better:
                             shutil.copy(outs[0]["path"], s_["raw"])             # the working copy is now the carved one,
