@@ -123,6 +123,8 @@ WHAT THESE PIECES ARE (the artist's own words, follow them over any habit of son
 "The songs should mimic emotions. They are raw and real, but it is really difficult to understand and comprehend their structure and source. They are infinite, never ending, morphing into one another. The only constant emotions are peaks and the bottomless depths, where everything is the same for an infinitely short or long period of time. It is bouncing us between these extremes. And there is also emptiness, the void, which we sometimes can notice and sometimes it just absorbs us."
 And: "I want something that is danceable, where people can lose themselves to it. Basically various types of rave, punk, electro."
 And, to be clear about that: "It should not limit itself to matching these genres too much. It should take the danceability and other essences from them. We don't want to make drum and bass. We want to understand what makes that music invoke the specific mood in a person that makes them want to dance."
+And, after hearing the first pieces: "There is a recurring feeling of the sound choking. We should go the opposite way: the sound should in general feel released. Chiselling should mean the same: making the sound more clear, releasing it, the way a statue is released from the block of stone."
+So the sound itself is OPEN: a clear bright top end, space around every hit, each sound allowed to ring out and be let go. Never squeezed, muffled, boxed in or pressed flat. Even the heaviest depth breathes.
 So every piece must make a body move, but it must NOT be an example of any existing genre. Do not imitate rave, punk, electro or drum and bass. Take what works in them and build something that has no name:
 - from rave: a pulse that never lets go; long stretches where nothing changes and that is the point; tension wound up and then let off all at once.
 - from drum and bass and jungle: speed on top and weight underneath at the same time (fast broken drums over a low end moving at half their pace); a beat that rolls forward and keeps tripping without ever falling.
@@ -144,8 +146,9 @@ HOW A PLAN IS WRITTEN:
 - lyrics: the passage, as section tags in square brackets naming the state and what happens, e.g. "[peak - everything, full stomp, no change]", "[depth - sunk, slow sub hits, growled breath]", "[morph - the drums melt into the voices]", "[thrown - from the bottom straight to the top]", and only where it is earned "[void - nothing, one dry click]". Under each tag, 0-4 lines of chant syllables or invented words. No real words in any language. 5-9 sections of very uneven length.
 - duration: 120 to 190 seconds. bpm: 118 to 190 (dance tempos; a heavy half-time piece may be written at 85-100 only if its kick still makes people move).
 
-THREE THINGS THE ARTIST HEARD GO WRONG, AND HOW TO AVOID THEM:
-- A constant hum under the whole piece. A tag is applied to the WHOLE piece, not to one section, so any tag that names something sustained lays a bed under everything, and then there is no void and no depth, only a wash: never write drone, hum, pad, sustained, swell, wash, ambience, room, echo, reverb, wide, hollow pipe, held note. The low end must be struck, not held: "sub hits that stop dead", "short sub thuds". Always include tags for dryness and edges: "dry", "close", "tight", "punchy". The depth is heaviness, not a hum.
+FOUR THINGS THE ARTIST HEARD GO WRONG, AND HOW TO AVOID THEM:
+- A constant hum under the whole piece. A tag is applied to the WHOLE piece, not to one section, so any tag that names something sustained lays a bed under everything, and then there is no void and no depth, only a wash: never write drone, hum, pad, sustained, swell, wash, ambience, echo, reverb, hollow pipe, held note. The low end must be struck, not held: "sub hits that stop dead", "short sub thuds". Always include tags for edges AND for openness: "punchy", "clear", "open", "bright crisp top end", "wide", "every hit rings out". The depth is heaviness, not a hum.
+- The sound choking. Tags that close a sound in are applied to the whole piece too: never write dry, close, tight, muffled, dark, dull, compressed, crushed, squashed, buried, claustrophobic, boxed, lo-fi, underwater, distant. Weight comes from what is struck, not from pressing everything together.
 - Smooth, soulful singing appearing from nowhere. The model sings anything voice-like in its default pop style unless told otherwise. Describe every voice as shouted, barked, chanted in unison, whispered, growled, rasped or throat-sung, and add "no melody in the voices, spoken rhythm". Never write wailing, singing, sung, humming, choir, soulful, high voice, female voice, crooning.
 - In the lyrics, the same: syllables start with hard consonants and are short (ka, tu, gra, zok, thum, tek, bra). No long open vowels and no vowel runs (not ee-yah, ah-ee-yo, oh-oh, yeah), and no trailing dots that stretch a sound.
 Drums come and go: present and hard at the peaks, a few heavy ones in the depths.
@@ -154,7 +157,7 @@ WHAT THE ARTIST HAS SAID ABOUT PIECES ALREADY MADE (steer by this):
 - "A great direction, but maybe faster": a piece about numbness and emptiness at 58 bpm. Emptiness is welcome; slowness is not. Keep things moving.
 - "Too undefined, a moving mass of sound": a slow piece carried by a long low note. Nice sounds, but nothing in it had edges. Avoid anything that is one continuous mass: every piece needs separate, countable events (hits, stabs, shouts) that you could clap along to.
 - "Interesting": bright metal snaps and rubbery noise at a relentless peak.
-Every sound has an edge, as clear and sharp as a knife."""
+Every sound has an edge, as clear and sharp as a knife, and it is let go: released, never choked."""
 
 
 def _sides(slug: str) -> str:
@@ -231,12 +234,39 @@ def _fit(x: dict, rng) -> dict:
         cap = (rng.choices(limbs, weights=[max(1, l.get("count", 1)) for l in limbs])[0]["trigger"] if limbs else words[0]) + ", " + cap
     if "danceable" not in cap:
         cap += ", danceable, driving kick"
+    if "open" not in cap:
+        cap += ", clear open sound, bright crisp top end, wide"
     x.update(caption=cap[:900], bpm=int(max(84, min(190, int(x.get("bpm") or 140)))), duration=int(max(100, min(200, int(x.get("duration") or 150)))),
              title=" ".join(str(x.get("title") or "untitled").split())[:40], lyrics=str(x.get("lyrics") or "[Instrumental]")[:3000])
     return x
 
 
+def _open(path: str) -> dict:
+    """How released a sound is, in two numbers: "air", the share of its energy above 6 kHz in percent (the pieces the artist
+    called choked have about 0.5, the open ones 2 or more, like the records the creatures were raised on), and "width",
+    how much of it lives at the sides (0.25 is nearly mono, 0.4 to 0.5 is a record)."""
+    import numpy as np
+    import soundfile as sf
+    try:
+        x, sr = sf.read(path, always_2d=True, dtype="float32")
+        m = x.mean(1)
+        n = len(m) // 4096 * 4096
+        S = (np.abs(np.fft.rfft(m[:n].reshape(-1, 4096) * np.hanning(4096), axis=1)) ** 2).mean(0)
+        f = np.fft.rfftfreq(4096, 1 / sr)
+        rms = float(np.sqrt((m ** 2).mean())) + 1e-9
+        side = (x[:, 0] - x[:, 1]) / 2 if x.shape[1] > 1 else m * 0
+        return {"air": round(float(S[f > 6000].sum() / (S.sum() + 1e-12) * 100), 2), "width": round(float(np.sqrt((side ** 2).mean())) / rms, 2)}
+    except Exception:
+        return {"air": 1.0, "width": .35}
+
+
 def measure(path: str) -> dict:
+    m = _measure(path)
+    m.update(_open(path))
+    return m
+
+
+def _measure(path: str) -> dict:
     """What can be told about a result without hearing it. Besides the track-wide numbers: a timeline in 5-second steps
     (level and drum hits), and how DEFINED its structure is: whether it falls into distinct blocks of sound that hold
     together, follow one another, and come back (a verse, a chorus, the chorus again) or is one undivided wash."""
@@ -455,10 +485,42 @@ def extremes(path: str, target: float = 30.0, most: float = 3.5) -> dict:
     if had < 1.5:
         return {"changed": False, "range_before": round(had, 1)}        # one level throughout: there is nothing to stretch
     ratio = float(min(most, max(1.0, target / had)))
-    gdb = np.minimum(0, (slow - hi) * (ratio - 1))                      # at its peaks nothing changes; the further below, the further down
+    gdb = np.maximum(-6.0, np.minimum(0, (slow - hi) * (ratio - 1)))    # at its peaks nothing changes; lower passages sink a little, never far: pressed down hard, a sound chokes
     gain = np.interp(np.arange(len(x)), np.arange(k) * hop + hop // 2, 10 ** (gdb / 20)).astype("float32")
     sf.write(path, x * gain[:, None], sr, subtype=sf.info(path).subtype)
     return {"changed": True, "range_before": round(had, 1), "range_after": round(had * ratio, 1), "ratio": round(ratio, 2)}
+
+
+def release(path: str, air: float = 2.2, width: float = .42) -> dict:
+    """Let a closed sound out. If a piece has much less top end than a record, its highs are lifted (a smooth shelf from
+    about 3 kHz, never more than 6 dB); if it is nearly mono, what it has at the sides is brought up above the bass (never
+    more than 1.6 times). A piece that is already open is left alone. Its loudest moment stays as loud as it was."""
+    import numpy as np
+    import soundfile as sf
+    x, sr = sf.read(path, always_2d=True, dtype="float32")
+    before = _open(path)
+    lift = float(min(6.0, max(0.0, 10 * np.log10(air / max(before["air"], .05)) * .7)))
+    wide = float(min(1.6, max(1.0, width / max(before["width"], .05)))) if x.shape[1] > 1 else 1.0
+    if lift < .5 and wide < 1.05:
+        return {"changed": False, **before}
+    peak = float(np.abs(x).max()) + 1e-9
+    f = np.fft.rfftfreq(len(x), 1 / sr)
+
+    def step(lo, hi):
+        u = np.clip((np.log(np.maximum(f, 1.0)) - np.log(lo)) / (np.log(hi) - np.log(lo)), 0, 1)
+        return u * u * (3 - 2 * u)
+    shelf = 1 + (10 ** (lift / 20) - 1) * step(2500.0, 8000.0)
+    if x.shape[1] > 1:
+        M, S = np.fft.rfft((x[:, 0] + x[:, 1]) / 2), np.fft.rfft((x[:, 0] - x[:, 1]) / 2)
+        M, S = M * shelf, S * shelf * (1 + (wide - 1) * step(150.0, 400.0))
+        mid, side = np.fft.irfft(M, len(x)), np.fft.irfft(S, len(x))
+        y = np.stack([mid + side, mid - side], 1).astype("float32")
+    else:
+        y = np.fft.irfft(np.fft.rfft(x[:, 0]) * shelf, len(x)).astype("float32")[:, None]
+    y *= peak / (float(np.abs(y).max()) + 1e-9)
+    sf.write(path, y, sr, subtype=sf.info(path).subtype)
+    after = _open(path)
+    return {"changed": True, "lift_db": round(lift, 1), "widened": round(wide, 2), "air": [before["air"], after["air"]], "width": [before["width"], after["width"]]}
 
 
 def finish(raw: str, dst: str, bpm: float) -> dict:
@@ -467,7 +529,7 @@ def finish(raw: str, dst: str, bpm: float) -> dict:
     The raw take is not changed."""
     shutil.copy(raw, dst)
     info = {}
-    for name, fn in (("buzz", lambda: polish(dst)), ("extremes", lambda: extremes(dst, 15.0, 1.8))):   # no silences are cut in: the artist does not want them forced
+    for name, fn in (("buzz", lambda: polish(dst)), ("extremes", lambda: extremes(dst, 12.0, 1.4)), ("release", lambda: release(dst))):   # no silences are cut in: the artist does not want them forced
         try:
             info[name] = fn()
         except Exception as ex:
@@ -538,8 +600,9 @@ def score(m: dict, others: list[dict]) -> dict:
             far, near = d, o["title"]
     variety = min(1, far / .22) if others else 1.0
     defn = float(m.get("definition", 0))
+    opened = .7 * min(1, max(0, (float(m.get("air", 1.0)) - .5) / 1.7)) + .3 * min(1, max(0, (float(m.get("width", .35)) - .2) / .22))   # released, not choked: a top end and some width
     clear = min(1, max(0, 1 - (float(m.get("hum", 0)) - 7) / 9))           # no tone that never stops. Silence is not rewarded for its own sake.
-    return {"total": round(.35 * dance + .2 * clear + .15 * ext + .05 * defn + .25 * variety, 3), "dance": round(dance, 2), "extremes": round(ext, 2), "clarity": round(clear, 2), "drums": round(drums, 2),
+    return {"total": round(.3 * dance + .15 * clear + .18 * opened + .09 * ext + .03 * defn + .25 * variety, 3), "open": round(opened, 2), "dance": round(dance, 2), "extremes": round(ext, 2), "clarity": round(clear, 2), "drums": round(drums, 2),
             "definition": round(defn, 2), "variety": round(variety, 2), "nearest": near, "shape": round(ext, 2)}
 
 
@@ -574,7 +637,8 @@ CHISEL_SCHEMA = {"type": "object", "required": ["start", "end", "caption", "note
                  "properties": {"start": {"type": "number"}, "end": {"type": "number"}, "caption": {"type": "string"}, "note": {"type": "string"}}}
 
 
-LENSES = ("the beat: where it falls apart, where the kick goes missing, where a body would stop moving",
+LENSES = ("release: the stretch that sounds most choked (muffled, squeezed, boxed in, everything pressed into one lump), to be opened so that each sound is clear and rings out",
+          "the beat: where it falls apart, where the kick goes missing, where a body would stop moving",
           "the extremes: a peak that is not overwhelming enough, a depth that is not heavy enough",
           "the edges: a stretch that is a blur, a mass of sound with no separate, countable events",
           "the passage: a change of state that is too orderly, or one that should melt and instead jolts")
@@ -593,12 +657,14 @@ def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: st
                   f'- its kinds of sound, one letter per 2.5 seconds: {m.get("kinds", "")}\n  (a defined song reads like AAAABBBBAAAACCCCBBBB: clear blocks that hold and return. A wash reads like ABACBADC or AAAAAAAAAAAA.)\n'
                   f'- a constant tone under everything: {m.get("hum")} dB at {m.get("hum_hz")} Hz (over 12 is a hum the artist hears); its quietest second is {m.get("floor")} dB below its loudest (-12 means it never lets go)\n'
                   f'- how defined its structure measures: {m.get("definition")} of 1. Drums overall: {m["attack"]} (the artist wants 0.2 or more). In the 5-second timeline, a stretch with real drums reads about 0.2 to 0.4, and under 0.1 means none.\n'
+                  f'- how released it is: {m.get("air")} percent of its energy is above 6 kHz (0.5 is choked and muffled, 2 or more is open) and its stereo width is {m.get("width")} (0.25 is nearly mono, 0.4 is open)\n'
                   + ("- stretches already reworked, do not pick these again: " + ", ".join(f"{a:.0f}-{b:.0f}s" for a, b in tried) + "\n" if tried else "")
                   + (f"\nThis time look especially at {lens}." if lens else "")
                   + (f"\nFor this stretch ANOTHER CREATURE takes over: {_sides(guest)}. Write the stretch for what that creature would do with it, so the piece becomes a meeting of the two." if guest else "")
-                  + "\nPick ONE stretch of 12 to 30 seconds to make again, the one whose remaking would most help the piece as dance music that reaches extremes: a stretch where the beat falls apart or the kick goes missing (unless that is a planned void), a peak that is not overwhelming enough, a depth that is not heavy enough, "
+                  + "\nChiselling means RELEASING the piece from the block, as a sculptor frees a statue: every carving must leave the sound clearer and more open than it found it, never denser. "
+                  "Pick ONE stretch of 12 to 30 seconds to make again, the one whose remaking would most free the piece as dance music that reaches extremes: a stretch that is choked or a lump of sound, a stretch where the beat falls apart or the kick goes missing (unless that is a planned void), a peak that is not overwhelming enough, a depth that is not heavy enough, "
                   "a stretch that is merely in-between, or a peak whose drums are missing. Do not add silences: only if the plan itself has a void section and the timeline shows that it is not empty may that one be made emptier. "
-                  f'Give start and end in seconds, and a caption for JUST that stretch: it must begin with "{words}", then say concretely what plays there (which drums and how, the low end, the voices, the noise). '
+                  f'Give start and end in seconds, and a caption for JUST that stretch: it must begin with "{words}", then say concretely what plays there (which drums and how, the low end, the voices, the noise), fewer things rather than more, and end with "clear open sound, bright crisp top end, wide, every hit rings out". '
                   "No genre or artist names. In the note, one sentence: which section this is and what it should become.")
         r = chat.think(HOUSE, prompt, CHISEL_SCHEMA, 240)
         a, b = float(r["start"]), float(r["end"])
@@ -612,7 +678,7 @@ def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: st
         n = len(hits)
         cands = [(sum(hits[i:i + 4]), i) for i in range(1, max(2, n - 5)) if not any(abs(i * 5 - a) < 15 for a, _ in tried)] or [(0, 1)]
         _, i = min(cands)
-        return {"start": float(i * 5), "end": float(min(secs, i * 5 + 20)), "caption": words + ", " + ", ".join(rng.sample(DRUMS, 2)) + ", hard dry hits on every beat, " + rng.choice(VOICE),
+        return {"start": float(i * 5), "end": float(min(secs, i * 5 + 20)), "caption": words + ", " + ", ".join(rng.sample(DRUMS, 2)) + ", hard clear hits on every beat, open bright sound, " + rng.choice(VOICE),
                 "note": "by rule: the stretch with the fewest drum hits gets drums (Claude did not answer: " + str(ex)[:60] + ")"}
 
 
