@@ -177,7 +177,9 @@ def _fit(x: dict, rng) -> dict:
 
 
 def measure(path: str) -> dict:
-    """What can be told about a result without hearing it."""
+    """What can be told about a result without hearing it. Besides the track-wide numbers: a timeline in 5-second steps
+    (level and drum hits), and how DEFINED its structure is: whether it falls into distinct blocks of sound that hold
+    together, follow one another, and come back (a verse, a chorus, the chorus again) or is one undivided wash."""
     import numpy as np
     import soundfile as sf
     f = gym.features(Path(path))
@@ -185,12 +187,54 @@ def measure(path: str) -> dict:
     m, h = x.mean(1), sr * 5
     e = np.sqrt((m[:len(m) // h * h].reshape(-1, h) ** 2).mean(1)) if len(m) > h * 3 else np.array([1.0])
     db = 20 * np.log10(e + 1e-6)
-    return dict({k: round(float(f.get(k, 0)), 3) for k in (*VEC, "bpm", "secs", "loud")}, contrast=round(float(db.max() - db.min()), 1), sections=[round(float(v), 1) for v in db - db.max()][:40])
+    out = dict({k: round(float(f.get(k, 0)), 3) for k in (*VEC, "bpm", "secs", "loud")}, contrast=round(float(db.max() - db.min()), 1), sections=[round(float(v), 1) for v in db - db.max()][:60])
+    try:
+        win = 2048
+        fr = m[:len(m) // win * win].reshape(-1, win) * np.hanning(win)
+        mag = np.abs(np.fft.rfft(fr, axis=1))
+        fq = np.fft.rfftfreq(win, 1 / sr)
+        edges = [40, 90, 180, 350, 700, 1400, 2800, 5600, 12000]
+        bands = np.stack([20 * np.log10(mag[:, (fq >= a) & (fq < b)].sum(1) + 1e-6) for a, b in zip(edges, edges[1:])], 1)
+        flux = np.maximum(0, np.diff(mag, axis=0)).sum(1)
+        per = max(1, int(round(2.5 * sr / win)))                       # frames in a 2.5-second block
+        nb = len(bands) // per
+        V = bands[:nb * per].reshape(nb, per, -1).mean(1)
+        V = V - V.mean(0)
+        spread = float(V.std())                                        # how much its sound changes at all over the song, in dB: hiss or a loop barely moves
+        fl = flux[:(len(flux) // per) * per].reshape(-1, per)
+        hits = np.percentile(fl, 96, axis=1) / (np.median(flux) + 1e-9)   # how far the sharpest moments of each block stand out
+        k = int(min(4, max(2, nb // 6)))
+        cent = [V[0]]
+        while len(cent) < k:                                           # farthest-point start: the same answer every time
+            dist = np.min([((V - c) ** 2).sum(1) for c in cent], axis=0)
+            cent.append(V[int(np.argmax(dist))])
+        cent = np.array(cent)
+        for _ in range(20):
+            D = ((V[:, None, :] - cent[None]) ** 2).sum(2)
+            lab = D.argmin(1)
+            cent = np.array([V[lab == c].mean(0) if (lab == c).any() else cent[c] for c in range(k)])
+        D = np.sqrt(((V[:, None, :] - cent[None]) ** 2).sum(2))
+        own = D[np.arange(nb), lab]
+        oth = np.where(np.arange(k)[None] == lab[:, None], np.inf, D).min(1)
+        sil = float(np.mean((oth - own) / (np.maximum(oth, own) + 1e-9)))    # blocks sit clearly in one kind of sound or another
+        runs = [(lab[0], 1)]
+        for v in lab[1:]:
+            runs = runs[:-1] + [(v, runs[-1][1] + 1)] if v == runs[-1][0] else runs + [(v, 1)]
+        held = float(np.mean([n >= 3 for _, n in runs]))                     # a kind of sound, once begun, lasts (7 seconds or more)
+        back = len({c for c in set(lab) if sum(1 for r, n in runs if r == c and n >= 2) >= 2})   # kinds of sound that return later
+        out["definition"] = round(float(np.clip(.5 * np.clip(sil / .55, 0, 1) + .3 * held + .2 * min(1, back / 2), 0, 1) * np.clip(spread / 3.5, 0, 1) ** .7), 3)
+        out["kinds"] = "".join("ABCD"[int(v)] for v in lab)[:120]            # the song as letters, one per 2.5 seconds: AAAABBBBAAAACCCC…
+        h5 = hits[:nb // 2 * 2].reshape(-1, 2).max(1)
+        out["hits"] = [round(float(np.clip((v - 1.2) / 4.5, 0, 1)), 2) for v in h5][:60]   # drum hits per 5 seconds: 0 = none (hiss measures 0), about 0.15-0.3 in a song with drums, 1 = nothing but drums
+    except Exception:
+        out.update(definition=0.0, kinds="", hits=[])
+    return out
 
 
 def score(m: dict, others: list[dict]) -> dict:
-    """A stand-in for judgement, made of things that can be measured: does it have drums and a pulse, does it have contrast,
-    and is it unlike the songs already finished. It cannot tell a good song from a dull one."""
+    """A stand-in for judgement, made of things that can be measured: does it have drums and a pulse, is its structure
+    defined (distinct blocks that hold and return), does it have contrast, and is it unlike the songs already finished.
+    It cannot tell a good song from a dull one."""
     drums = .5 * min(1, max(0, (m["attack"] - .06) / .22)) + .5 * min(1, m["steady"] / .6)
     shape = min(1, m["contrast"] / 9)
     far, near = 1.0, None
@@ -199,7 +243,8 @@ def score(m: dict, others: list[dict]) -> dict:
         if d < far:
             far, near = d, o["title"]
     variety = min(1, far / .22) if others else 1.0
-    return {"total": round(.4 * drums + .25 * shape + .35 * variety, 3), "drums": round(drums, 2), "shape": round(shape, 2), "variety": round(variety, 2), "nearest": near}
+    defn = float(m.get("definition", 0))
+    return {"total": round(.3 * drums + .3 * defn + .15 * shape + .25 * variety, 3), "drums": round(drums, 2), "definition": round(defn, 2), "shape": round(shape, 2), "variety": round(variety, 2), "nearest": near}
 
 
 def revise(song: dict, m: dict, sc: dict, tries_left: int, rng) -> dict:
@@ -226,6 +271,43 @@ def revise(song: dict, m: dict, sc: dict, tries_left: int, rng) -> dict:
         return {"keep": False, "note": "by rule (Claude did not answer: " + str(ex)[:80] + ")", "song": dict(song, caption=cap)}
 
 
+CHISEL_SCHEMA = {"type": "object", "required": ["start", "end", "caption", "note"],
+                 "properties": {"start": {"type": "number"}, "end": {"type": "number"}, "caption": {"type": "string"}, "note": {"type": "string"}}}
+
+
+def chisel_plan(song: dict, m: dict, tried: list, rng) -> dict:
+    """Which stretch of the song to carve next, and into what. Claude reads the song as a timeline; without it, the stretch
+    with the fewest drum hits that has not been tried is given drums."""
+    secs, hits, lev = float(m.get("secs") or song["duration"]), m.get("hits") or [], m.get("sections") or []
+    words = song["caption"].split(",")[0].strip()
+    try:
+        line = lambda arr: " ".join(f"{int(i * 5)}s:{v}" for i, v in enumerate(arr))
+        prompt = (f'Song: "{song["title"]}" ({secs:.0f} seconds) for the creature {song["creature"]}. Its idea: {song["idea"]}\n\nCAPTION\n{song["caption"]}\n\nLYRICS (the plan it was made from)\n{song["lyrics"]}\n\n'
+                  "It exists as audio now. Nobody has heard it; this is what can be measured:\n"
+                  f"- level in 5-second steps (dB below its loudest): {line(lev)}\n- drum hits in 5-second steps (0 none .. 1 hard): {line(hits)}\n"
+                  f'- its kinds of sound, one letter per 2.5 seconds: {m.get("kinds", "")}\n  (a defined song reads like AAAABBBBAAAACCCCBBBB: clear blocks that hold and return. A wash reads like ABACBADC or AAAAAAAAAAAA.)\n'
+                  f'- how defined its structure measures: {m.get("definition")} of 1. Drums overall: {m["attack"]} (the artist wants 0.2 or more). In the 5-second timeline, a stretch with real drums reads about 0.2 to 0.4, and under 0.1 means none.\n'
+                  + ("- stretches already reworked, do not pick these again: " + ", ".join(f"{a:.0f}-{b:.0f}s" for a, b in tried) + "\n" if tried else "")
+                  + "\nPick ONE stretch of 12 to 30 seconds to make again, the one whose remaking would most sharpen the song into a defined structure: a chorus that does not stand out from the verse, "
+                  "a stretch where the plan asks for drums and there are none, a blur between two sections, a return that does not sound like what it returns to. Leave deliberate silences and quiet breakdowns alone. "
+                  f'Give start and end in seconds, and a caption for JUST that stretch: it must begin with "{words}", then say concretely what plays there (which drums and how, the low end, the voices, the noise). '
+                  "No genre or artist names. In the note, one sentence: which section this is and what it should become.")
+        r = chat.think(HOUSE, prompt, CHISEL_SCHEMA, 240)
+        a, b = float(r["start"]), float(r["end"])
+        a = max(0.0, min(secs - 12, a))
+        b = max(a + 12, min(secs, min(a + 30, b)))
+        cap = " ".join(str(r.get("caption") or "").split())
+        if words not in cap:
+            cap = words + ", " + cap
+        return {"start": round(a, 1), "end": round(b, 1), "caption": cap[:700], "note": (r.get("note") or "")[:300]}
+    except Exception as ex:
+        n = len(hits)
+        cands = [(sum(hits[i:i + 4]), i) for i in range(1, max(2, n - 5)) if not any(abs(i * 5 - a) < 15 for a, _ in tried)] or [(0, 1)]
+        _, i = min(cands)
+        return {"start": float(i * 5), "end": float(min(secs, i * 5 + 20)), "caption": words + ", " + ", ".join(rng.sample(DRUMS, 2)) + ", hard dry hits on every beat, " + rng.choice(VOICE),
+                "note": "by rule: the stretch with the fewest drum hits gets drums (Claude did not answer: " + str(ex)[:60] + ")"}
+
+
 def status() -> dict:
     s = {k: v for k, v in _state.items() if k not in ("job", "stop")}
     return s or {"running": False}
@@ -238,9 +320,11 @@ def stop():
             _state["job"]["cancel"] = True
 
 
-def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, direction: str = "", tries: int = 1, name: str = "") -> dict:
+def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, direction: str = "", tries: int = 1, name: str = "", hours: float = 0) -> dict:
     """Make a collection. Every song starts as its own idea and gets up to `tries` goes: made, measured, revised, made again.
-    The best go of each is the song; only those reach the library."""
+    The best go of each is the song; only those reach the library.
+    With `hours`, it then keeps chiselling until that time is up: one stretch of one song is made again, and the change is
+    kept only if the song measures as more defined than before. A song is left alone once three carvings in a row did not help."""
     if _state.get("running"):
         raise RuntimeError("a night shift is already running")
     e = engines.get("ace_step")
@@ -257,8 +341,9 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
     jobs[job["id"]] = job
     tag = (name.strip() or time.strftime("collection %Y-%m-%d"))[:50]
     _state.clear()
+    hours = max(0.0, min(16.0, float(hours or 0)))
     _state.update(running=True, id=sid, creatures=creatures, creature=creatures[0], count=count, tries=tries, made=0, thrown=0, msg="starting…", started=time.time(), songs=[], tag=tag,
-                  job=job, stop=False, error=None, per=None)
+                  job=job, stop=False, error=None, per=None, hours=hours, until=time.time() + hours * 3600 if hours else None, phase="making", carved=0, carves=0)
     sheet = {"id": sid, "name": tag, "creatures": creatures, "direction": direction, "tries": tries, "started": time.strftime("%Y-%m-%d %H:%M:%S"), "songs": []}
     save = lambda: (d / "collection.json").write_text(json.dumps(sheet, indent=1, ensure_ascii=False))
 
@@ -352,20 +437,81 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     library.write_meta(run, {"engine": "ace_step", "engine_name": "night shift", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "label": label,
                                              "params": best["params"], "outputs": [{"path": str(dst), "kind": "audio", "label": best["song"]["title"]}],
                                              "info": {"idea": best["song"]["idea"], "score": best["sc"]}, "seconds": 0})
-                    done.append({"title": best["song"]["title"], "m": best["m"]})
-                    entry.update(path=str(dst), score=best["sc"])
+                    done.append({"title": best["song"]["title"], "m": best["m"], "n": n, "path": str(dst), "song": best["song"], "sc": best["sc"], "strength": strength, "entry": entry,
+                                 "tried": [], "misses": 0, "carved": 0})
+                    first = d / "first takes"                       # the song before any carving, kept so it can always be gone back to
+                    first.mkdir(exist_ok=True)
+                    shutil.copy(dst, first / dst.name)
+                    entry.update(path=str(dst), score=best["sc"], carving=[])
                     _state["made"] = len(done)
                     _state["songs"].append({"n": n, "name": best["song"]["title"], "path": str(dst), "creature": best["song"]["creature"], "idea": best["song"]["idea"]})
                     _state["per"] = round((time.time() - _state["started"]) / len(done), 1)
                 sheet["songs"].append(entry)
                 save()
+            # ---- the rest of the night: chisel. One stretch of one song is made again; it is kept only if the song measures as more defined
+            rnd = 0
+            while hours and not _state["stop"] and not _state["error"] and time.time() < _state["until"]:
+                live = [s_ for s_ in done if s_["misses"] < 3 and s_["carved"] < 12]
+                if not live:
+                    break
+                rnd += 1
+                _state["phase"] = "chiselling"
+                for s_ in sorted(live, key=lambda q: q["sc"]["total"]):             # the least defined first
+                    if _state["stop"] or time.time() >= _state["until"]:
+                        break
+                    base = f"chiselling, round {rnd} · “{s_['title']}”"
+                    _state["msg"] = base + " · choosing where to carve"
+                    job.update(msg=base, frac=min(.99, (time.time() - _state["started"]) / max(1, _state["until"] - _state["started"])))
+                    where = d / f"s{s_['n']:02d}_t{uuid.uuid4().hex[:6]}"
+                    try:
+                        cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng)
+                        s_["tried"].append((cp["start"], cp["end"]))
+                        _state["msg"] = base + f" · remaking {cp['start']:.0f}–{cp['end']:.0f}s"
+                        where.mkdir()
+                        params = gym.bred_boost(coerce(e.spec, {"task": "repaint", "src_audio": s_["path"], "repaint_start": cp["start"], "repaint_end": cp["end"], "caption": cp["caption"],
+                                                                "lyrics": s_["song"]["lyrics"], "duration": round(float(s_["m"].get("secs") or s_["song"]["duration"]), 1), "thinking": False, "batch": 1,
+                                                                "seed": rng.randint(1, 2 ** 31 - 1), "creature": s_["song"]["creature"], "creature_strength": s_["strength"]}))
+                        outs = []
+                        for ev in e.run(params, where):
+                            if ev[0] != "progress":
+                                outs = ev[1]
+                        if not outs:
+                            raise RuntimeError("nothing came back")
+                        _state["carves"] += 1
+                        why = broken(outs[0]["path"], float(s_["song"]["duration"]))
+                        m2 = None if why else measure(outs[0]["path"])
+                        sc2 = None if why else score(m2, [o for o in done if o is not s_])
+                        better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .004
+                        s_["entry"]["carving"].append({"round": rnd, "from": cp["start"], "to": cp["end"], "why": cp["note"], "kept": better, "broken": why or None,
+                                                       "before": s_["sc"]["total"], "after": sc2["total"] if sc2 else None, "definition": [s_["sc"]["definition"], sc2["definition"] if sc2 else None]})
+                        if better:
+                            shutil.copy(outs[0]["path"], s_["path"])            # the song in the library is now the carved one
+                            s_.update(m=m2, sc=sc2, misses=0, carved=s_["carved"] + 1)
+                            s_["entry"]["score"] = sc2
+                            _state["carved"] += 1
+                        else:
+                            s_["misses"] += 1
+                        fails = 0
+                    except Exception as ex:
+                        fails += 1
+                        s_["misses"] += 1
+                        print("[night] a carving failed: " + str(ex).strip()[-400:], flush=True)
+                        if fails >= 4:
+                            _state["error"] = str(ex).strip().splitlines()[0][:300]
+                            break
+                        time.sleep(15)
+                    finally:
+                        shutil.rmtree(where, ignore_errors=True)
+                    save()
             _state["msg"] = (f"stopped: {_state['made']} songs are in the library" if _state["stop"] else "stopped: " + _state["error"] if _state["error"]
-                             else f"done: {_state['made']} songs are in the library as “{tag}”")
+                             else f"done: {_state['made']} songs are in the library as “{tag}”" + (f", {_state['carved']} carvings kept of {_state['carves']} tried" if _state.get("carves") else ""))
         except Exception as ex:
             _state["error"] = str(ex).strip().splitlines()[0][:300] if str(ex).strip() else "it failed"
             _state["msg"] = "stopped: " + _state["error"]
             print("[night] stopped: " + str(ex).strip()[-800:], flush=True)
         finally:
+            for o in sheet["songs"]:
+                o.pop("entry", None)
             for t_ in d.glob("s*_t*"):
                 shutil.rmtree(t_, ignore_errors=True)                # no leftovers: only the finished songs and the sheet remain
             _state.update(running=False, finished=time.time())

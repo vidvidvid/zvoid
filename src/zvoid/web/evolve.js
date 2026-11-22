@@ -47,29 +47,33 @@ function evoNightBox(trained, s) {
   const N = EVO.night || {}, box = h('div', { id: 'evo-night' });
   if (N.running) {
     const left = N.per && N.count > N.made ? ` · about ${Math.max(1, Math.round((N.count - N.made) * N.per / 60))} min left` : '';
-    box.append(h('div', { class: 'evo-night-msg' }, `${N.made} of ${N.count} songs finished${left}`), h('div', { class: 'evo-bar' }, h('i', { style: `width:${Math.round(N.made / N.count * 100)}%` })),
+    const until = N.until ? new Date(N.until * 1000).toTimeString().slice(0, 5) : '';
+    box.append(h('div', { class: 'evo-night-msg' }, N.phase === 'chiselling' ? `chiselling the ${N.made} songs until ${until} · ${N.carved} carvings kept of ${N.carves} tried` : `${N.made} of ${N.count} songs made${left}`), h('div', { class: 'evo-bar' }, h('i', { style: `width:${Math.round(N.made / N.count * 100)}%` })),
       h('small', { title: N.msg || '' }, N.msg || ''), h('div', { class: 'acts' }, h('button', { title: 'It ends after the try it is on. Songs already finished stay in the library.', onclick: () => api('/api/night/stop', { method: 'POST' }).then(evoNightPoll) }, '■ stop')));
   } else {
     EVO.nightWho = EVO.nightWho || new Set(N.creatures && N.creatures.length ? N.creatures : s && s.creature ? [s.creature] : trained.slice(-1).map(c => c.slug));
     const cnt = h('input', { type: 'number', min: 1, max: 200, value: EVO.nightCount || 20, style: 'width:58px', onchange: e => { EVO.nightCount = +e.target.value; est(); } });
-    const tr = h('select', { title: 'How many goes each song gets. After each go it is measured (drums, pulse, contrast, how unlike the others it is) and its plan is rewritten before the next go. The best go is the song.', onchange: e => { EVO.nightTries = +e.target.value; est(); } }, [1, 2, 3, 4, 6].map(v => h('option', { value: v }, v === 1 ? '1 go each' : v + ' goes each'))); tr.value = EVO.nightTries || 3;
+    const tr = h('select', { title: 'How many goes each song gets. After each go it is measured (drums, pulse, contrast, how unlike the others it is) and its plan is rewritten before the next go. The best go is the song.', onchange: e => { EVO.nightTries = +e.target.value; est(); } }, [1, 2, 3, 4, 6].map(v => h('option', { value: v }, v === 1 ? '1 go each' : v + ' goes each'))); tr.value = EVO.nightTries || 2;
     const dir = h('textarea', { rows: 3, spellcheck: 'false', placeholder: 'what the collection is: nothing like the world has heard before, primal music of the future, drums that come and go…', oninput: e => { EVO.nightDir = e.target.value; } }); dir.value = EVO.nightDir != null ? EVO.nightDir : (s && s.direction) || '';
-    const estEl = h('small', {}), est = () => { const m = Math.round((+cnt.value || 20) * (+tr.value || 3) * 1.75 + (+cnt.value || 20) * .4); estEl.textContent = `about ${m >= 90 ? (m / 60).toFixed(1) + ' hours' : m + ' minutes'} on the PC · only the finished songs reach the library`; };
+    const hrs = h('input', { type: 'number', min: 0, max: 16, step: .5, value: EVO.nightHours != null ? EVO.nightHours : 8, style: 'width:58px', title: 'After the songs are made, it keeps chiselling them for this long: one stretch of one song is made again, and the change is kept only if the song measures as more defined. 0 = make them and stop.', onchange: e => { EVO.nightHours = +e.target.value; est(); } });
+    const estEl = h('small', {}), est = () => { const m = Math.round((+cnt.value || 20) * (+tr.value || 2) * 1.75 + (+cnt.value || 20) * .4), end = new Date(Date.now() + (m + (+hrs.value || 0) * 60) * 60000).toTimeString().slice(0, 5);
+      estEl.textContent = `making them: about ${m >= 90 ? (m / 60).toFixed(1) + ' hours' : m + ' minutes'}` + ((+hrs.value || 0) ? ` · then chiselling for up to ${+hrs.value} h · done by about ${end}` : '') + ' · only the finished songs reach the library'; estEl.title = estEl.textContent; };
     est();
     box.append(h('div', { class: 'evo-who' }, trained.map(c => h('label', {}, h('input', { type: 'checkbox', checked: EVO.nightWho.has(c.slug), onchange: e => { e.target.checked ? EVO.nightWho.add(c.slug) : EVO.nightWho.delete(c.slug); } }), h('span', {}, c.name)))),
-      dir, h('div', { class: 'acts' }, cnt, h('span', { class: 'gym-note' }, 'songs'), tr), estEl,
+      dir, h('div', { class: 'acts' }, cnt, h('span', { class: 'gym-note' }, 'songs'), tr),
+      h('div', { class: 'acts' }, h('span', { class: 'gym-note' }, 'then chisel for'), hrs, h('span', { class: 'gym-note' }, 'hours')), estEl,
       h('div', { class: 'acts' }, h('button', { class: 'hot', disabled: !trained.length, title: 'Both machines are kept awake while it runs. Leave Zvoid open.', onclick: async () => {
         if (!EVO.nightWho.size) return toast('tick at least one creature', true);
-        try { EVO.night = await api('/api/night', { json: { creatures: [...EVO.nightWho], count: +cnt.value || 20, tries: +tr.value || 3, direction: dir.value } }); evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'make the collection ▸')),
+        try { EVO.night = await api('/api/night', { json: { creatures: [...EVO.nightWho], count: +cnt.value || 20, tries: +tr.value || 2, hours: +hrs.value || 0, direction: dir.value } }); evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'make the collection ▸')),
       N.msg && N.finished ? h('small', { title: N.msg }, N.msg) : null);
   }
   return box;
 }
 async function evoNightPoll() {
   clearTimeout(EVO.nightT);
-  try { const was = JSON.stringify([(EVO.night || {}).running, (EVO.night || {}).made, (EVO.night || {}).thrown]); EVO.night = await api('/api/night');
-    const b = $('#btn-evo'); if (b) b.textContent = EVO.night.running ? `⟲ evolve · night ${EVO.night.made}/${EVO.night.count}` : '⟲ evolve';
-    if (EVO.open) { if (JSON.stringify([EVO.night.running, EVO.night.made, EVO.night.thrown]) !== was) evoDraw(); else { const m = document.querySelector('#evo-night small'); if (m && EVO.night.running) m.textContent = EVO.night.msg || ''; } } } catch (e) {}
+  try { const sig = n => JSON.stringify([n.running, n.made, n.thrown, n.phase, n.carves]), was = sig(EVO.night || {}); EVO.night = await api('/api/night');
+    const b = $('#btn-evo'); if (b) b.textContent = EVO.night.running ? (EVO.night.phase === 'chiselling' ? `⟲ evolve · chiselling` : `⟲ evolve · night ${EVO.night.made}/${EVO.night.count}`) : '⟲ evolve';
+    if (EVO.open) { if (sig(EVO.night) !== was) evoDraw(); else { const m = document.querySelector('#evo-night small'); if (m && EVO.night.running) m.textContent = EVO.night.msg || ''; } } } catch (e) {}
   EVO.nightT = setTimeout(evoNightPoll, EVO.night && EVO.night.running ? 3000 : 20000);
 }
 function evoMark() { document.querySelectorAll('#evo .evo-pp').forEach(b => { const on = b.dataset.path === LIB.playing; b.textContent = on ? '■' : '▶'; b.closest('.evo-card, .evo-step').classList.toggle('playing', on); }); }
