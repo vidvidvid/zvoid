@@ -481,7 +481,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         why = broken(outs[0]["path"], float(s_["song"]["duration"]))
                         m2 = None if why else measure(outs[0]["path"])
                         sc2 = None if why else score(m2, [o for o in done if o is not s_])
-                        better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .004
+                        better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .002
                         s_["entry"]["carving"].append({"round": rnd, "from": cp["start"], "to": cp["end"], "why": cp["note"], "kept": better, "broken": why or None,
                                                        "before": s_["sc"]["total"], "after": sc2["total"] if sc2 else None, "definition": [s_["sc"]["definition"], sc2["definition"] if sc2 else None]})
                         if better:
