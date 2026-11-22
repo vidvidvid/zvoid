@@ -431,11 +431,13 @@ function gymBuild() {
       h('h3', {}, 'food'),
       h('div', { class: 'food' }, c.food.length ? c.food.map(f => {
         const cap = h('input', { spellcheck: 'false', placeholder: 'caption for this track (optional)', onchange: () => api('/api/gym/' + c.slug, { method: 'PUT', json: { captions: { [f.name]: cap.value } } }) }); cap.value = f.caption || '';
-        return h('div', { class: 'food-row' + (Gym.playing === f.name ? ' playing' : ''), style: `--c:hsl(${hueOf(f.bright ?? .3)},90%,60%)` }, h('button', { class: 'food-play', title: 'Play this track to the entity', onclick: () => gymPlay(c.slug, f.name) }, Gym.playing === f.name ? '■' : '▶'), h('div', {}, h('b', { title: f.name + '\nDrag it onto the creature, or double-click, to make it sing from this track', draggable: 'true', ondragstart: e => { e.dataTransfer.setData('text/x-zvoid-food', f.name); e.dataTransfer.effectAllowed = 'copy'; }, ondblclick: () => gymSing(c, null, f.name) }, f.name), h('small', {}, `${Math.round(f.secs)}s · ~${Math.round(f.bpm || 0)} bpm · bass ${Math.round((f.low || 0) * 100)}% · bright ${Math.round((f.bright || 0) * 100)}%`), cap),
+        return h('div', { class: 'food-row' + (Gym.playing === f.name ? ' playing' : ''), style: `--c:hsl(${hueOf(f.bright ?? .3)},90%,60%)` }, h('button', { class: 'food-play', title: 'Play this track to the entity', onclick: () => gymPlay(c.slug, f.name) }, Gym.playing === f.name ? '■' : '▶'), h('div', {}, h('b', { title: f.name + '\nDrag it onto the creature, or double-click, to make it sing from this track', class: 'food-grab', onpointerdown: e => gymThrow(e, f.name), ondblclick: () => gymSing(c, null, f.name) }, f.name), h('small', {}, `${Math.round(f.secs)}s · ~${Math.round(f.bpm || 0)} bpm · bass ${Math.round((f.low || 0) * 100)}% · bright ${Math.round((f.bright || 0) * 100)}%`), cap),
           h('button', { title: 'Sing from this track: the creature makes a new clip out of a passage of it', disabled: running, onclick: () => gymSing(c, null, f.name) }, '♪'),
           h('button', { title: 'Take this track away', disabled: running, onclick: () => gymDo(() => api(`/api/gym/${c.slug}/food/${encodeURIComponent(f.name)}`, { method: 'DELETE' })) }, '×'));
       }) : h('p', { class: 'gym-note' }, 'Nothing yet. Drop audio files anywhere on this screen.')),
       h('div', { class: 'acts' }, h('button', { disabled: running, onclick: () => { const i = $('#gym-pick'); i.value = ''; i.click(); } }, '+ feed audio or video…'), h('button', { disabled: running, title: 'Pick a folder. Tracks are linked where they are, not copied.', onclick: gymPickFolder }, '+ feed a folder…')),
+      h('label', { class: 'gym-stray', title: 'When it sings, it starts from a passage of one of its tracks. Left: it stays close to that passage, tune and all. Right: it keeps the feel and strays far from the tune.' }, h('span', {}, 'when it sings: close to the track ↔ far from it'),
+        h('input', { type: 'range', min: 0, max: 1, step: .05, value: Gym.stray == null ? .7 : Gym.stray, oninput: e => { Gym.stray = +e.target.value; try { localStorage.setItem('zvoid.stray', Gym.stray); } catch (x) {} } })),
       ...((c.limbs || []).length > 1 ? [h('h3', {}, 'limbs'),
         h('p', { class: 'gym-note' }, 'Tracks that sound alike grow together as one limb. Each limb learns its own word: put it in a caption to call that side of the creature.'),
         h('div', { class: 'limbs' }, c.limbs.map(l => h('div', { class: 'limb-row', style: `--c:hsl(${hueOf(l.mean.bright)},90%,60%)` }, h('i'), h('span', {}, l.tags.join(' · ')), h('small', {}, l.count + ' tracks'), h('code', { title: 'The trigger word of this limb' }, l.trigger), h('button', { class: 'limb-sing', title: 'Ask this limb to sing: ACE-Step makes a short new clip in its style and the creature performs it. You can also double-click the limb itself.', disabled: running, onclick: () => gymSing(c, l.id) }, '♪'))))] : []),
@@ -463,9 +465,6 @@ function gymBuild() {
       h('p', { class: 'gym-note' }, 'On this Mac, training uses the Apple GPU and pauses the ace-step module. Stopping keeps the last saved checkpoint.'),
       ...(!running ? [h('div', { class: 'acts gym-end' }, h('button', { class: 'danger', data: { label: 'delete creature' }, title: 'Deletes what it learned and its list of tracks. Your original audio files are not touched.', onclick: e => gymDelete(e.currentTarget, c) }, 'delete creature'))] : []));
   }
-  stage.addEventListener('dragover', e => { if ([...e.dataTransfer.types].includes('text/x-zvoid-food')) { e.preventDefault(); stage.classList.add('fed'); } });
-  stage.addEventListener('dragleave', () => stage.classList.remove('fed'));
-  stage.addEventListener('drop', e => { stage.classList.remove('fed'); const name = e.dataTransfer.getData('text/x-zvoid-food'); if (name && Gym.cur) { e.preventDefault(); e.stopPropagation(); gymSing(Gym.cur, null, name); } });   // a track thrown into the creature: it sings from that one
   const keepPicker = $('#gym-picker'); if (keepPicker) stage.append(keepPicker);
   el.replaceChildren(left, stage, right, h('input', { id: 'gym-pick', type: 'file', multiple: true, accept: 'audio/*,video/*,.wav,.mp3,.flac,.aiff,.aif,.ogg,.m4a,.mp4,.mov,.mkv,.webm', hidden: true, onchange: e => gymFeedFiles([...e.target.files]) }));
 }
@@ -573,6 +572,25 @@ setInterval(() => {                                                             
 
 /* Ask a limb to sing: ACE-Step makes a short new clip in that limb's style (through the creature's adapter if it has trained),
    and the creature performs it. Until it has trained, you hear what the plain model makes of that limb's description. */
+try { const v = localStorage.getItem('zvoid.stray'); if (v != null && v !== '') Gym.stray = +v; } catch (e) {}
+function gymThrow(e, name) {                           // drag a track by its name and let go over the creature: it sings from that one. Done by hand, because the app's window has no built-in drag
+  if (e.button) return;
+  const x0 = e.clientX, y0 = e.clientY; let ghost = null;
+  const over = ev => { const st = $('#gym-stage'), r = st && st.getBoundingClientRect(); return !!r && ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom; };
+  const move = ev => {
+    if (!ghost) { if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return; ghost = h('div', { class: 'food-ghost' }, '♪ ' + name.replace(/\.[a-z0-9]+$/i, '')); document.body.append(ghost); document.body.classList.add('throwing'); }
+    ghost.style.left = ev.clientX + 12 + 'px'; ghost.style.top = ev.clientY + 10 + 'px';
+    const st = $('#gym-stage'); if (st) st.classList.toggle('fed', over(ev)); ghost.classList.toggle('in', over(ev));
+  };
+  const up = ev => {
+    removeEventListener('pointermove', move); removeEventListener('pointerup', up); removeEventListener('pointercancel', up);
+    const st = $('#gym-stage'); if (st) st.classList.remove('fed'); document.body.classList.remove('throwing');
+    if (!ghost) return;
+    ghost.remove();
+    if (ev.type === 'pointerup' && over(ev) && Gym.cur) gymSing(Gym.cur, null, name);
+  };
+  addEventListener('pointermove', move); addEventListener('pointerup', up); addEventListener('pointercancel', up);
+}
 async function gymSing(c, limbId, track) {              // track: sing from this one of its tracks, not a random one
   if (track && c) { const f = c.food.find(x => x.name === track); if (f) limbId = f.limb || 0; }
   if (!c || !c.food.length) return toast('feed it first');
@@ -587,7 +605,8 @@ async function gymSing(c, limbId, track) {              // track: sing from this
   try {
     try {                                                // it sings from a fresh collage of its own tracks, played back through what it has learned: never the same twice
       const sd = await api(`/api/gym/${c.slug}/seed`, { json: { limb: limb ? limb.id : null, track: track || '' } }), r = Math.random;
-      Object.assign(params, { task: 'cover', src_audio: sd.path, bpm: sd.bpm, caption: caption.replace(/, instrumental$/, ''), cover_strength: +(.5 + r() * .4).toFixed(2), cover_noise_strength: +(.2 + r() * .22).toFixed(2), creature_strength: c.trained ? +(1.1 + r() * r() * .9).toFixed(2) : 1 });   // measured: .2 keeps the passage's shape and colour but none of its waveform, .35 keeps most of it
+      const far = Gym.stray == null ? .7 : Gym.stray, mix = (a, b) => a + (b - a) * far;   // 0 = stays on the track, 1 = strays far: its tune is carried by both settings, so both loosen together
+      Object.assign(params, { task: 'cover', src_audio: sd.path, bpm: sd.bpm, caption: caption.replace(/, instrumental$/, ''), cover_strength: +clamp(mix(.85, .1) + (r() - .5) * .16, .05, 1).toFixed(2), cover_noise_strength: +clamp(mix(.4, .06) + (r() - .5) * .08, 0, .6).toFixed(2), creature_strength: c.trained ? +(1.1 + r() * r() * .9).toFixed(2) : 1 });
       label = `${c.name} sings · from ${sd.tracks[0].replace(/\.[a-z0-9]+$/i, '')}`;
       toast(`it is composing from “${sd.tracks[0].replace(/\.[a-z0-9]+$/i, '')}”` + (c.trained ? '' : ' (it has not trained yet, so the plain model plays them back)'));
     } catch (e) { toast(c.trained ? 'its tracks could not be read, so it composes from words alone' : 'it has not trained yet: this is the plain model\'s guess at that limb'); }
