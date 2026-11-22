@@ -614,7 +614,7 @@ function libMark() {                                   // playing or not: mark t
 }
 function libPlay(it, at) {                           // at: where to start, 0..1 through the clip (a click on its waveform)
   if (!LIB.audio) { LIB.audio = new Audio(); LIB.audio.onended = () => { LIB.playing = null; libMark(); }; try { ac().createMediaElementSource(LIB.audio).connect(bus()); } catch {} }
-  const A = LIB.audio, seek = () => { if (at != null && isFinite(A.duration)) A.currentTime = clamp(at, 0, .999) * A.duration; };
+  const A = LIB.audio, seek = () => { if (at != null && isFinite(A.duration)) { A.currentTime = clamp(at, 0, .999) * A.duration; LIB.jump = true; } };
   if (LIB.playing === it.path && at == null) { A.pause(); LIB.playing = null; }
   else if (LIB.playing === it.path) seek();
   else { ac().resume(); A.src = fileUrl(it.path); if (at != null) A.addEventListener('loadedmetadata', seek, { once: true }); A.play().catch(e => toast('could not play that: ' + e.message, true)); LIB.playing = it.path; }
@@ -643,18 +643,18 @@ function libWave(it) {
   requestAnimationFrame(() => libWaveDraw(cv));
   return cv;
 }
-{ let t0 = 0, at = 0, seen = -1, ticks = 0, prev = 0;     // the playhead: drawn every frame, and carried by the clock between the player's own time reports, which arrive in coarse steps
+{ let t0 = 0, at = 0, seen = -1, ticks = 0, prev = 0, debt = 0;     // the playhead: drawn every frame, and carried by the clock between the player's own time reports, which arrive in coarse steps
   const step = () => { requestAnimationFrame(step);
     const A = LIB.audio; if (!LIB.playing || !A) { LIB.est = null; seen = -1; ticks = 0; return; }
     const now = performance.now(), ct = A.currentTime, live = !A.paused && !A.seeking && A.readyState >= 3;
-    if (!live || seen < 0 || ct < seen - .05) { t0 = ct; at = now; ticks = 0; prev = ct; }             // stopped, seeking, or jumped back: take the player's word and wait
+    if (seen < 0 || ct < seen - .05 || LIB.jump || A.seeking) { t0 = ct; at = now; ticks = LIB.jump && live ? 2 : 0; prev = ct; debt = 0; LIB.jump = false; }   // just started, or you jumped: take the player's word
+    else if (!live) { ticks = 0; debt = 0; if (Math.abs(ct - prev) > .5) prev = ct; }                   // paused or buffering: the bar stays exactly where it is
     else {
-      if (ct !== seen) { ticks++; if (ticks === 2) { t0 = ct; at = now; } }                               // the clock only starts once the player's time has really begun to move: sound comes out a moment after "play"
-      if (ticks < 2) prev = ct;
+      if (ct !== seen) { ticks++; if (ticks === 2) { t0 = Math.abs(ct - prev) > .5 ? ct : Math.max(prev, ct); at = now; } }                               // the clock only starts once the player's time has really begun to move: sound comes out a moment after "play"
+      if (ticks < 2) prev = Math.abs(ct - prev) > .5 ? ct : Math.max(prev, ct);
       else { let est = t0 + (now - at) / 1000;
-        if (est > ct + .25) { est = Math.max(prev, ct); t0 = est; at = now; }                             // ahead of the player: wait for it, never step back
-        else if (est < ct - .25) { est = ct; t0 = ct; at = now; }                                         // behind (a jump forward): catch up at once
-        else if (ct !== seen) t0 += (ct - est) * .1;                                                      // otherwise lean gently toward each report
+        if (Math.abs(est - ct) > 1.5) { est = ct; t0 = ct; at = now; prev = ct; debt = 0; }                         // far apart: something really jumped, so take the player's word
+        else { if (ct !== seen) debt += (ct - est) * .08; const adj = clamp(debt, -.004, .004); t0 += adj; debt -= adj; est += adj; }                   // otherwise the clock is trusted: the player's reports hang back and bunch up, above all in the first second, while the sound itself runs on evenly. Lean toward them slowly: no stopping, no stepping back
         prev = Math.max(prev, est); } }
     seen = ct; LIB.est = Math.max(0, prev);
     if (!LIB.cv || !LIB.cv.isConnected || LIB.cv.dataset.path !== LIB.playing) LIB.cv = [...document.querySelectorAll('.lib-wave')].find(c => c.dataset.path === LIB.playing) || null;
