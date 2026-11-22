@@ -323,7 +323,8 @@ function renderNode(n) {
   const title = isS ? 'sample' : spec ? (spec.tab || spec.name) : n.type + ' (missing)';
   const go = !isS && spec && h('button', { class: 'go', title: 'Run this module (shift-click: re-run everything upstream too)' }, r.state === 'running' ? '■' : '▸');
   if (go) go.onclick = ev => { ev.stopPropagation(); (R[n.id] || {}).state === 'running' ? stopNode(n.id) : runNode(n.id, new Map(), ev.shiftKey).catch(() => {}); };
-  const head = h('div', { class: 'node-head' }, h('span', { class: 'glyph' }, GLYPHS[n.type] || '✦'), h('span', { class: 'node-title' }, title), go,
+  const where = !isS && spec && spec.far && h('button', { class: 'where' + (spec.where === 'pc' ? ' pc' : ''), title: (spec.where === 'pc' ? `Runs on ${spec.far.name}.` : 'Runs on this Mac.') + ` Click to switch. This sets where every ${spec.tab || spec.name} module runs.`, onclick: ev => { ev.stopPropagation(); engineWhere(n.type); } }, spec.where === 'pc' ? 'PC' : 'Mac');
+  const head = h('div', { class: 'node-head' }, h('span', { class: 'glyph' }, GLYPHS[n.type] || '✦'), h('span', { class: 'node-title' }, title), where, go,
     h('button', { title: 'Remove', onclick: ev => { ev.stopPropagation(); removeNode(n.id); } }, '×'));
   head.addEventListener('mousedown', ev => dragNode(ev, n));
   e.append(head, h('div', { class: 'progress' + (r.frac == null ? ' indet' : '') }, h('i', { style: r.frac != null ? `width:${Math.round(r.frac * 100)}%` : '' })));
@@ -723,6 +724,14 @@ async function libraryOpen(body) {
   libraryDraw();
 }
 
+async function engineWhere(id) {                        // switch an engine between this Mac and the PC, from any of its modules
+  const e = ENG[id]; if (!e || !e.far) return;
+  if (Object.values(S.nodes).some(n => n.type === id && (R[n.id] || {}).state === 'running')) return toast('wait until it has finished: switching now would stop it', true);
+  const to = e.where === 'pc' ? 'mac' : 'pc';
+  if (to === 'pc' && !e.far.reachable) return toast(e.far.name + ' is not reachable right now', true);
+  try { const r = await api(`/api/engines/${id}/where`, { json: { where: to } }); toast(`${e.tab || e.name} now runs on ${r.where === 'pc' ? e.far.name : 'this Mac'}`); } catch (x) { return toast(String(x.message || x), true); }
+  await refreshEngines(); Object.values(S.nodes).filter(n => n.type === id).forEach(renderNode);
+}
 async function refreshEngines() { try { for (const e of await api('/api/engines')) ENG[e.id] = e; } catch {} }
 
 /* ---------- circuits: one open at a time, with a name, like a document ---------- */
