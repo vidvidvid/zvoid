@@ -213,7 +213,7 @@ def revise(song: dict, m: dict, sc: dict, tries_left: int, rng) -> dict:
                   f'- clear pitches vs noise: tonal {m["tonal"]}, hiss {m["noise"]}\n- voice-like movement: {m["voice"]}\n- how squashed and distorted: {m["dist"]}\n'
                   f'- loudness through the song in 5-second steps, in dB below its loudest: {m["sections"]}\n  (contrast {m["contrast"]} dB; under 4 means it never really changes)\n'
                   + (f'- the finished song it is most like: "{sc["nearest"]}" (variety {sc["variety"]}, 1 = very different)\n' if sc.get("nearest") else "")
-                  + f"\nTries left for this song: {tries_left}. If it already has drums, contrast and its own character, answer keep=true (still return the caption, lyrics and bpm unchanged).\n"
+                  + f"\nTries left for this song: {tries_left}. The artist heard a song that measured 0.12 for drum hits and said it needed more drums, so merely detectable is not enough: aim for drum hits of 0.2 or more in the parts where drums play. Answer keep=true only if drum hits are at least 0.2, contrast is at least 5 dB and it is unlike the others (still return the caption, lyrics and bpm unchanged).\n"
                   "Otherwise rewrite the caption and lyrics to fix what the numbers show, keeping the idea and the creature's words at the front. Say in one sentence what you changed and why.")
         r = chat.think(HOUSE, prompt, REVISE_SCHEMA, 240)
         if r.get("keep"):
@@ -330,9 +330,10 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                             _state["msg"] = f"song {n} of {count} · “{song['title']}” · reading its measurements"
                             rv = revise(best["song"], best["m"], best["sc"], tries - t, rng)
                             entry["tries"][-1]["then"] = rv["note"]
-                            if rv["keep"]:
+                            if rv["keep"] and best["sc"]["drums"] >= .55:
                                 break
-                            song = rv["song"]
+                            if not rv["keep"]:
+                                song = rv["song"]                    # a kept plan that is still short on drums simply gets another go: a new take of the same plan
                     except Exception as ex:
                         fails += 1
                         shutil.rmtree(where, ignore_errors=True)
