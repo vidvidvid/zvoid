@@ -371,6 +371,11 @@ def create_app():
             raise HTTPException(404, "that track is gone (was the original moved?)")
         return FileResponse(f.resolve())
 
+    @app.post("/api/gym/{slug}/seed")
+    def gym_seed(slug: str, body: dict):
+        """A new collage of the creature's own tracks, for it to sing from."""
+        return gym_call(gym.seed, slug, body.get("limb"))
+
     @app.get("/api/gym/{slug}/grain/{name}")
     def gym_grain_file(slug: str, name: str):
         return FileResponse(gym_call(gym.grain, slug, name), media_type="audio/wav")

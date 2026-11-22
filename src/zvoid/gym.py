@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from .paths import CREATURES_DIR, ENGINES_DIR, ENVS_DIR, ROOT
+from .paths import CREATURES_DIR, ENGINES_DIR, ENVS_DIR, ROOT, UPLOADS_DIR
 
 _lock = threading.Lock()
 _train: dict = {"slug": None, "proc": None, "state": "idle", "msg": "", "stage": "", "epoch": 0, "max_epochs": 0,
@@ -371,6 +371,99 @@ def feed_links(slug: str, paths: list[str]) -> dict:
     regroup(c)
     _save(c)
     return dict(_view(c), skipped=skipped)
+
+
+def _cut(src: Path, start: float, secs: float, sr: int = 44100) -> np.ndarray:
+    """A stretch of any audio or video file, as stereo samples."""
+    r = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{max(0, start):.3f}", "-t", f"{secs:.3f}", "-i", str(src), "-vn", "-ac", "2", "-ar", str(sr), "-f", "f32le", "-"],
+                       capture_output=True)
+    return np.frombuffer(r.stdout[:len(r.stdout) // 8 * 8], dtype="<f4").reshape(-1, 2).copy()
+
+
+def seed(slug: str, limb=None, dur: float = 14.0) -> dict:
+    """What the creature sings from: a new collage cut out of its own tracks, different every time. Pieces of a limb's
+    tracks are held, looped on the beat, stuttered, slowed, pitched or turned round, in one or two layers. ACE-Step then
+    plays this back through what the creature has learned, so a song starts from its food and not from a list of words."""
+    c = _load(slug)
+    d = _dir(slug)
+    food = [f for f in c["food"] if (d / "food" / f["name"]).exists()]
+    mine = [f for f in food if limb is None or f.get("limb", 0) == limb] or food
+    if not mine:
+        raise RuntimeError("its tracks are gone (were the originals moved?)")
+    rng = np.random.default_rng()
+    sr, n = 44100, int(dur * 44100)
+    out = np.zeros((n, 2), "float32")
+    lm = next((l for l in c.get("limbs", []) if l["id"] == limb), None)
+    bpm = float(np.clip((lm or {}).get("mean", {}).get("bpm") or np.mean([f.get("bpm") or 120 for f in mine]), 60, 190))
+    beat = 60 / bpm
+    used, moves = [], []
+
+    def piece(pool, secs):
+        f = pool[int(rng.integers(len(pool)))]
+        u = rng.random()
+        rate = 1.0 if u < .5 else float(2 ** (rng.integers(-7, 8) / 12)) if u < .8 else .5 if u < .93 else 2.0
+        L = float(f.get("secs") or 60)
+        need = secs * rate + .05
+        x = _cut(d / "food" / f["name"], rng.uniform(L * .04, max(L * .05, L * .96 - need)), need)
+        if len(x) < sr * .03:
+            return None
+        if rate != 1:
+            idx = np.arange(0, len(x) - 1, rate)
+            x = np.stack([np.interp(idx, np.arange(len(x)), x[:, ch]) for ch in (0, 1)], 1).astype("float32")
+        back = rng.random() < .15
+        if back:
+            x = x[::-1].copy()
+        if f["name"] not in used:
+            used.append(f["name"])
+        return x[:int(secs * sr)], ("slowed " if rate == .5 else "sped up " if rate == 2 else "pitched " if rate != 1 else "") + ("backwards " if back else "")
+
+    def edge(x, ms=6):
+        k = min(len(x) // 2, int(sr * ms / 1000))
+        if k:
+            x[:k] *= np.linspace(0, 1, k)[:, None]
+            x[-k:] *= np.linspace(1, 0, k)[:, None]
+        return x
+
+    def voice(pool, gain):
+        t = 0.0
+        while t < dur - .2:
+            kind = rng.choice(["hold", "loop", "stutter"], p=[.4, .4, .2])
+            if kind == "hold":
+                L = beat * int(rng.choice([4, 8, 8, 12]))
+                got = piece(pool, L)
+                x = got and edge(got[0], 25)
+            elif kind == "loop":                              # a short piece repeated on the beat: this is where new patterns come from
+                L, unit = beat * int(rng.choice([4, 8, 8])), beat * float(rng.choice([.5, 1, 1, 2, 1.5, .75]))
+                got = piece(pool, unit)
+                x = got and np.concatenate([edge(got[0].copy()) * (.75 + .25 * (i % 2 == 0)) for i in range(int(np.ceil(L / unit)))])[:int(L * sr)]
+            else:
+                L, unit = beat * int(rng.choice([1, 2, 2, 4])), beat / int(rng.choice([4, 6, 8, 3]))
+                got = piece(pool, unit)
+                reps = int(np.ceil(L / unit))
+                x = got and np.concatenate([edge(got[0].copy(), 3) * (1 - .6 * i / reps) for i in range(reps)])[:int(L * sr)]
+            if got:
+                i0 = int(t * sr)
+                seg = out[i0:i0 + len(x)]
+                seg += x[:len(seg)] * gain
+                moves.append(got[1] + kind)
+            t += L
+
+    voice(mine, 1.0)
+    if rng.random() < .6:                                     # a second layer, sometimes from another limb
+        voice(food if rng.random() < .35 else mine, float(rng.uniform(.35, .7)))
+    pk = float(np.abs(out).max())
+    if pk < 1e-4:
+        raise RuntimeError("could not read its tracks")
+    out = np.tanh(out / pk * 1.3) / np.tanh(1.3) * .9
+    k = int(.05 * sr)
+    out[-k:] *= np.linspace(1, 0, k)[:, None]
+    sd = UPLOADS_DIR / "seeds"                                # with the other input audio, where the engines are allowed to read
+    sd.mkdir(parents=True, exist_ok=True)
+    for old in sorted(sd.glob(f"{slug}_seed_*.wav"))[:-6]:
+        old.unlink(missing_ok=True)
+    path = sd / f"{slug}_seed_{time.strftime('%Y%m%d-%H%M%S')}_{int(rng.integers(1000)):03d}.wav"
+    sf.write(path, out, sr, subtype="PCM_16")
+    return {"path": str(path), "tracks": used, "moves": moves, "bpm": round(bpm)}
 
 
 def grain(slug: str, name: str) -> Path:

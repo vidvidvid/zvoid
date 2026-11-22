@@ -108,11 +108,19 @@ def _creature(dit, p, ctx):
     # adapters only apply on the PyTorch path, so skip the MLX fast path while a creature is active
     if not hasattr(dit, "_zv_mlx"):
         dit._zv_mlx = bool(getattr(dit, "use_mlx_dit", False))
-    dit.use_mlx_dit = dit._zv_mlx and not want
+    dit.use_mlx_dit = dit._zv_mlx and not want and not float(p.get("cover_noise_strength") or 0) > 0   # the fast path also ignores "keep the source sound"
     if not want:
         return ""
     dit.set_use_lora(True)
-    dit.set_lora_scale(float(p.get("creature_strength", 1)))
+    strength = float(p.get("creature_strength", 1))
+    dit.set_lora_scale(strength)
+    if strength > 1:                                          # ACE-Step caps its own setting at 1; past that the adapter is applied directly
+        try:
+            name = getattr(dit, "_lora_active_adapter", None) or next(iter(getattr(dit, "_active_loras", None) or {}), None)
+            if not name or not dit._apply_scale_to_adapter(name, min(strength, 4.0)):
+                ctx.progress("Could not push the creature past strength 1: using 1.")
+        except Exception as ex:
+            ctx.progress(f"Could not push the creature past strength 1 ({ex}): using 1.")
     try:
         import json as _json
         return _json.loads((cdir / "creature.json").read_text()).get("tag", "")

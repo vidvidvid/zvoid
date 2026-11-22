@@ -577,8 +577,13 @@ async function gymSing(c, limbId) {
   const caption = [limb && c.trained ? limb.trigger : '', c.trained ? c.tag : '', c.style || '', ...(limb ? limb.tags : []), 'instrumental'].filter(Boolean).join(', ');
   const params = { task: 'text2music', caption, lyrics: '[Instrumental]', duration: 14, thinking: false, batch: 1, seed: -1, creature: c.trained ? c.slug : '', creature_strength: 1 };
   if (m && m.bpm) params.bpm = Math.round(clamp(m.bpm, 50, 200));
-  Gym.sing = { slug: c.slug, limb: limbId == null ? 0 : limbId, t0: performance.now(), msg: 'composing…' }; toast(c.trained ? 'it is composing…' : 'it has not trained yet: this is the plain model\'s guess at that limb');
+  Gym.sing = { slug: c.slug, limb: limbId == null ? 0 : limbId, t0: performance.now(), msg: 'cutting up its tracks…' };
   try {
+    try {                                                // it sings from a fresh collage of its own tracks, played back through what it has learned: never the same twice
+      const sd = await api(`/api/gym/${c.slug}/seed`, { json: { limb: limb ? limb.id : null } }), r = Math.random;
+      Object.assign(params, { task: 'cover', src_audio: sd.path, bpm: sd.bpm, caption: caption.replace(/, instrumental$/, ''), cover_strength: +(.4 + r() * .5).toFixed(2), cover_noise_strength: +(.14 + r() * .24).toFixed(2), creature_strength: c.trained ? +(1.1 + r() * r() * .9).toFixed(2) : 1 });   // measured: .2 keeps the collage's shape and colour but none of its waveform, .35 keeps most of it
+      toast(`it is composing from ${sd.tracks.length} of its tracks` + (c.trained ? '' : ' (it has not trained yet, so the plain model plays them back)'));
+    } catch (e) { toast(c.trained ? 'its tracks could not be read, so it composes from words alone' : 'it has not trained yet: this is the plain model\'s guess at that limb'); }
     const { id } = await api('/api/run', { json: { engine: 'ace_step', params } });
     for (;;) { await sleep(500); const j = await api('/api/jobs/' + id); Gym.sing.id = id; Gym.sing.frac = j.frac || 0; Gym.sing.msg = (j.msg || 'composing…') + (j.frac != null ? ` · ${Math.round(j.frac * 100)}%` : '');
       if (j.state === 'done') { const out = (j.outputs || [])[0]; if (!out) throw new Error('nothing came back'); gymPlayPath(out.path); toast('it sings (saved to the library)'); break; }

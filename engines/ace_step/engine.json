@@ -130,6 +130,17 @@
       "help": "cover: 1 = keep the original structure closely, 0.2 = loose style transfer."
     },
     {
+      "name": "cover_noise_strength",
+      "type": "slider",
+      "min": 0,
+      "max": 0.95,
+      "step": 0.05,
+      "default": 0,
+      "advanced": true,
+      "label": "keep the source sound",
+      "help": "cover: how much of the source audio itself survives. 0 = only its structure is followed, the sound is invented. 0.3–0.6 = a mutation of the source: its textures and timbre come through, reshaped. 0.9 = almost the source."
+    },
+    {
       "name": "repaint_start",
       "type": "number",
       "default": 0,
