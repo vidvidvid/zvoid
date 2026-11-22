@@ -431,7 +431,8 @@ function gymBuild() {
       h('h3', {}, 'food'),
       h('div', { class: 'food' }, c.food.length ? c.food.map(f => {
         const cap = h('input', { spellcheck: 'false', placeholder: 'caption for this track (optional)', onchange: () => api('/api/gym/' + c.slug, { method: 'PUT', json: { captions: { [f.name]: cap.value } } }) }); cap.value = f.caption || '';
-        return h('div', { class: 'food-row' + (Gym.playing === f.name ? ' playing' : ''), style: `--c:hsl(${hueOf(f.bright ?? .3)},90%,60%)` }, h('button', { class: 'food-play', title: 'Play this track to the entity', onclick: () => gymPlay(c.slug, f.name) }, Gym.playing === f.name ? '■' : '▶'), h('div', {}, h('b', { title: f.name }, f.name), h('small', {}, `${Math.round(f.secs)}s · ~${Math.round(f.bpm || 0)} bpm · bass ${Math.round((f.low || 0) * 100)}% · bright ${Math.round((f.bright || 0) * 100)}%`), cap),
+        return h('div', { class: 'food-row' + (Gym.playing === f.name ? ' playing' : ''), style: `--c:hsl(${hueOf(f.bright ?? .3)},90%,60%)` }, h('button', { class: 'food-play', title: 'Play this track to the entity', onclick: () => gymPlay(c.slug, f.name) }, Gym.playing === f.name ? '■' : '▶'), h('div', {}, h('b', { title: f.name + '\nDrag it onto the creature, or double-click, to make it sing from this track', draggable: 'true', ondragstart: e => { e.dataTransfer.setData('text/x-zvoid-food', f.name); e.dataTransfer.effectAllowed = 'copy'; }, ondblclick: () => gymSing(c, null, f.name) }, f.name), h('small', {}, `${Math.round(f.secs)}s · ~${Math.round(f.bpm || 0)} bpm · bass ${Math.round((f.low || 0) * 100)}% · bright ${Math.round((f.bright || 0) * 100)}%`), cap),
+          h('button', { title: 'Sing from this track: the creature makes a new clip out of a passage of it', disabled: running, onclick: () => gymSing(c, null, f.name) }, '♪'),
           h('button', { title: 'Take this track away', disabled: running, onclick: () => gymDo(() => api(`/api/gym/${c.slug}/food/${encodeURIComponent(f.name)}`, { method: 'DELETE' })) }, '×'));
       }) : h('p', { class: 'gym-note' }, 'Nothing yet. Drop audio files anywhere on this screen.')),
       h('div', { class: 'acts' }, h('button', { disabled: running, onclick: () => { const i = $('#gym-pick'); i.value = ''; i.click(); } }, '+ feed audio or video…'), h('button', { disabled: running, title: 'Pick a folder. Tracks are linked where they are, not copied.', onclick: gymPickFolder }, '+ feed a folder…')),
@@ -462,6 +463,9 @@ function gymBuild() {
       h('p', { class: 'gym-note' }, 'On this Mac, training uses the Apple GPU and pauses the ace-step module. Stopping keeps the last saved checkpoint.'),
       ...(!running ? [h('div', { class: 'acts gym-end' }, h('button', { class: 'danger', data: { label: 'delete creature' }, title: 'Deletes what it learned and its list of tracks. Your original audio files are not touched.', onclick: e => gymDelete(e.currentTarget, c) }, 'delete creature'))] : []));
   }
+  stage.addEventListener('dragover', e => { if ([...e.dataTransfer.types].includes('text/x-zvoid-food')) { e.preventDefault(); stage.classList.add('fed'); } });
+  stage.addEventListener('dragleave', () => stage.classList.remove('fed'));
+  stage.addEventListener('drop', e => { stage.classList.remove('fed'); const name = e.dataTransfer.getData('text/x-zvoid-food'); if (name && Gym.cur) { e.preventDefault(); e.stopPropagation(); gymSing(Gym.cur, null, name); } });   // a track thrown into the creature: it sings from that one
   const keepPicker = $('#gym-picker'); if (keepPicker) stage.append(keepPicker);
   el.replaceChildren(left, stage, right, h('input', { id: 'gym-pick', type: 'file', multiple: true, accept: 'audio/*,video/*,.wav,.mp3,.flac,.aiff,.aif,.ogg,.m4a,.mp4,.mov,.mkv,.webm', hidden: true, onchange: e => gymFeedFiles([...e.target.files]) }));
 }
@@ -569,7 +573,8 @@ setInterval(() => {                                                             
 
 /* Ask a limb to sing: ACE-Step makes a short new clip in that limb's style (through the creature's adapter if it has trained),
    and the creature performs it. Until it has trained, you hear what the plain model makes of that limb's description. */
-async function gymSing(c, limbId) {
+async function gymSing(c, limbId, track) {              // track: sing from this one of its tracks, not a random one
+  if (track && c) { const f = c.food.find(x => x.name === track); if (f) limbId = f.limb || 0; }
   if (!c || !c.food.length) return toast('feed it first');
   if (c.training && c.training.state === 'running') return toast('it cannot sing while it trains: training has the GPU');
   if (Gym.sing) return toast('it is already composing…');
@@ -581,7 +586,7 @@ async function gymSing(c, limbId) {
   Gym.sing = { slug: c.slug, limb: limbId == null ? 0 : limbId, t0: performance.now(), msg: 'listening to its tracks…' };
   try {
     try {                                                // it sings from a fresh collage of its own tracks, played back through what it has learned: never the same twice
-      const sd = await api(`/api/gym/${c.slug}/seed`, { json: { limb: limb ? limb.id : null } }), r = Math.random;
+      const sd = await api(`/api/gym/${c.slug}/seed`, { json: { limb: limb ? limb.id : null, track: track || '' } }), r = Math.random;
       Object.assign(params, { task: 'cover', src_audio: sd.path, bpm: sd.bpm, caption: caption.replace(/, instrumental$/, ''), cover_strength: +(.5 + r() * .4).toFixed(2), cover_noise_strength: +(.2 + r() * .22).toFixed(2), creature_strength: c.trained ? +(1.1 + r() * r() * .9).toFixed(2) : 1 });   // measured: .2 keeps the passage's shape and colour but none of its waveform, .35 keeps most of it
       label = `${c.name} sings · from ${sd.tracks[0].replace(/\.[a-z0-9]+$/i, '')}`;
       toast(`it is composing from “${sd.tracks[0].replace(/\.[a-z0-9]+$/i, '')}”` + (c.trained ? '' : ' (it has not trained yet, so the plain model plays them back)'));

@@ -277,7 +277,7 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
   background: linear-gradient(90deg, #fff, #b9a8ff 55%, #2ee6d6); -webkit-background-clip: text; background-clip: text; color: transparent; }
 #gym-caption div { font: 11px var(--mono); color: var(--muted); letter-spacing: .08em; }
 .food { display: grid; gap: 6px; max-height: 34vh; overflow: auto; }
-.food-row { display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; align-items: start; padding: 7px 8px; border: 1px solid var(--line); border-radius: 10px; }
+.food-row { display: grid; grid-template-columns: 24px 1fr auto auto; gap: 8px; align-items: start; padding: 7px 8px; border: 1px solid var(--line); border-radius: 10px; }
 .food-row i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); margin-top: 4px; }
 .food-row div { display: grid; gap: 3px; min-width: 0; } .food-row b { font: 600 11.5px var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .food-row small { font: 9.5px var(--mono); color: var(--muted); } .food-row input { padding: 3px 6px !important; font-size: 11px !important; }
@@ -318,6 +318,8 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 #gym-bloom { position: absolute; inset: 0; width: 100%; height: 100%; filter: blur(18px) brightness(1.7) saturate(1.4); opacity: .85; pointer-events: none; }
 
 #gym .food-play { width: 22px; height: 22px; padding: 0; border-radius: 50%; font-size: 8px; display: grid; place-items: center; color: var(--c); border-color: var(--c); box-shadow: 0 0 10px -3px var(--c); }
+.food-row b[draggable] { cursor: grab; }
+#gym-stage.fed { box-shadow: inset 0 0 0 1px var(--violet), inset 0 0 90px -30px var(--violet); }
 .food-row.playing { border-color: var(--c); box-shadow: 0 0 24px -10px var(--c); }
 #gym-stage { cursor: crosshair; }
 
@@ -448,3 +450,5 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 @keyframes runp-slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
 #runp .lib-wave { height: 26px; }
 .node.waiting { opacity: .7; } .node.done { box-shadow: 0 0 0 1px #1f6b62; } .node.failed { box-shadow: 0 0 0 1px #c2185b, 0 0 26px -10px #c2185b; }
+
+.lib-rename { width: 100%; box-sizing: border-box; background: var(--ink); color: var(--text); border: 1px solid var(--violet); border-radius: 5px; padding: 2px 6px; font: inherit; outline: none; }

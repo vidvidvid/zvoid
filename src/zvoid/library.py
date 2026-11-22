@@ -94,6 +94,45 @@ def star(path: str, on: bool) -> bool:
     return on
 
 
+_TITLES = OUTPUTS_DIR / ".titles.json"
+
+
+def _titles() -> dict:
+    try:
+        return dict(json.loads(_TITLES.read_text()))
+    except Exception:
+        return {}
+
+
+def rename(path: Path, title: str) -> dict:
+    """Give a made file a name of your own. Clips the modules made are renamed on disk too, so the name follows them into
+    Finder and other programs; stills, films and recordings keep their file name (it carries their creature and date)
+    and only show the new name here. An empty name goes back to the automatic one."""
+    title = re.sub(r"\s+", " ", title or "").strip()[:120]
+    t, new = _titles(), path
+    t.pop(str(path), None)
+    if title and (path.parent / "meta.json").exists():
+        stem = re.sub(r"\s+", " ", re.sub(r'[/\\:*?"<>|\x00-\x1f]', " ", title)).strip(" .")[:100] or path.stem
+        new, n = path.with_name(stem + path.suffix), 1
+        while new.exists() and new != path:
+            n += 1
+            new = path.with_name(f"{stem} {n}{path.suffix}")
+        if new != path:
+            path.rename(new)
+            meta = path.parent / "meta.json"
+            try:                                              # the run's own record points at the file by name
+                meta.write_text(meta.read_text().replace(json.dumps(str(path))[1:-1], json.dumps(str(new))[1:-1]))
+            except Exception:
+                pass
+            if str(path) in _stars():
+                star(str(path), False)
+                star(str(new), True)
+    if title:
+        t[str(new)] = title
+    _TITLES.write_text(json.dumps(t, indent=1, ensure_ascii=False))
+    return {"path": str(new), "name": new.name, "title": title}
+
+
 def _kind(p: Path) -> str:
     e = p.suffix.lower()
     return "audio" if e in AUDIO_EXT else "midi" if e in MIDI_EXT else "still" if e in IMAGE_EXT else "video" if e in VIDEO_EXT else "other"
@@ -101,7 +140,7 @@ def _kind(p: Path) -> str:
 
 def list_items(limit: int = 800) -> list[dict]:
     """Every file worth showing, newest first: what the modules made, plus stills, time-lapses, films and sound recordings."""
-    stars, items = _stars(), []
+    stars, items, named = _stars(), [], _titles()
     for run in list_runs(400):
         params = run.get("params") or {}
         label = (run.get("label") or "").strip()
@@ -142,6 +181,9 @@ def list_items(limit: int = 800) -> list[dict]:
             source = "still" if k == "still" else "film" if tag == "film-" else "sound recording" if tag == "sound-" else default
             items.append({"path": str(f), "name": f.name, "kind": k, "title": f"{creature.replace('-', ' ')} · {source}" if creature else f.stem, "when": when,
                           "source": source, "engine": "", "creature": creature, "seed": None, "model": "", "size": f.stat().st_size, "star": str(f) in stars})
+    for it in items:
+        if it["path"] in named:
+            it["title"], it["renamed"] = named[it["path"]], True
     items.sort(key=lambda i: i["when"], reverse=True)
     return items[:limit]
 
@@ -154,15 +196,19 @@ def trash(path: Path) -> dict:
     while dst.exists():
         n += 1
         dst = bin_ / f"{path.stem} {n}{path.suffix}"
-    was_star = str(path) in _stars()
+    was_star, title = str(path) in _stars(), _titles().get(str(path))
     path.rename(dst)
+    if title:
+        t = _titles()
+        t.pop(str(path), None)
+        _TITLES.write_text(json.dumps(t, indent=1, ensure_ascii=False))
     star(str(path), False)
     parent, meta = path.parent, None
     if (parent / "meta.json").exists() and not any(p.name != "meta.json" for p in parent.iterdir()):
         meta = (parent / "meta.json").read_text()
         (parent / "meta.json").unlink()
         parent.rmdir()
-    return {"path": str(path), "trash": str(dst), "meta": meta, "star": was_star}
+    return {"path": str(path), "trash": str(dst), "meta": meta, "star": was_star, "title": title}
 
 
 def restore(rec: dict) -> None:
@@ -180,6 +226,10 @@ def restore(rec: dict) -> None:
         (dst.parent / "meta.json").write_text(rec["meta"])
     if rec.get("star"):
         star(str(dst), True)
+    if rec.get("title"):
+        t = _titles()
+        t[str(dst)] = rec["title"]
+        _TITLES.write_text(json.dumps(t, indent=1, ensure_ascii=False))
 
 
 def peaks(path: Path, n: int = 600) -> dict:

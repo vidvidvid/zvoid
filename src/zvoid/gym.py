@@ -380,7 +380,7 @@ def _cut(src: Path, start: float, secs: float, sr: int = 44100) -> np.ndarray:
     return np.frombuffer(r.stdout[:len(r.stdout) // 8 * 8], dtype="<f4").reshape(-1, 2).copy()
 
 
-def seed(slug: str, limb=None, dur: float = 14.0, mode: str = "") -> dict:
+def seed(slug: str, limb=None, dur: float = 14.0, mode: str = "", track: str = "") -> dict:
     """What the creature sings from: a passage of one of its own tracks, different every time. ACE-Step then plays it back
     through what the creature has learned, so a song starts from its food and not from a list of words.
 
@@ -421,7 +421,12 @@ def seed(slug: str, limb=None, dur: float = 14.0, mode: str = "") -> dict:
             x[-k:] *= np.linspace(1, 0, k)[:, None]
         return x
 
-    f = mine[int(rng.integers(len(mine)))]
+    f = next((x for x in food if x["name"] == track), None) if track else None      # a track you chose, or one of the limb's at random
+    if track and not f:
+        raise FileNotFoundError("that track is gone (was the original moved?)")
+    if f:
+        mine = [x for x in food if x.get("limb", 0) == f.get("limb", 0)] or food
+    f = f or mine[int(rng.integers(len(mine)))]
     bpm = float(np.clip(f.get("bpm") or 120, 70, 180))
     beat = 60 / bpm
     used, moves = [f["name"]], []

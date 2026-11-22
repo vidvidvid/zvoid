@@ -648,6 +648,28 @@ async function libTrash(it) {                        // one click: it goes to th
   try { const r = await api('/api/made/trash', { json: { path: it.path } }); (LIB.undo || (LIB.undo = [])).push(r.undo); if (LIB.undo.length > 50) LIB.undo.shift();
     LIB.items = LIB.items.filter(x => x.path !== it.path); if (LIB.playing === it.path) { LIB.audio.pause(); LIB.playing = null; } libraryDraw(); toast('moved to the Trash · ⌘Z to undo'); } catch (e) { toast('could not delete: ' + e.message, true); }
 }
+function libRename(it, el) {                           // the name becomes a text field: Enter saves, Esc cancels, empty = the automatic name again
+  if (!el || el.querySelector('input')) return;
+  const inp = h('input', { class: 'lib-rename', spellcheck: 'false' }); inp.value = it.title;
+  let done = false;
+  const end = async save => {
+    if (done) return; done = true;
+    const title = inp.value.trim();
+    if (save && title !== it.title) {
+      try {
+        const r = await api('/api/made/rename', { json: { path: it.path, title } });
+        if (LIB.playing === it.path) LIB.playing = r.path;
+        toast(title ? 'renamed' : 'back to its automatic name');
+      } catch (e) { toast('could not rename: ' + (e.message || e), true); }
+      try { LIB.items = await api('/api/made'); } catch (e) {}
+    }
+    libraryDraw();
+  };
+  inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') end(true); else if (e.key === 'Escape') end(false); });
+  inp.addEventListener('blur', () => end(true));
+  inp.addEventListener('click', e => e.stopPropagation());
+  el.replaceChildren(inp); inp.focus(); inp.select();
+}
 async function libUndo() {
   const u = LIB.undo && LIB.undo.pop(); if (!u) return false;
   try { await api('/api/made/restore', { json: { undo: u } }); toast('put back'); if ($('#lib-list')) { LIB.items = await api('/api/made'); libraryDraw(); } } catch (e) { toast('could not put it back: ' + e.message, true); }
@@ -673,6 +695,7 @@ function libraryDraw() {
   const tools = it => h('div', { class: 'lib-tools' },
     h('button', { class: 'lib-star' + (it.star ? ' on' : ''), title: it.star ? 'Remove the star' : 'Star this as a keeper', onclick: () => libStar(it) }, it.star ? '★' : '☆'),
     it.kind === 'audio' && h('button', { title: 'Add to the canvas as a sample', onclick: () => { addNode('sample', undefined, undefined, { file: { path: it.path, name: it.name } }); toast('added to the canvas'); } }, '+ canvas'),
+    h('button', { title: 'Rename (or double-click the name)', onclick: e => libRename(it, e.currentTarget.closest('.lib-row, .lib-tile').querySelector('.lib-what')) }, '✎'),
     h('button', { title: 'Show in Finder', onclick: () => api('/api/reveal', { json: { path: it.path } }) }, '↗'),
     h('button', { class: 'lib-del', title: 'Move to the Trash (⌘Z brings it back)', onclick: () => libTrash(it) }, '×'));
   list.replaceChildren(...days.flatMap(dy => {
@@ -680,10 +703,10 @@ function libraryDraw() {
     return [h('h5', { class: 'lib-day' }, `${dy.name} · ${dy.items.length}`),
       tiles.length && h('div', { class: 'lib-grid' }, tiles.map(it => h('div', { class: 'lib-tile' },
         h('button', { class: 'lib-thumb', title: 'Open', onclick: () => libPreview(it) }, h('img', { loading: 'lazy', src: '/api/thumb?path=' + encodeURIComponent(it.path) }), it.kind === 'video' && h('i', {}, it.source === 'film' ? '▶ film' : '▶ time-lapse')),
-        h('div', { class: 'lib-what', title: it.name }, it.title), h('div', { class: 'lib-meta' }, meta(it)), tools(it)))),
+        h('div', { class: 'lib-what', title: it.name, ondblclick: e => libRename(it, e.currentTarget) }, it.title), h('div', { class: 'lib-meta' }, meta(it)), tools(it)))),
       ...rows.map(it => h('div', { class: 'lib-row' + (LIB.playing === it.path ? ' playing' : '') },
         it.kind === 'audio' ? h('button', { class: 'lib-pp', title: 'Play / stop', onclick: () => libPlay(it) }, LIB.playing === it.path ? '■' : '▶') : h('span', { class: 'lib-pp midi' }, '♪'),
-        h('div', { class: 'lib-text' }, h('div', { class: 'lib-what', title: it.title + '\n' + it.name }, it.title), h('div', { class: 'lib-meta' }, meta(it))), it.kind === 'audio' ? libWave(it) : h('span'), tools(it)))];
+        h('div', { class: 'lib-text' }, h('div', { class: 'lib-what', title: it.title + '\n' + it.name + '\ndouble-click to rename', ondblclick: e => libRename(it, e.currentTarget) }, it.title), h('div', { class: 'lib-meta' }, meta(it))), it.kind === 'audio' ? libWave(it) : h('span'), tools(it)))];
   }).filter(Boolean));
 }
 async function libraryOpen(body) {

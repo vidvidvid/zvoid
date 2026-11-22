@@ -257,6 +257,14 @@ def create_app():
         b = await request.json()
         return {"star": library.star(str(_inside_outputs(b.get("path"))), bool(b.get("on")))}
 
+    @app.post("/api/made/rename")
+    async def made_rename(request: Request):
+        b = await request.json()
+        f = _inside_outputs(b.get("path"))
+        if not f.is_file():
+            raise HTTPException(404, "that file is gone")
+        return library.rename(f, str(b.get("title") or ""))
+
     @app.post("/api/made/trash")
     async def made_trash(request: Request):
         f = _inside_outputs((await request.json()).get("path"))
@@ -375,7 +383,7 @@ def create_app():
     @app.post("/api/gym/{slug}/seed")
     def gym_seed(slug: str, body: dict):
         """A new collage of the creature's own tracks, for it to sing from."""
-        return gym_call(gym.seed, slug, body.get("limb"), mode=str(body.get("mode") or ""))
+        return gym_call(gym.seed, slug, body.get("limb"), mode=str(body.get("mode") or ""), track=str(body.get("track") or ""))
 
     @app.get("/api/gym/{slug}/grain/{name}")
     def gym_grain_file(slug: str, name: str):
