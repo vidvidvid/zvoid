@@ -26,8 +26,10 @@ NO_CACHE = {"Cache-Control": "no-store"}
 
 def _inside_outputs(path: str) -> Path:
     p = Path(path).resolve()
-    if OUTPUTS_DIR.resolve() not in p.parents or not p.exists():
+    if OUTPUTS_DIR.resolve() not in p.parents:
         raise HTTPException(400, "file is not in the outputs folder")
+    if not p.exists():
+        raise HTTPException(400, f"“{p.name}” is gone: it was deleted or renamed. Run the module that made it again.")
     return p
 
 
@@ -290,6 +292,18 @@ def create_app():
     @app.get("/api/file")
     def get_file(path: str):
         return FileResponse(_inside_outputs(path))
+
+    @app.post("/api/exists")
+    def files_exist(body: dict):
+        """Which of these files are still there (and inside the outputs folder). A clip deleted or renamed in the library leaves the canvas pointing at nothing."""
+        out = []
+        for p in (body.get("paths") or [])[:200]:
+            try:
+                q = Path(str(p)).resolve()
+                out.append(OUTPUTS_DIR.resolve() in q.parents and q.is_file())
+            except Exception:
+                out.append(False)
+        return out
 
     @app.post("/api/upload")
     async def upload(request: Request, name: str = "audio.wav"):

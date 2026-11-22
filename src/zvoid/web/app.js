@@ -531,9 +531,18 @@ function runNode(id, memo = new Map(), fresh = false) {
   return job;
 }
 /* what a module needs before it can run. `fresh` is true (make everything upstream again) or the set of modules a loop is going round (make those again, leave the rest) */
-function feedInputs(ins, memo, fresh) {
+async function feedInputs(ins, memo, fresh) {
+  const have = [...new Set(ins.map(c => outFile(S.nodes[c.from.node], c.from.port)).filter(f => f && f.path).map(f => f.path))];
+  let gone = new Set();                             // a clip that was deleted or renamed in the library: the module that made it has to make it again
+  if (have.length) { try { const ok = await api('/api/exists', { json: { paths: have } }); gone = new Set(have.filter((p, i) => !ok[i])); } catch (e) {} }
   return Promise.all(ins.map(c => { const u = S.nodes[c.from.node];
     if (u.type === 'loop' && c.from.port === 'each') return loopFeed(u, memo, fresh);
+    const f0 = outFile(u, c.from.port);
+    if (f0 && gone.has(f0.path)) {
+      if (u.type === 'sample') throw new Error(`“${(u.file || {}).name || 'that sample'}” is gone from disk: drop the audio on its sample module again`);
+      if (u.type === 'loop') { u.final = null; u.passes = []; } else { u.result = null; u.passes = []; }
+      toast('a sound it needs was deleted or renamed, so the module that made it runs again'); renderNode(u);
+    }
     const again = fresh === true || (fresh instanceof Set && fresh.has(u.id));
     return (u.type === 'sample' || again || !outFile(u, c.from.port)) ? runNode(u.id, memo, fresh) : null; }));
 }
@@ -808,6 +817,9 @@ function libRename(it, el) {                           // the name becomes a tex
       try {
         const r = await api('/api/made/rename', { json: { path: it.path, title } });
         if (LIB.playing === it.path) LIB.playing = r.path;
+        if (r.path !== it.path) { let hit = false;                 // modules on the canvas that hold this clip follow it to its new name
+          for (const n of Object.values(S.nodes)) { for (const o of [...((n.result || {}).outputs || []), ...(n.passes || []).flatMap(x => x.outputs || [x]), n.cur, n.final, n.file].filter(Boolean)) if (o.path === it.path) { o.path = r.path; hit = true; } }
+          if (hit) { Object.values(S.nodes).forEach(renderNode); save(); } }
         toast(title ? 'renamed' : 'back to its automatic name');
       } catch (e) { toast('could not rename: ' + (e.message || e), true); }
       try { LIB.items = await api('/api/made'); } catch (e) {}
