@@ -901,12 +901,17 @@ function loadPatch(p, name) {
 }
 const patchOk = name => /^[\w\- ]{1,40}$/.test(name);
 async function patchSave(as) {                          // save under its name; a circuit without one asks for it first
+  if (PATCH.busy) return PATCH.busy;                    // typing a name and clicking save is one save, not two: leaving the name field already saves
+  return PATCH.busy = patchSave1(as).finally(() => { PATCH.busy = null; });
+}
+async function patchSave1(as) {
   const name = (as != null ? as : PATCH.name || $('#patch-name').value).trim();
+  if (name && name === PATCH.name && patchSig() === PATCH.sig && Date.now() - (PATCH.savedAt || 0) < 1500) return;
   if (!name) { $('#patch-name').focus(); return toast('give the circuit a name, then press Enter'); }
   if (!patchOk(name)) return toast('names can use letters, numbers, spaces and dashes (up to 40)', true);
   if (name !== PATCH.name && PATCH.list.some(x => x.name === name) && !confirm(`Replace the saved circuit “${name}”?`)) return;
   await api('/api/patches/' + encodeURIComponent(name), { method: 'PUT', json: S });
-  PATCH.name = name; PATCH.sig = patchSig(); save(); patchMark(); toast('saved “' + name + '”'); refreshPatches();
+  PATCH.name = name; PATCH.sig = patchSig(); PATCH.savedAt = Date.now(); save(); patchMark(); toast('saved “' + name + '”'); refreshPatches();
 }
 async function patchRename(to) {
   to = to.trim(); const from = PATCH.name;
