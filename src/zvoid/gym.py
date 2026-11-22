@@ -1054,6 +1054,8 @@ def _watch(slug: str, proc, far: dict | None = None):
                 _train.update(epoch_t0=time.time(), step0=0)
         elif t == "update":
             kind = m.get("kind")
+            if kind in ("step", "epoch") and _train.get("stage") != "train":
+                _train.update(stage="train", stage_t0=time.time(), epoch_t0=time.time(), step0=0)   # steps are arriving, so it is training, whatever the last stage message said
             if kind == "step":
                 if _train["first_loss"] is None:
                     _train["first_loss"] = m["loss"]

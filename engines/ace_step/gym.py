@@ -66,7 +66,7 @@ def _mend_resume(send):
         if not sd or len(sd) < want:
             raise RuntimeError(f"What it had learned does not fit the model being trained ({len(sd)} of {want} parts). Its capacity setting must match the one it was trained with.")
         dec.load_state_dict(sd, strict=False)
-        send(type="stage", stage="load", msg=f"it remembers what it learned ({len(sd)} parts put back)")
+        send(type="stage", stage="train", msg=f"it remembers what it learned ({len(sd)} parts put back)")   # this happens inside training: saying "load" here left the window showing "waking the model" for the whole run
         return got
 
     th.resume_checkpoint = resume_checkpoint
