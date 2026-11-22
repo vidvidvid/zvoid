@@ -75,7 +75,8 @@ async function evoNightPoll() {
   try { const sig = n => JSON.stringify([n.running, n.made, n.thrown, n.phase, n.carves, (n.msg || '').split(' · now:')[0]]), was = sig(EVO.night || {}); EVO.night = await api('/api/night');
     if (EVO.night.id && (EVO.open || !EVO.sheet)) await evoSheet();
     const b = $('#btn-evo'); if (b) b.textContent = EVO.night.running ? (EVO.night.phase === 'chiselling' ? `⟲ evolve · chiselling` : `⟲ evolve · night ${EVO.night.made}/${EVO.night.count}`) : '⟲ evolve';
-    if (EVO.open) { if (sig(EVO.night) !== was) evoDraw(); else { const m = document.querySelector('#evo-night small'); if (m && EVO.night.running) m.textContent = EVO.night.msg || ''; const m2 = $('#night-msg'); if (m2) m2.textContent = EVO.night.msg || ''; } } } catch (e) {}
+    const typing = !!(document.activeElement && document.activeElement.tagName === 'TEXTAREA' && document.activeElement.closest('.night-talk'));   // while you are writing an answer the screen is not rebuilt under you
+    if (EVO.open) { if ((sig(EVO.night) !== was || EVO.stale) && !typing) evoDraw(); else { if (sig(EVO.night) !== was) EVO.stale = true; const m = document.querySelector('#evo-night small'); if (m && EVO.night.running) m.textContent = EVO.night.msg || ''; const m2 = $('#night-msg'); if (m2) m2.textContent = EVO.night.msg || ''; } } } catch (e) {}
   EVO.nightT = setTimeout(evoNightPoll, EVO.night && EVO.night.running ? 3000 : 20000);
 }
 async function evoSheet() {                              // the night's own notes: every piece it planned, what it tried, what it kept
@@ -379,7 +380,8 @@ function evoTalk(sh) {
   const T = EVO.taste; if (!T) return null;
   const q = T.asked, picks = EVO.talkPicks ||= new Set(), byN = {}, id = EVO.night.id; ((sh && sh.songs) || []).forEach(e => { byN[e.n] = e; });
   const name = n => { const x = ((sh && sh.ideas) || [])[n - 1]; return x ? (x.name || x.title) : 'piece ' + n; };
-  const ta = h('textarea', { rows: 2, placeholder: EVO.fixing ? 'What did I get wrong?' : 'or in your own words…', oninput: e => { EVO.talkText = e.target.value; } }); ta.value = EVO.talkText || '';
+  const ta = h('textarea', { rows: 2, placeholder: EVO.fixing ? 'What did I get wrong?' : 'or in your own words…', oninput: e => { EVO.talkText = e.target.value; },
+    onblur: () => setTimeout(() => { if (EVO.stale && !EVO.talkBusy && !(document.activeElement && document.activeElement.tagName === 'TEXTAREA' && document.activeElement.closest('.night-talk'))) { EVO.stale = false; evoDraw(); } }, 600) }); ta.value = EVO.talkText || '';
   const know = h('div', { class: 'talk-know' }, h('h4', {}, 'what I understand so far'),
     T.understanding.length ? h('ul', {}, T.understanding.map(u => h('li', {}, u))) : h('p', { class: 'gym-note' }, 'Nothing yet. Mark a piece “more” or “less”, or let me ask you something.'),
     T.understanding.length && !EVO.fixing && !EVO.talkBusy ? h('button', { class: 'talk-link', onclick: () => { EVO.fixing = true; EVO.talkText = ''; evoDraw(); } }, 'that’s not right…') : '');
@@ -442,6 +444,7 @@ function evoCard(n, opts) {
 }
 function evoDraw() {
   const el = evoEl(); if (!EVO.open) return;
+  EVO.stale = false;
   const s = EVO.s, trained = EVO.creatures.filter(c => c.trained), fed = EVO.creatures.filter(c => c.food && c.food.length);
   const from = h('select', {}, fed.map(c => h('option', { value: c.slug }, c.name)));
   const left = h('div', { id: 'evo-left' },
