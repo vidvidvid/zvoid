@@ -85,50 +85,154 @@ async function evoSheet() {                              // the night's own note
     const r = await fetch(fileUrl(`${EVO.outRoot}/_night/${EVO.night.id}/collection.json`), { cache: 'no-store' }); if (r.ok) EVO.sheet = await r.json();
   } catch (e) {}
 }
-/* The night as a picture. The creatures stand in a ring, each in its own colour. Every piece is a small body drawn between
-   the creatures that play it, tied to each by a thread: one creature, and it sits close to it; four, and it hangs in the
-   middle. It is a faint outline while it waits, pulses while it is being made, and fills in when it is finished. Each
-   carving leaves a mark in orbit round it: bright if it was kept, dim if not, and in a guest creature's colour when that
-   creature did the carving. Click a finished piece to hear it. */
-function evoNightMap(N, sh) {
-  const NS = 'http://www.w3.org/2000/svg', el = (t, a, ...kids) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); kids.forEach(c => c != null && e.append(c)); return e; };
-  const W = 1000, H = 470, cx = W / 2, cy = H / 2 - 6, ideas = (sh && sh.ideas) || [], who = (N.creatures || (sh && sh.creatures) || []), done = {}, cur = /song (\d+) of/.exec(N.msg || ''), carv = /“([^”]+)”/.exec(N.phase === 'chiselling' ? N.msg || '' : '');
-  ((sh && sh.songs) || []).forEach(e => { done[e.n] = e; });
-  const hue = c => { const x = EVO.creatures.find(q => q.slug === c); return x && x.look ? x.look.hue : (hash(c) * 360); }, col = (c, l = 62, a = 1) => `hsla(${hue(c)},90%,${l}%,${a})`;
-  const P = {}; who.forEach((c, i) => { const a = -Math.PI / 2 + i / who.length * Math.PI * 2; P[c] = [cx + Math.cos(a) * 400, cy + Math.sin(a) * 178]; });
-  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, class: 'night-map' });
+/* The night as a small vivarium. The creatures float in a ring in the dark, each a glowing body of its own species and
+   colours. Every piece is an offspring hanging between the creatures that play it, joined to each by a living filament,
+   and grown from a part of each parent's body. While it waits it is dust; while it is being made, light runs down the
+   filaments into a churning cloud; once finished it has a body that beats at its own tempo. Carving strikes it like
+   lightning and leaves a spark in orbit for every cut (bright if kept, in a guest's colour if a guest made it). A piece
+   that is playing moves with its own sound and sends light back to its parents. Hover to read it, click to hear it. */
+const NIGHT_W = 1000, NIGHT_H = 500;
+function nightGlow(g, x, y, R, hue, hue2, t, sd, e) {
+  for (let j = 0; j < 3; j++) {
+    const a = j * 2.1 + sd * 6.28 + t * .11, bx = x + Math.cos(a) * R * .22 + noise(t * .2 + j * 5 + sd * 40) * R * .08, by = y + Math.sin(a) * R * .2 + noise(t * .17 + j * 9 + sd * 60) * R * .08;
+    const rad = R * (1.15 + .3 * j), hu = j === 1 ? hue2 : hue, gr = g.createRadialGradient(bx, by, 0, bx, by, rad);
+    gr.addColorStop(0, `hsla(${hu},95%,66%,${(j ? .16 : .34) * e})`); gr.addColorStop(.45, `hsla(${hu + 25},95%,48%,${.07 * e})`); gr.addColorStop(1, 'hsla(0,0%,0%,0)');
+    g.fillStyle = gr; g.fillRect(bx - rad, by - rad, rad * 2, rad * 2);
+  }
+}
+function nightForm(g, x, y, R, plan, hue, hue2, t, sd, a0, span, e) {
+  const full = span > 6, st = (hu, l, a) => `hsla(${hu},95%,${l}%,${Math.min(1, a * e)})`, A = (k, n) => full ? a0 + k / n * 6.2832 : a0 + (n === 1 ? 0 : (k / (n - 1) - .5)) * span;
+  const P = (a, r) => [x + Math.cos(a) * r, y + Math.sin(a) * r], lw = Math.max(.7, R * .035);
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  if (plan === 1) {
+    const n = full ? 6 + Math.floor(sd * 4) : 3;
+    for (let k = 0; k < n; k++) { const a = A(k, n) + Math.sin(t * .4 + sd * 9) * .12, len = R * (.82 + .18 * Math.sin(t * 1.1 + k * 1.7 + sd * 20)), w = full ? 2.2 / n + .12 : .3, c1 = P(a - w, len * .7), c2 = P(a + w, len * .7), tip = P(a, len);
+      g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(c1[0], c1[1], tip[0], tip[1]); g.quadraticCurveTo(c2[0], c2[1], x, y);
+      g.fillStyle = st(hue, 60, .07); g.fill(); g.strokeStyle = st(k % 2 ? hue2 : hue, 70, .6); g.lineWidth = lw; g.stroke();
+      g.beginPath(); g.arc(tip[0], tip[1], lw * 1.3, 0, 7); g.fillStyle = st(hue2, 80, .8); g.fill(); }
+  } else if (plan === 2) {
+    const pts = []; for (let i = 0; i <= 60; i++) pts.push(P(a0 + i * .22 + t * .15, R * .08 * Math.exp(i * .042)));
+    g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.strokeStyle = st(hue, 70, .7); g.lineWidth = lw * 1.2; g.stroke();
+    g.beginPath(); for (let i = 30; i <= 60; i += 3) { g.moveTo(pts[i][0], pts[i][1]); g.lineTo(pts[i - 28][0], pts[i - 28][1]); } g.strokeStyle = st(hue2, 66, .3); g.lineWidth = lw * .7; g.stroke();
+  } else if (plan === 3) {
+    const n = full ? 5 + Math.floor(sd * 3) : 2, deep = R > 22 ? 3 : 2;
+    const br = (px, py, a, len, d, k) => { const aa = a + noise(t * .25 + d * 3.1 + k * 7.7 + sd * 50) * .28, ex = px + Math.cos(aa) * len, ey = py + Math.sin(aa) * len;
+      g.beginPath(); g.moveTo(px, py); g.lineTo(ex, ey); g.strokeStyle = st(d ? hue : hue2, 62 + (deep - d) * 5, .65); g.lineWidth = lw * (.5 + d * .45); g.stroke();
+      if (d) { br(ex, ey, aa + .5, len * .64, d - 1, k * 2 + 1); br(ex, ey, aa - .42, len * .64, d - 1, k * 2 + 2); } else { g.beginPath(); g.arc(ex, ey, lw * 1.1, 0, 7); g.fillStyle = st(hue2, 80, .9); g.fill(); } };
+    for (let k = 0; k < n; k++) br(x, y, A(k, n), R * .44, deep, k + 1);
+  } else if (plan === 4) {
+    const n = full ? 7 + Math.floor(sd * 3) : 3, rot = full ? t * .05 : 0;
+    for (let k = 0; k < n; k++) { const a = A(k, n) + rot, len = R * (.55 + .45 * hash('s' + k + sd)), b1 = P(a - .13, len * .34), b2 = P(a + .13, len * .34), tip = P(a, len), glint = .5 + .5 * Math.sin(t * 1.3 + k * 2.4);
+      g.beginPath(); g.moveTo(x, y); g.lineTo(b1[0], b1[1]); g.lineTo(tip[0], tip[1]); g.lineTo(b2[0], b2[1]); g.closePath();
+      g.fillStyle = st(hue, 66, .08 + .1 * glint); g.fill(); g.strokeStyle = st(k % 2 ? hue2 : hue, 76, .7); g.lineWidth = lw * .7; g.stroke();
+      g.beginPath(); g.moveTo(x, y); g.lineTo(tip[0], tip[1]); g.strokeStyle = st(hue, 88, .25 + .3 * glint); g.stroke(); }
+  } else {
+    g.save(); g.translate(x, y); g.rotate(full ? sd * 6.28 + Math.sin(t * .2 + sd * 9) * .25 : a0);
+    if (plan === 5) {
+      g.rotate(-Math.PI / 2); const br = R * .5, sw = Math.sin(t * 1.4 + sd * 9) * .08;
+      g.beginPath(); g.ellipse(0, -R * .2, br * (1 + sw), br * (.8 - sw), 0, Math.PI, 0); g.fillStyle = st(hue, 62, .12); g.fill(); g.strokeStyle = st(hue, 72, .7); g.lineWidth = lw; g.stroke();
+      const n = full ? 7 : 4;
+      for (let k = 0; k < n; k++) { const bx = (k / (n - 1) - .5) * br * 1.8; g.beginPath(); g.moveTo(bx, -R * .2);
+        for (let i = 1; i <= 8; i++) g.lineTo(bx + Math.sin(t * 1.5 + i * .6 + k * 1.3) * R * .07 * i / 4, -R * .2 + i * R * .13); g.strokeStyle = st(k % 2 ? hue2 : hue, 70, .5); g.lineWidth = lw * .7; g.stroke(); }
+    } else {
+      const n = full ? 9 : 5, x0 = full ? -R * .85 : 0, x1 = full ? R * .85 : R * 1.05, sp = i => [x0 + (x1 - x0) * i / (n - 1), Math.sin(i * .7 + t * 1.2 + sd * 9) * R * .09];
+      g.beginPath(); for (let i = 0; i < n; i++) { const p = sp(i); i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); } g.strokeStyle = st(hue, 72, .8); g.lineWidth = lw * 1.3; g.stroke();
+      for (let i = 0; i < n; i++) { const p = sp(i), rl = R * .5 * Math.sin(Math.PI * (i + .5) / n) * (1 + .08 * Math.sin(t * 1.6 + i));
+        g.beginPath(); g.arc(p[0], p[1], lw * 1.2, 0, 7); g.fillStyle = st(hue2, 82, .9); g.fill();
+        if (i && i < n - 1) for (const s of [-1, 1]) { g.beginPath(); g.moveTo(p[0], p[1]); g.quadraticCurveTo(p[0] - R * .05, p[1] + s * rl * .7, p[0] - R * .2, p[1] + s * rl); g.strokeStyle = st(i % 2 ? hue : hue2, 66, .5); g.lineWidth = lw * .75; g.stroke(); } }
+    }
+    g.restore();
+  }
+}
+function evoNightMap(N0, sh0) {
+  const W = NIGHT_W, H = NIGHT_H, cx = W / 2, cy = H / 2 - 14, ideas = (sh0 && sh0.ideas) || [], who = (N0.creatures || (sh0 && sh0.creatures) || []);
+  const look = c => { const x = EVO.creatures.find(q => q.slug === c); return (x && x.look) || { plan: Math.floor(hash(c + 'p') * 6), hue: hash(c) * 360, hue2: hash(c + '2') * 360 }; };
+  const L = {}, P = {}; who.forEach((c, i) => { const a = -Math.PI / 2 + i / who.length * Math.PI * 2; P[c] = [cx + Math.cos(a) * 395, cy + 4 + Math.sin(a) * 160]; L[c] = look(c); });
+  const col = (c, l = 62, a = 1) => `hsla(${L[c].hue},92%,${l}%,${a})`;
   const pos = ideas.map((x, i) => { const cs = [x.creature, ...(x.mix || [])].filter(c => P[c]), k = cs.length || 1, a = i * 2.39996, j = 26 + (i % 5) * 9;
     let px = cs.reduce((s, c) => s + P[c][0], 0) / k, py = cs.reduce((s, c) => s + P[c][1], 0) / k;
-    if (k === 1) { px = cx + (px - cx) * .7; py = cy + (py - cy) * .7; }                           // a piece of one creature stays near it
+    if (k === 1) { px = cx + (px - cx) * .62; py = cy + (py - cy) * .62; }
     return [px + Math.cos(a) * j * (k === 1 ? 1.3 : 1), py + Math.sin(a) * j * .8, cs]; });
-  for (let rep = 0; rep < 60; rep++) for (let i = 0; i < pos.length; i++) for (let j = i + 1; j < pos.length; j++) {     // nudge apart whatever lands on top of something else
-    const dx = pos[j][0] - pos[i][0], dy = pos[j][1] - pos[i][1], d = Math.hypot(dx, dy) || 1; if (d < 46) { const f = (46 - d) / d / 2; pos[i][0] -= dx * f; pos[i][1] -= dy * f; pos[j][0] += dx * f; pos[j][1] += dy * f; }
-    if (j === i + 1) for (const c in P) { const ex = pos[i][0] - P[c][0], ey = pos[i][1] - P[c][1], ed = Math.hypot(ex, ey) || 1; if (ed < 62) { pos[i][0] = P[c][0] + ex / ed * 62; pos[i][1] = P[c][1] + ey / ed * 62; } }     // and off the creatures themselves
-    pos[i][0] = Math.min(W - 40, Math.max(40, pos[i][0])); pos[i][1] = Math.min(H - 60, Math.max(24, pos[i][1])); }
-  const gT = el('g', {}), gN = el('g', {});
-  ideas.forEach((x, i) => { const n = i + 1, e = done[n], [px, py, cs] = pos[i], making = N.running && N.phase !== 'chiselling' && cur && +cur[1] === n, carving = carv && carv[1] === x.title, st = e && e.path ? 'done' : making ? 'making' : 'wait';
-    cs.forEach(c => gT.append(el('line', { x1: P[c][0], y1: P[c][1], x2: px, y2: py, stroke: col(c, 60, st === 'wait' ? .1 : st === 'making' ? .75 : .34), 'stroke-width': st === 'making' ? 1.6 : 1, class: st === 'making' || carving ? 'thread live' : 'thread' })));
-    const r = st === 'done' ? 9 + 7 * ((e.score || {}).total || .5) : 9, g = el('g', { class: 'night-node ' + st + (carving ? ' carving' : '') + (e && e.path && LIB.playing === e.path ? ' playing' : ''), transform: `translate(${px},${py})` });
-    cs.forEach((c, k) => { const a0 = k / cs.length * Math.PI * 2 - Math.PI / 2, a1 = (k + 1) / cs.length * Math.PI * 2 - Math.PI / 2;     // one slice per creature in it
-      g.append(cs.length === 1 ? el('circle', { r, fill: st === 'wait' ? 'none' : col(c, 58, st === 'making' ? .55 : .9), stroke: col(c, 66, st === 'wait' ? .35 : 1), 'stroke-width': 1.2 })
-        : el('path', { d: `M0,0 L${Math.cos(a0) * r},${Math.sin(a0) * r} A${r},${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${Math.cos(a1) * r},${Math.sin(a1) * r} Z`, fill: st === 'wait' ? 'none' : col(c, 58, st === 'making' ? .55 : .9), stroke: col(c, 66, st === 'wait' ? .35 : 1), 'stroke-width': 1 })); });
-    ((e && e.carving) || []).forEach((c, k) => { const a = k * .7 - Math.PI / 2; g.append(el('circle', { cx: Math.cos(a) * (r + 6), cy: Math.sin(a) * (r + 6), r: c.kept ? 2.3 : 1.4, fill: c.by ? col(c.by, 68) : '#fff', opacity: c.kept ? .95 : .28 })); });
-    g.append(el('text', { y: r + 15, 'text-anchor': 'middle', class: 'night-label' }, document.createTextNode(x.title)));
-    const tip = el('title', {}); tip.textContent = `${String(n).padStart(2, '0')} · ${x.title} · ${x.bpm} bpm\n${cs.map(c => c.replace(/-/g, ' ')).join(' × ')}\n${x.idea}` + (e && e.carving && e.carving.length ? `\n${e.carving.filter(c => c.kept).length} of ${e.carving.length} carvings kept` : ''); g.append(tip);
-    if (e && e.path) g.addEventListener('click', () => libPlay({ path: e.path, kind: 'audio', size: 5e7 }));
-    gN.append(g); });
-  const gC = el('g', {}); who.forEach(c => { const [x, y] = P[c], busy = N.running && new RegExp('Summoning creature “' + c + '”').test(N.msg || '');
-    gC.append(el('circle', { cx: x, cy: y, r: 30, fill: col(c, 50, .1), stroke: col(c, 62, .9), 'stroke-width': 1.4, class: 'night-creature' + (busy ? ' busy' : '') }), el('circle', { cx: x, cy: y, r: 5, fill: col(c, 66) }),
-      el('text', { x, y: y + (y > cy ? 48 : -40), 'text-anchor': 'middle', class: 'night-cname', fill: col(c, 72) }, document.createTextNode(c.replace(/-/g, ' ')))); });
-  svg.append(gT, gC, gN);
-  if (N.started && N.until) {                                                                  // the night as a line: where the making ended, where it is now
-    const t0 = N.started, t1 = N.until, now = Math.min(t1, (N.finished || Date.now() / 1000)), x = t => 60 + (t - t0) / (t1 - t0) * (W - 120), hh = t => new Date(t * 1000).toTimeString().slice(0, 5);
-    svg.append(el('line', { x1: 60, y1: H - 14, x2: W - 60, y2: H - 14, stroke: '#2a2a44', 'stroke-width': 2 }), el('line', { x1: 60, y1: H - 14, x2: x(now), y2: H - 14, stroke: N.phase === 'chiselling' ? '#2ee6d6' : '#a43cff', 'stroke-width': 2 }),
-      el('circle', { cx: x(now), cy: H - 14, r: 4, fill: '#fff', class: N.running ? 'night-now' : '' }),
-      x(now) > 190 ? el('text', { x: 60, y: H - 22, class: 'night-tick' }, document.createTextNode(hh(t0))) : null, el('text', { x: W - 60, y: H - 22, 'text-anchor': 'end', class: 'night-tick' }, document.createTextNode(hh(t1))),
-      el('text', { x: Math.min(W - 150, Math.max(110, x(now))), y: H - 22, 'text-anchor': 'middle', class: 'night-tick on' }, document.createTextNode(N.running ? (N.phase === 'chiselling' ? 'chiselling' : `making ${N.made}/${N.count}`) : 'finished')));
-  }
-  return svg;
+  for (let rep = 0; rep < 80; rep++) for (let i = 0; i < pos.length; i++) {
+    for (let j = i + 1; j < pos.length; j++) { const dx = pos[j][0] - pos[i][0], dy = pos[j][1] - pos[i][1], d = Math.hypot(dx, dy) || 1; if (d < 62) { const f = (62 - d) / d / 2; pos[i][0] -= dx * f; pos[i][1] -= dy * f; pos[j][0] += dx * f; pos[j][1] += dy * f; } }
+    for (const c in P) { const ex = pos[i][0] - P[c][0], ey = pos[i][1] - P[c][1], ed = Math.hypot(ex, ey) || 1; if (ed < 98) { pos[i][0] = P[c][0] + ex / ed * 98; pos[i][1] = P[c][1] + ey / ed * 98; } }
+    pos[i][0] = Math.min(W - 50, Math.max(50, pos[i][0])); pos[i][1] = Math.min(H - 74, Math.max(30, pos[i][1])); }
+  const cv = document.createElement('canvas'); cv.className = 'night-map'; const g = cv.getContext('2d');
+  const mono = (getComputedStyle(document.documentElement).getPropertyValue('--mono') || '').trim() || 'Menlo, monospace';
+  const stars = Array.from({ length: 110 }, (_, i) => [hash('sx' + i) * W, hash('sy' + i) * H, .4 + hash('sr' + i) * 1.1, hash('sp' + i) * 6.28]);
+  let hot = -1;
+  const at = e => { const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left) / r.width * W, my = (e.clientY - r.top) / r.height * H; let b = -1, bd = 30; pos.forEach((p, i) => { const d = Math.hypot(p[0] - mx, p[1] - my); if (d < bd) { bd = d; b = i; } }); return b; };
+  const entry = i => { const sh = EVO.sheet && sh0 && EVO.sheet.id === sh0.id ? EVO.sheet : sh0; return ((sh && sh.songs) || []).find(e => e.n === i + 1); };
+  cv.addEventListener('mousemove', e => { hot = at(e); const en = hot >= 0 && entry(hot); cv.style.cursor = en && en.path ? 'pointer' : 'default'; });
+  cv.addEventListener('mouseleave', () => { hot = -1; });
+  cv.addEventListener('click', e => { const i = at(e), en = i >= 0 && entry(i); if (en && en.path) libPlay({ path: en.path, kind: 'audio', size: 5e7 }); });
+  /* a filament from a creature to a piece: a bowed line that never holds still */
+  const fil = (a, b, t, k) => { const pts = [], dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len, bow = (hash('b' + k) - .5) * len * .3;
+    for (let i = 0; i <= 14; i++) { const u = i / 14, env = Math.sin(u * Math.PI), o = bow * env + noise(t * .35 + u * 3 + k * 13.7) * 9 * env; pts.push([a[0] + dx * u + nx * o, a[1] + dy * u + ny * o]); } return pts; };
+  const along = (pts, u) => { const f = Math.min(.9999, Math.max(0, u)) * (pts.length - 1), i = Math.floor(f), w = f - i; return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * w, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * w]; };
+  const dot = (x, y, r, c) => { const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, c); gr.addColorStop(1, 'hsla(0,0%,0%,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); };
+  const frame = () => {
+    if (!cv.isConnected) return;
+    if (!cv.clientWidth || evoEl().hidden) { setTimeout(frame, 500); return; }
+    requestAnimationFrame(frame);
+    const dpr = Math.min(2, window.devicePixelRatio || 1), cw = Math.round(cv.clientWidth * dpr), ch = Math.round(cv.clientWidth * H / W * dpr);
+    if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
+    const t = performance.now() / 1000, N = EVO.night || N0, sh = EVO.sheet && sh0 && EVO.sheet.id === sh0.id ? EVO.sheet : sh0, done = {};
+    ((sh && sh.songs) || []).forEach(e => { done[e.n] = e; });
+    const cur = /song (\d+) of/.exec(N.msg || ''), carv = /“([^”]+)”/.exec(N.phase === 'chiselling' ? N.msg || '' : ''), au = audioLevels(), lv = au ? au.level : 0;
+    g.setTransform(cw / W, 0, 0, cw / W, 0, 0); g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, W, H); g.globalCompositeOperation = 'lighter';
+    for (const s of stars) { g.fillStyle = `rgba(190,200,255,${.12 + .2 * (.5 + .5 * Math.sin(t * .8 + s[3]))})`; g.beginPath(); g.arc(s[0], s[1], s[2], 0, 7); g.fill(); }
+    const glow = {}; who.forEach(c => { glow[c] = 0; });
+    const state = ideas.map((x, i) => { const e = done[i + 1], making = N.running && N.phase !== 'chiselling' && cur && +cur[1] === i + 1; return { e, st: e && e.path ? 'done' : making ? 'making' : 'wait', carving: !!(carv && carv[1] === x.title), playing: !!(e && e.path && LIB.playing === e.path) }; });
+    /* filaments, and the light that runs along them */
+    ideas.forEach((x, i) => { const [px, py, cs] = pos[i], s = state[i], on = hot === i;
+      cs.forEach((c, k) => { const pts = fil(P[c], [px, py], t, i * 7 + k), a = s.st === 'wait' ? .05 : s.st === 'making' ? .5 : s.playing ? .45 + lv * .4 : .16;
+        g.beginPath(); pts.forEach((p, q) => q ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.strokeStyle = col(c, 62, Math.min(1, a + (on ? .4 : 0))); g.lineWidth = s.st === 'making' || s.playing ? 1.5 : 1; g.stroke();
+        if (s.st === 'making') { glow[c] += .5; for (let b = 0; b < 3; b++) { const p = along(pts, (t * .32 + b / 3 + k * .11) % 1); dot(p[0], p[1], 9, col(c, 78, .95)); } }
+        if (s.carving) { glow[c] += .3; const p = along(pts, (t * .7 + k * .3) % 1); dot(p[0], p[1], 7, 'rgba(230,250,255,.9)'); }
+        if (s.playing) { glow[c] += .3 + lv; for (let b = 0; b < 2; b++) { const p = along(pts, 1 - (t * .45 + b / 2 + k * .17) % 1); dot(p[0], p[1], 6 + lv * 8, col(c, 80, .8)); } } }); });
+    /* the creatures */
+    who.forEach((c, i) => { const [x, y] = P[c], lk = L[c], sd = hash(c + 'seed'), e = .95 + Math.min(.6, glow[c] * .5) + .08 * Math.sin(t * .9 + i), R = 46 * (1 + .05 * Math.sin(t * .7 + i * 2) + Math.min(.2, glow[c] * .12));
+      nightGlow(g, x, y, R, lk.hue, lk.hue2, t, sd, e); nightForm(g, x, y, R, lk.plan | 0, lk.hue, lk.hue2, t, sd, -Math.PI / 2 + sd * 6.28, 7, e); });
+    /* the pieces */
+    ideas.forEach((x, i) => { const [px, py, cs] = pos[i], s = state[i], on = hot === i, sd = hash(x.title), k = cs.length || 1;
+      if (s.st === 'wait') { for (let m = 0; m < 5; m++) { const a = t * (.25 + m * .06) + m * 1.3 + sd * 6, c = cs[m % k]; dot(px + Math.cos(a) * (5 + m * 1.6), py + Math.sin(a * 1.2) * (4 + m), 3.2, col(c, 70, on ? .8 : .35)); } }
+      else if (s.st === 'making') { const R = 15 + 3 * Math.sin(t * 5);
+        cs.forEach((c, q) => { nightGlow(g, px + noise(t * 2.3 + q * 9) * 5, py + noise(t * 2.1 + q * 4 + 3) * 5, R * .8, L[c].hue, L[c].hue2, t * 4, sd + q * .3, .9); nightForm(g, px, py, R * (.5 + .5 * Math.abs(noise(t * 1.4 + q * 5))), L[c].plan | 0, L[c].hue, L[c].hue2, t * 3, sd, q / k * 6.2832 + t * .6, 6.2832 / k * .7, .5 + .5 * Math.abs(noise(t * 3 + q))); });
+        dot(px, py, 10 + 5 * Math.sin(t * 7), 'rgba(255,255,255,.75)'); }
+      else { const score = (s.e.score || {}).total || .5, beat = Math.exp(-((t * (x.bpm || 120) / 60) % 1) * 5), R = (13 + 9 * score) * (1 + .1 * beat + (s.playing ? lv * .5 : 0) + (on ? .12 : 0)), e = .8 + .3 * beat + (s.playing ? .4 : 0);
+        cs.forEach((c, q) => { const a0 = Math.atan2(P[c][1] - py, P[c][0] - px); nightGlow(g, px + Math.cos(a0) * R * .25, py + Math.sin(a0) * R * .25, R * .62, L[c].hue, L[c].hue2, t, sd + q * .3, e * .8); nightForm(g, px, py, R, L[c].plan | 0, L[c].hue, L[c].hue2, t, sd + q * .21, k === 1 ? a0 + Math.PI : a0, k === 1 ? 7 : Math.min(1.5, 5 / k), e); });
+        dot(px, py, 5 + 4 * beat, `rgba(255,255,255,${.6 + .4 * beat})`);
+        (s.e.carving || []).forEach((c, q) => { const a = q * .7 + t * .3; dot(px + Math.cos(a) * (R + 7), py + Math.sin(a) * (R + 7), c.kept ? 4.5 : 2.5, c.by && L[c.by] ? col(c.by, 75, c.kept ? .95 : .4) : `rgba(255,255,255,${c.kept ? .95 : .3})`); });
+        if (s.playing && au) { g.beginPath(); for (let q = 0; q <= 96; q++) { const a = q / 96 * 6.2832, r = R + 12 + au.wave[(q * 5) % 512] * 14; q ? g.lineTo(px + Math.cos(a) * r, py + Math.sin(a) * r) : g.moveTo(px + Math.cos(a) * r, py + Math.sin(a) * r); } g.closePath(); g.strokeStyle = 'rgba(46,230,214,.75)'; g.lineWidth = 1.2; g.stroke(); }
+        if (s.carving) { const tick = Math.floor(t / .28), fr = (t / .28) % 1;
+          for (let b = 0; b < 2; b++) { const a = hash('l' + tick + b) * 6.2832, sx = px + Math.cos(a) * 80, sy = py + Math.sin(a) * 60; g.beginPath(); g.moveTo(sx, sy);
+            for (let q = 1; q < 7; q++) g.lineTo(sx + (px - sx) * q / 7 + (hash('j' + tick + b + q) - .5) * 16, sy + (py - sy) * q / 7 + (hash('k' + tick + b + q) - .5) * 16); g.lineTo(px, py); g.strokeStyle = `rgba(215,245,255,${.9 * (1 - fr)})`; g.lineWidth = 1.3; g.stroke(); }
+          dot(px, py, 22 * (1 - fr) + 6, 'rgba(220,245,255,.6)'); } }
+    });
+    /* words */
+    g.globalCompositeOperation = 'source-over'; g.textAlign = 'center';
+    who.forEach(c => { const [x, y] = P[c]; g.font = `600 12px ${mono}`; g.fillStyle = col(c, 76, .95); g.fillText(c.replace(/-/g, ' ').toUpperCase().split('').join(' '), x, y + (y > cy ? 74 : -62)); });
+    ideas.forEach((x, i) => { const [px, py] = pos[i], s = state[i], on = hot === i, r = s.st === 'wait' ? 10 : 13 + 9 * (((s.e || {}).score || {}).total || .5);
+      g.font = `${on || s.playing ? 600 : 400} 10.5px ${mono}`; g.fillStyle = on || s.playing ? '#fff' : s.st === 'wait' ? 'rgba(120,116,150,.75)' : 'rgba(205,202,228,.92)'; g.fillText(x.title, px, py + r + 16); });
+    if (hot >= 0 && ideas[hot]) { const x = ideas[hot], e = done[hot + 1], cs = pos[hot][2], words = String(x.idea || '').split(' '), lines = ['']; words.forEach(w => { if ((lines[lines.length - 1] + ' ' + w).length > 44) lines.push(w); else lines[lines.length - 1] = (lines[lines.length - 1] + ' ' + w).trim(); });
+      const head = `${String(hot + 1).padStart(2, '0')} · ${x.title} · ${x.bpm} bpm`, body = lines.slice(0, 5).map((l, q) => l + (q === 4 && lines.length > 5 ? '…' : '')), carved = e && e.carving && e.carving.length ? `${e.carving.filter(c => c.kept).length} of ${e.carving.length} carvings kept` : '';
+      g.textAlign = 'left'; g.font = `600 12px ${mono}`; let bw = g.measureText(head).width; g.font = `10.5px ${mono}`; [cs.map(c => c.replace(/-/g, ' ')).join(' × '), ...body, carved].forEach(l => { bw = Math.max(bw, g.measureText(l).width); });
+      const bh = 44 + body.length * 14 + (carved ? 16 : 0), bx = Math.min(W - bw - 30, Math.max(6, pos[hot][0] + 30)), by = Math.min(H - bh - 34, Math.max(6, pos[hot][1] - bh / 2));
+      g.fillStyle = 'rgba(8,8,18,.9)'; g.strokeStyle = 'rgba(120,116,170,.5)'; g.lineWidth = 1; g.beginPath(); g.rect(bx, by, bw + 24, bh); g.fill(); g.stroke();
+      g.font = `600 12px ${mono}`; g.fillStyle = '#fff'; g.fillText(head, bx + 12, by + 20);
+      g.font = `10.5px ${mono}`; g.fillStyle = 'rgba(46,230,214,.95)'; g.fillText(cs.map(c => c.replace(/-/g, ' ')).join(' × '), bx + 12, by + 36);
+      g.fillStyle = 'rgba(190,187,214,.9)'; body.forEach((l, q) => g.fillText(l, bx + 12, by + 52 + q * 14));
+      if (carved) { g.fillStyle = 'rgba(150,146,180,.9)'; g.fillText(carved, bx + 12, by + 54 + body.length * 14); } }
+    /* the night as a line: where it began, where it is now, where it ends */
+    if (N.started && N.until) { const t0 = N.started, t1 = N.until, now = Math.min(t1, N.finished || Date.now() / 1000), X = v => 60 + (v - t0) / (t1 - t0) * (W - 120), hh = v => new Date(v * 1000).toTimeString().slice(0, 5), y = H - 14, live = N.phase === 'chiselling' ? '#2ee6d6' : '#a43cff';
+      g.lineWidth = 2; g.strokeStyle = '#2a2a44'; g.beginPath(); g.moveTo(60, y); g.lineTo(W - 60, y); g.stroke(); g.strokeStyle = live; g.beginPath(); g.moveTo(60, y); g.lineTo(X(now), y); g.stroke();
+      g.globalCompositeOperation = 'lighter'; dot(X(now), y, N.running ? 9 + 3 * Math.sin(t * 3) : 6, 'rgba(255,255,255,.95)'); g.globalCompositeOperation = 'source-over';
+      g.font = `9.5px ${mono}`; g.fillStyle = '#6d6a88'; g.textAlign = 'left'; if (X(now) > 190) g.fillText(hh(t0), 60, y - 9); g.textAlign = 'right'; g.fillText(hh(t1), W - 60, y - 9);
+      g.textAlign = 'center'; g.fillStyle = '#e9e7f5'; g.fillText(N.running ? (N.phase === 'chiselling' ? 'chiselling' : `making ${N.made}/${N.count}`) : 'finished', Math.min(W - 150, Math.max(110, X(now))), y - 9); }
+  };
+  requestAnimationFrame(frame);
+  return cv;
 }
 function evoNightView() {                               // tonight, piece by piece: who plays it, what it is, and where it has got to
   const N = EVO.night || {}, sh = EVO.sheet && EVO.sheet.id === N.id ? EVO.sheet : null, ideas = (sh && sh.ideas) || [], done = {}, cur = /song (\d+) of/.exec(N.msg || '');
@@ -148,8 +252,7 @@ function evoNightView() {                               // tonight, piece by pie
         path ? libWave({ path, kind: 'audio', size: 5e7 }) : h('span', { class: 'night-wait' }, making ? 'being made now…' : 'waiting'),
         h('small', { class: 'night-carve', title: tried ? (e.carving || []).map(c => `${c.kept ? 'kept' : 'not kept'}: ${c.from}–${c.to}s${c.by ? ' by ' + c.by : ''} · ${c.why || ''}`).join('\n') : '' }, tried ? `${kept} of ${tried} carvings kept` : '')); })));
 }
-function evoMark() { document.querySelectorAll('#evo .evo-pp').forEach(b => { const on = b.dataset.path === LIB.playing; b.textContent = on ? '■' : '▶'; const box = b.closest('.evo-card, .evo-step, .night-row'); if (box) box.classList.toggle('playing', on); });
-  if (EVO.showNight && document.querySelector('.night-map')) { clearTimeout(EVO.markT); EVO.markT = setTimeout(evoDraw, 60); } }
+function evoMark() { document.querySelectorAll('#evo .evo-pp').forEach(b => { const on = b.dataset.path === LIB.playing; b.textContent = on ? '■' : '▶'; const box = b.closest('.evo-card, .evo-step, .night-row'); if (box) box.classList.toggle('playing', on); }); }
 
 function evoCard(n, opts) {
   const it = evoIt(n.path), live = EVO.s.live;
