@@ -643,14 +643,20 @@ function libWave(it) {
   requestAnimationFrame(() => libWaveDraw(cv));
   return cv;
 }
-{ let t0 = 0, at = 0, seen = -1;                        // the playhead: drawn every frame, and carried by the clock between the player's own time reports, which arrive in coarse steps (worst just after a clip starts). That is what made it stutter.
+{ let t0 = 0, at = 0, seen = -1, ticks = 0, prev = 0;     // the playhead: drawn every frame, and carried by the clock between the player's own time reports, which arrive in coarse steps
   const step = () => { requestAnimationFrame(step);
-    const A = LIB.audio; if (!LIB.playing || !A) { LIB.est = null; seen = -1; return; }
-    const now = performance.now(), ct = A.currentTime, moving = !A.paused && !A.seeking && A.readyState >= 3;
-    let est = moving && seen >= 0 ? t0 + (now - at) / 1000 : ct;
-    if (seen < 0 || !moving || Math.abs(ct - est) > .3) { t0 = ct; at = now; est = ct; }              // just started, paused, jumped, or drifted: take the player's word
-    else if (ct !== seen) { t0 += (ct - est) * .15; }                                                  // otherwise lean gently toward each new report
-    seen = ct; LIB.est = Math.max(0, est);
+    const A = LIB.audio; if (!LIB.playing || !A) { LIB.est = null; seen = -1; ticks = 0; return; }
+    const now = performance.now(), ct = A.currentTime, live = !A.paused && !A.seeking && A.readyState >= 3;
+    if (!live || seen < 0 || ct < seen - .05) { t0 = ct; at = now; ticks = 0; prev = ct; }             // stopped, seeking, or jumped back: take the player's word and wait
+    else {
+      if (ct !== seen) { ticks++; if (ticks === 2) { t0 = ct; at = now; } }                               // the clock only starts once the player's time has really begun to move: sound comes out a moment after "play"
+      if (ticks < 2) prev = ct;
+      else { let est = t0 + (now - at) / 1000;
+        if (est > ct + .25) { est = Math.max(prev, ct); t0 = est; at = now; }                             // ahead of the player: wait for it, never step back
+        else if (est < ct - .25) { est = ct; t0 = ct; at = now; }                                         // behind (a jump forward): catch up at once
+        else if (ct !== seen) t0 += (ct - est) * .1;                                                      // otherwise lean gently toward each report
+        prev = Math.max(prev, est); } }
+    seen = ct; LIB.est = Math.max(0, prev);
     if (!LIB.cv || !LIB.cv.isConnected || LIB.cv.dataset.path !== LIB.playing) LIB.cv = [...document.querySelectorAll('.lib-wave')].find(c => c.dataset.path === LIB.playing) || null;
     if (LIB.cv) libWaveDraw(LIB.cv); };
   requestAnimationFrame(step); }
