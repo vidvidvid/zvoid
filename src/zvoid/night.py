@@ -132,7 +132,7 @@ Between states it MORPHS: one thing turns into another so that you cannot say wh
 
 HOW A PLAN IS WRITTEN:
 - caption: comma-separated tags. It MUST begin with one or two of the chosen creature's own words, exactly as given (they wake the adapter up). Then the tempo ("148 bpm"), then ONE or TWO words for the kind of dance music it is, then 9-14 concrete sound tags: the kick and how it drives (four-on-the-floor, breakbeat, galloping, stomping), the other drums, the low end, the noises, the voices, how it moves between extremes, the feeling. Always say "danceable" and name the kick.
-  The kinds to draw from, and to VARY across the collection so no two neighbours are the same kind: rave, hardcore rave, acid, techno, electro, electro-punk, punk, digital hardcore, gabber, jungle, breakbeat, footwork, industrial dance, body music, hard trance, ghetto house. Mix two where it suits ("punk rave", "acid electro"). Never an artist or band name.
+  The kinds to draw from, and to VARY across the collection so no two neighbours are the same kind: rave, hardcore rave, acid, techno, electro, electro-punk, punk, digital hardcore, gabber, drum and bass, jungle, breakbeat, footwork, industrial dance, body music, hard trance, ghetto house. Mix two where it suits ("punk rave", "acid electro"). Never an artist or band name.
 - lyrics: the passage, as section tags in square brackets naming the state and what happens, e.g. "[peak - everything, full stomp, no change]", "[depth - sunk, slow sub hits, growled breath]", "[morph - the drums melt into the voices]", "[thrown - from the bottom straight to the top]", and only where it is earned "[void - nothing, one dry click]". Under each tag, 0-4 lines of chant syllables or invented words. No real words in any language. 5-9 sections of very uneven length.
 - duration: 120 to 190 seconds. bpm: 118 to 190 (dance tempos; a heavy half-time piece may be written at 85-100 only if its kick still makes people move).
 
@@ -140,7 +140,12 @@ THREE THINGS THE ARTIST HEARD GO WRONG, AND HOW TO AVOID THEM:
 - A constant hum under the whole piece. A tag is applied to the WHOLE piece, not to one section, so any tag that names something sustained lays a bed under everything, and then there is no void and no depth, only a wash: never write drone, hum, pad, sustained, swell, wash, ambience, room, echo, reverb, wide, hollow pipe, held note. The low end must be struck, not held: "sub hits that stop dead", "short sub thuds". Always include tags for dryness and edges: "dry", "close", "tight", "punchy". The depth is heaviness, not a hum.
 - Smooth, soulful singing appearing from nowhere. The model sings anything voice-like in its default pop style unless told otherwise. Describe every voice as shouted, barked, chanted in unison, whispered, growled, rasped or throat-sung, and add "no melody in the voices, spoken rhythm". Never write wailing, singing, sung, humming, choir, soulful, high voice, female voice, crooning.
 - In the lyrics, the same: syllables start with hard consonants and are short (ka, tu, gra, zok, thum, tek, bra). No long open vowels and no vowel runs (not ee-yah, ah-ee-yo, oh-oh, yeah), and no trailing dots that stretch a sound.
-Drums come and go: present and hard at the peaks, a few heavy ones in the depths. The piece the artist has liked most so far was a frantic, drum-led chase in stop-start bursts: drums carrying it is a good thing.
+Drums come and go: present and hard at the peaks, a few heavy ones in the depths.
+WHAT THE ARTIST HAS SAID ABOUT PIECES ALREADY MADE (steer by this):
+- Liked most: a frantic, drum-led chase in stop-start bursts; and "panic as a chase: drums sprint in stop-start bursts and are thrown to the bottom without warning" ("a great direction"). Drums carrying a piece is good.
+- "A great direction, but maybe faster": a piece about numbness and emptiness at 58 bpm. Emptiness is welcome; slowness is not. Keep things moving.
+- "Too undefined, a moving mass of sound": a slow piece carried by a long low note. Nice sounds, but nothing in it had edges. Avoid anything that is one continuous mass: every piece needs separate, countable events (hits, stabs, shouts) that you could clap along to.
+- "Interesting": bright metal snaps and rubbery noise at a relentless peak.
 Every sound has an edge, as clear and sharp as a knife."""
 
 
