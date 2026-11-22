@@ -380,10 +380,14 @@ def _cut(src: Path, start: float, secs: float, sr: int = 44100) -> np.ndarray:
     return np.frombuffer(r.stdout[:len(r.stdout) // 8 * 8], dtype="<f4").reshape(-1, 2).copy()
 
 
-def seed(slug: str, limb=None, dur: float = 14.0) -> dict:
-    """What the creature sings from: a new collage cut out of its own tracks, different every time. Pieces of a limb's
-    tracks are held, looped on the beat, stuttered, slowed, pitched or turned round, in one or two layers. ACE-Step then
-    plays this back through what the creature has learned, so a song starts from its food and not from a list of words."""
+def seed(slug: str, limb=None, dur: float = 14.0, mode: str = "") -> dict:
+    """What the creature sings from: a passage of one of its own tracks, different every time. ACE-Step then plays it back
+    through what the creature has learned, so a song starts from its food and not from a list of words.
+
+    "groove": one or two bars of a track, cut on a hit and looped, with small breaks and fills, and sometimes a short
+    figure from another track of the same limb laid over it. It stays one coherent pattern: a first version that cut
+    many pieces at random and pitched them came out as disconnected noodling.
+    "slice": one unbroken passage, as it is."""
     c = _load(slug)
     d = _dir(slug)
     food = [f for f in c["food"] if (d / "food" / f["name"]).exists()]
@@ -392,69 +396,84 @@ def seed(slug: str, limb=None, dur: float = 14.0) -> dict:
         raise RuntimeError("its tracks are gone (were the originals moved?)")
     rng = np.random.default_rng()
     sr, n = 44100, int(dur * 44100)
-    out = np.zeros((n, 2), "float32")
-    lm = next((l for l in c.get("limbs", []) if l["id"] == limb), None)
-    bpm = float(np.clip((lm or {}).get("mean", {}).get("bpm") or np.mean([f.get("bpm") or 120 for f in mine]), 60, 190))
-    beat = 60 / bpm
-    used, moves = [], []
+    mode = mode if mode in ("groove", "slice") else ("groove" if rng.random() < .7 else "slice")
 
-    def piece(pool, secs):
-        f = pool[int(rng.integers(len(pool)))]
-        u = rng.random()
-        rate = 1.0 if u < .5 else float(2 ** (rng.integers(-7, 8) / 12)) if u < .8 else .5 if u < .93 else 2.0
-        L = float(f.get("secs") or 60)
-        need = secs * rate + .05
-        x = _cut(d / "food" / f["name"], rng.uniform(L * .04, max(L * .05, L * .96 - need)), need)
-        if len(x) < sr * .03:
-            return None
-        if rate != 1:
-            idx = np.arange(0, len(x) - 1, rate)
-            x = np.stack([np.interp(idx, np.arange(len(x)), x[:, ch]) for ch in (0, 1)], 1).astype("float32")
-        back = rng.random() < .15
-        if back:
-            x = x[::-1].copy()
-        if f["name"] not in used:
-            used.append(f["name"])
-        return x[:int(secs * sr)], ("slowed " if rate == .5 else "sped up " if rate == 2 else "pitched " if rate != 1 else "") + ("backwards " if back else "")
+    def passage(f, secs, tries=4):
+        """The loudest of a few random stretches of a track, starting on its strongest hit."""
+        L, best = float(f.get("secs") or 60), None
+        for _ in range(tries):
+            x = _cut(d / "food" / f["name"], rng.uniform(L * .08, max(L * .1, L * .92 - secs - 1)), secs + 1.0)
+            if len(x) < sr * (secs + .2):
+                continue
+            h = 441                                              # 10 ms frames
+            e = np.sqrt((x[:sr].mean(1)[:sr // h * h].reshape(-1, h) ** 2).mean(1))
+            k = int(np.argmax(np.diff(e, prepend=e[0]))) * h     # where the level jumps most in the first second
+            x = x[max(0, k - 220):][:int(secs * sr)]
+            lv = float(np.sqrt((x ** 2).mean()))
+            if len(x) >= int(secs * sr) - 2 and (best is None or lv > best[1]):
+                best = (x, lv)
+        return best[0] if best else None
 
-    def edge(x, ms=6):
+    def edge(x, ms=5):
         k = min(len(x) // 2, int(sr * ms / 1000))
         if k:
             x[:k] *= np.linspace(0, 1, k)[:, None]
             x[-k:] *= np.linspace(1, 0, k)[:, None]
         return x
 
-    def voice(pool, gain):
-        t = 0.0
-        while t < dur - .2:
-            kind = rng.choice(["hold", "loop", "stutter"], p=[.4, .4, .2])
-            if kind == "hold":
-                L = beat * int(rng.choice([4, 8, 8, 12]))
-                got = piece(pool, L)
-                x = got and edge(got[0], 25)
-            elif kind == "loop":                              # a short piece repeated on the beat: this is where new patterns come from
-                L, unit = beat * int(rng.choice([4, 8, 8])), beat * float(rng.choice([.5, 1, 1, 2, 1.5, .75]))
-                got = piece(pool, unit)
-                x = got and np.concatenate([edge(got[0].copy()) * (.75 + .25 * (i % 2 == 0)) for i in range(int(np.ceil(L / unit)))])[:int(L * sr)]
-            else:
-                L, unit = beat * int(rng.choice([1, 2, 2, 4])), beat / int(rng.choice([4, 6, 8, 3]))
-                got = piece(pool, unit)
-                reps = int(np.ceil(L / unit))
-                x = got and np.concatenate([edge(got[0].copy(), 3) * (1 - .6 * i / reps) for i in range(reps)])[:int(L * sr)]
-            if got:
-                i0 = int(t * sr)
-                seg = out[i0:i0 + len(x)]
-                seg += x[:len(seg)] * gain
-                moves.append(got[1] + kind)
-            t += L
-
-    voice(mine, 1.0)
-    if rng.random() < .6:                                     # a second layer, sometimes from another limb
-        voice(food if rng.random() < .35 else mine, float(rng.uniform(.35, .7)))
+    f = mine[int(rng.integers(len(mine)))]
+    bpm = float(np.clip(f.get("bpm") or 120, 70, 180))
+    beat = 60 / bpm
+    used, moves = [f["name"]], []
+    if mode == "slice":
+        x = passage(f, dur)
+        if x is None:
+            raise RuntimeError("could not read its tracks")
+        out = edge(x.copy(), 30)
+        moves.append("one unbroken passage")
+    else:
+        bars = int(rng.choice([1, 2, 2, 4]))
+        unit = beat * 4 * bars
+        loop = passage(f, unit)
+        if loop is None:
+            raise RuntimeError("could not read its tracks")
+        loop = edge(loop.copy())
+        m, b = len(loop), int(beat * sr)
+        out = np.zeros((n, 2), "float32")
+        moves.append(f"a {bars}-bar loop")
+        for r in range(int(np.ceil(n / m))):
+            x = loop.copy()
+            u = rng.random()
+            if r and u < .22:                                    # a fill: the last beat becomes a stutter of the loop's first hit
+                k = b // int(rng.choice([2, 4, 4, 8]))
+                x[-b:] = np.concatenate([edge(loop[:k].copy(), 3)] * int(np.ceil(b / k)))[:b]
+                moves.append("stutter fill")
+            elif r and u < .36:                                  # a break: half a bar of silence
+                x[-2 * b:] = 0
+                moves.append("break")
+            elif r and u < .46:                                  # the last beat turned round
+                x[-b:] = edge(x[-b:][::-1].copy())
+                moves.append("reversed beat")
+            seg = out[r * m:(r + 1) * m]
+            seg += x[:len(seg)]
+        others = [g for g in mine if g["name"] != f["name"]]
+        if others and rng.random() < .4:                         # a short figure from a sister track, repeating over it
+            g = others[int(rng.integers(len(others)))]
+            fig = passage(g, beat * float(rng.choice([1, 2, 2, 4])), tries=3)
+            if fig is not None:
+                if rng.random() < .25:                           # an octave down
+                    idx = np.arange(0, len(fig) - 1, .5)
+                    fig = np.stack([np.interp(idx, np.arange(len(fig)), fig[:, ch]) for ch in (0, 1)], 1).astype("float32")
+                fig, every, gain = edge(fig.copy()), int(beat * 4 * int(rng.choice([1, 2])) * sr), float(rng.uniform(.3, .55))
+                for i0 in range(int(rng.choice([0, 2])) * b, n, every):
+                    seg = out[i0:i0 + len(fig)]
+                    seg += fig[:len(seg)] * gain
+                used.append(g["name"])
+                moves.append("a figure from another track")
     pk = float(np.abs(out).max())
     if pk < 1e-4:
         raise RuntimeError("could not read its tracks")
-    out = np.tanh(out / pk * 1.3) / np.tanh(1.3) * .9
+    out = np.tanh(out / pk * 1.2) / np.tanh(1.2) * .9
     k = int(.05 * sr)
     out[-k:] *= np.linspace(1, 0, k)[:, None]
     sd = UPLOADS_DIR / "seeds"                                # with the other input audio, where the engines are allowed to read
@@ -463,7 +482,7 @@ def seed(slug: str, limb=None, dur: float = 14.0) -> dict:
         old.unlink(missing_ok=True)
     path = sd / f"{slug}_seed_{time.strftime('%Y%m%d-%H%M%S')}_{int(rng.integers(1000)):03d}.wav"
     sf.write(path, out, sr, subtype="PCM_16")
-    return {"path": str(path), "tracks": used, "moves": moves, "bpm": round(bpm)}
+    return {"path": str(path), "tracks": used, "moves": moves, "bpm": round(bpm), "mode": mode}
 
 
 def grain(slug: str, name: str) -> Path:

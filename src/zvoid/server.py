@@ -180,6 +180,7 @@ def create_app():
         lv = params.get(lp)
         is_file = any(q["name"] == lp and q.get("type") in ("audio", "file") for q in e.spec.get("params", []))
         label = (re.sub(r"^\d{6}_", "", Path(lv).stem) if lv else "") if is_file else str(lv or "")
+        label = str(body.get("label") or "").strip()[:120] or label   # the caller may name the result itself
         job = {"id": uuid.uuid4().hex[:12], "engine": e.id, "state": "queued", "msg": "queued", "frac": None,
                "outputs": [], "info": {}, "error": None, "seed": params.get("seed"), "cancel": False}
         jobs[job["id"]] = job
@@ -374,7 +375,7 @@ def create_app():
     @app.post("/api/gym/{slug}/seed")
     def gym_seed(slug: str, body: dict):
         """A new collage of the creature's own tracks, for it to sing from."""
-        return gym_call(gym.seed, slug, body.get("limb"))
+        return gym_call(gym.seed, slug, body.get("limb"), mode=str(body.get("mode") or ""))
 
     @app.get("/api/gym/{slug}/grain/{name}")
     def gym_grain_file(slug: str, name: str):
