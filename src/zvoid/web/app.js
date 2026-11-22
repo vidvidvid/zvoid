@@ -739,25 +739,47 @@ function libMark() {                                   // playing or not: mark t
   if (typeof evoMark === 'function') evoMark();
 }
 /* the library's player. A clip is read into memory and started from there, so it sounds the instant you click and its position is known exactly (the browser's own streaming player was slow to start in the app's window, and vague about where it was) */
-function libPos() { const p = LIB.p; if (!p || !p.buf) return [0, 0]; const d = p.buf.duration; return [p.paused ? p.off : Math.min(d, p.off + ac().currentTime - p.t0), d]; }
-function libHalt() { const p = LIB.p; if (p && p.src) { const src = p.src; p.src = null; src.onended = null; try { src.stop(); } catch {} } }
+const LIB_SHORT = 9e6;                                 // up to about 45 seconds of audio: small enough to hold in memory and start instantly
+const libShort = it => it.short || (it.size > 0 && it.size < LIB_SHORT);
+function libPos() {
+  const p = LIB.p; if (!p) return [0, 0];
+  if (p.el) return [p.el.currentTime || 0, isFinite(p.el.duration) ? p.el.duration : 0];
+  if (!p.buf) return [0, 0];
+  const d = p.buf.duration; return [p.paused ? p.off : Math.min(d, p.off + ac().currentTime - p.t0), d];
+}
+function libHalt() { const p = LIB.p; if (p && p.el) p.el.pause(); if (p && p.src) { const src = p.src; p.src = null; src.onended = null; try { src.stop(); } catch {} } }
 function libStop() { libHalt(); LIB.p = null; LIB.playing = null; }
 function libStart(off) {
   const p = LIB.p, c = ac(); libHalt();
+  if (p.el) { try { p.el.currentTime = Math.max(0, off); } catch (e) {} p.paused = false; p.el.play().catch(() => {}); return; }
   const src = c.createBufferSource(); src.buffer = p.buf; src.connect(bus());
   src.onended = () => { if (LIB.p === p && p.src === src) { libStop(); libMark(); } };
   p.off = clamp(off, 0, Math.max(0, p.buf.duration - .02)); p.t0 = c.currentTime; p.paused = false; p.src = src; src.start(0, p.off);
 }
+function libStream() {                                 // one player for long pieces: it reads the file as it goes and holds almost nothing in memory
+  if (!LIB.el) { LIB.el = new Audio(); LIB.el.preload = 'auto'; try { ac().createMediaElementSource(LIB.el).connect(bus()); } catch (e) {}
+    LIB.el.addEventListener('ended', () => { if (LIB.p && LIB.p.el === LIB.el) { libStop(); libMark(); } }); }
+  return LIB.el;
+}
+/* Short clips are read into memory and start the instant you click. Whole songs are streamed: read into memory, each one is
+   tens of megabytes and seconds of work, and doing that for every song the pointer passed over is what made the app crawl. */
 async function libPlay(it, at) {                     // at: where to start, 0..1 through the clip (a click on its waveform)
   ac().resume();
   if (LIB.playing === it.path && at == null) { libStop(); return libMark(); }
-  if (LIB.playing === it.path && LIB.p && LIB.p.buf) { libStart(clamp(at, 0, .999) * LIB.p.buf.duration); return libMark(); }
-  libStop(); LIB.playing = it.path; const p = LIB.p = { path: it.path, buf: null, src: null, t0: 0, off: 0, paused: false, want: at }; libMark();
-  try { const buf = await loadBuf(it.path); for (const k of bufs.keys()) { if (bufs.size <= 24) break; if (k !== it.path) bufs.delete(k); }   // keep the last couple of dozen clips ready, not all of them
+  if (LIB.playing === it.path && LIB.p && (LIB.p.buf || LIB.p.el)) { const d = libPos()[1]; if (d) libStart(clamp(at, 0, .999) * d); else LIB.p.want = at; return libMark(); }
+  libStop(); LIB.playing = it.path; const p = LIB.p = { path: it.path, buf: null, src: null, el: null, t0: 0, off: 0, paused: false, want: at }; libMark();
+  if (!libShort(it)) {
+    const el = libStream(); p.el = el; el.src = fileUrl(it.path);
+    const go = () => { if (LIB.p !== p) return; if (p.want != null && isFinite(el.duration)) { try { el.currentTime = clamp(p.want, 0, .999) * el.duration; } catch (e) {} p.want = null; } };
+    el.addEventListener('loadedmetadata', go, { once: true });
+    el.play().catch(e => { if (LIB.p === p) { libStop(); libMark(); toast('could not play that: ' + (e.message || e), true); } });
+    return;
+  }
+  try { const buf = await loadBuf(it.path); let held = 0; for (const [k, v] of [...bufs.entries()].reverse()) { held++; if (held > 12 && k !== it.path) bufs.delete(k); }   // keep the last dozen short clips ready, not all of them
     if (LIB.p !== p) return; p.buf = buf; libStart(p.want != null ? clamp(p.want, 0, .999) * buf.duration : 0); libMark(); }
   catch (e) { if (LIB.p === p) { libStop(); libMark(); toast('could not play that: ' + (e.message || e), true); } }
 }
-function libWarm(it) { if (it.kind === 'audio' && it.size < 6e7 && !bufs.has(it.path)) loadBuf(it.path).catch(() => {}); }   // the pointer is on a clip: get it ready, so a click plays at once
+function libWarm(it) { if (it.kind === 'audio' && libShort(it) && !bufs.has(it.path)) loadBuf(it.path).catch(() => {}); }   // the pointer is on a short clip: get it ready, so a click plays at once
 /* The waveform of a clip: click anywhere on it to play from there. What has played is lit; a line follows your pointer. */
 function libWaveDraw(cv) {
   const pk = LIB.peaks.get(cv.dataset.path), dpr = devicePixelRatio || 1, w = cv.clientWidth, hgt = cv.clientHeight; if (!w) return;
@@ -782,7 +804,7 @@ function libWave(it) {
   return cv;
 }
 { const step = () => { requestAnimationFrame(step);     // the playhead, every frame
-    if (!LIB.playing || !LIB.p || !LIB.p.buf || LIB.p.paused) return;
+    if (!LIB.playing || !LIB.p || !(LIB.p.buf || LIB.p.el) || LIB.p.paused) return;
     if (!LIB.cv || !LIB.cv.isConnected || LIB.cv.dataset.path !== LIB.playing) LIB.cv = [...document.querySelectorAll('.lib-wave')].find(c => c.dataset.path === LIB.playing) || null;
     if (LIB.cv) libWaveDraw(LIB.cv); };
   requestAnimationFrame(step); }
@@ -837,7 +859,8 @@ async function libUndo() {
   return true;
 }
 function libPause() {                                // space: pause and resume whatever the library is playing
-  const p = LIB.p; if (!p || !p.buf || !LIB.playing) return false;
+  const p = LIB.p; if (!p || !(p.buf || p.el) || !LIB.playing) return false;
+  if (p.el) { if (p.el.paused) { p.paused = false; p.el.play().catch(() => {}); } else { p.el.pause(); p.paused = true; } return true; }
   if (p.paused) libStart(p.off); else { const pos = libPos()[0]; libHalt(); p.off = pos; p.paused = true; }
   return true;
 }

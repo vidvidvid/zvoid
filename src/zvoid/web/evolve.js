@@ -2,7 +2,7 @@
    alive and it becomes the parent of the next round. The family tree is kept, so any earlier sound can be grown again. */
 const EVO = { open: false, list: [], s: null, timer: 0, auto: true, creatures: [] };
 const evoEl = () => $('#evo');
-const evoIt = path => ({ path, kind: 'audio', size: 0, name: path.split('/').pop() });
+const evoIt = path => ({ path, kind: 'audio', size: 0, short: true, name: path.split('/').pop() });   // evolve's sounds are short: held in memory, so comparing them is instant
 
 async function openEvo(sid) {
   if (typeof Gym !== 'undefined' && Gym.open) closeGym();
