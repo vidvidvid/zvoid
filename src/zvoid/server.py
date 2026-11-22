@@ -275,7 +275,8 @@ def create_app():
 
     @app.post("/api/night")
     def night_start(body: dict):
-        return evo(night.start, engines, jobs, _coerce, str(body.get("creature") or ""), int(body.get("count") or 10), str(body.get("direction") or ""))
+        who = body.get("creatures") or [str(body.get("creature") or "")]
+        return evo(night.start, engines, jobs, _coerce, who, int(body.get("count") or 10), str(body.get("direction") or ""), int(body.get("tries") or 1), str(body.get("name") or ""))
 
     @app.post("/api/night/stop")
     def night_stop():

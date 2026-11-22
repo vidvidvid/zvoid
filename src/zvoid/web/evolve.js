@@ -47,14 +47,21 @@ function evoNightBox(trained, s) {
   const N = EVO.night || {}, box = h('div', { id: 'evo-night' });
   if (N.running) {
     const left = N.per && N.count > N.made ? ` · about ${Math.max(1, Math.round((N.count - N.made) * N.per / 60))} min left` : '';
-    box.append(h('div', { class: 'evo-night-msg' }, `${N.made} of ${N.count} made${N.thrown ? ` · ${N.thrown} thrown away` : ''}${left}`), h('div', { class: 'evo-bar' }, h('i', { style: `width:${Math.round(N.made / N.count * 100)}%` })),
-      h('small', {}, N.msg || ''), h('div', { class: 'acts' }, h('button', { onclick: () => api('/api/night/stop', { method: 'POST' }).then(evoNightPoll) }, '■ stop after this song')));
+    box.append(h('div', { class: 'evo-night-msg' }, `${N.made} of ${N.count} songs finished${left}`), h('div', { class: 'evo-bar' }, h('i', { style: `width:${Math.round(N.made / N.count * 100)}%` })),
+      h('small', { title: N.msg || '' }, N.msg || ''), h('div', { class: 'acts' }, h('button', { title: 'It ends after the try it is on. Songs already finished stay in the library.', onclick: () => api('/api/night/stop', { method: 'POST' }).then(evoNightPoll) }, '■ stop')));
   } else {
-    const who = h('select', {}, trained.map(c => h('option', { value: c.slug }, c.name))), cnt = h('input', { type: 'number', min: 1, max: 200, value: 10, style: 'width:64px' });
-    if (N.creature && trained.some(c => c.slug === N.creature)) who.value = N.creature; else if (s && s.creature) who.value = s.creature;
-    box.append(h('div', { class: 'acts' }, who, cnt, h('span', { class: 'gym-note' }, 'songs')),
-      h('div', { class: 'acts' }, h('button', { class: 'hot', disabled: !trained.length, title: 'About a minute and a half per song on the PC. Both machines are kept awake while it runs. Do not close Zvoid.', onclick: async () => { try { EVO.night = await api('/api/night', { json: { creature: who.value, count: +cnt.value || 10, direction: (s && s.direction) || '' } }); evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'start ▸')),
-      N.msg && N.finished ? h('small', {}, N.msg) : null);
+    EVO.nightWho = EVO.nightWho || new Set(N.creatures && N.creatures.length ? N.creatures : s && s.creature ? [s.creature] : trained.slice(-1).map(c => c.slug));
+    const cnt = h('input', { type: 'number', min: 1, max: 200, value: EVO.nightCount || 20, style: 'width:58px', onchange: e => { EVO.nightCount = +e.target.value; est(); } });
+    const tr = h('select', { title: 'How many goes each song gets. After each go it is measured (drums, pulse, contrast, how unlike the others it is) and its plan is rewritten before the next go. The best go is the song.', onchange: e => { EVO.nightTries = +e.target.value; est(); } }, [1, 2, 3, 4, 6].map(v => h('option', { value: v }, v === 1 ? '1 go each' : v + ' goes each'))); tr.value = EVO.nightTries || 3;
+    const dir = h('textarea', { rows: 3, spellcheck: 'false', placeholder: 'what the collection is: nothing like the world has heard before, primal music of the future, drums that come and go…', oninput: e => { EVO.nightDir = e.target.value; } }); dir.value = EVO.nightDir != null ? EVO.nightDir : (s && s.direction) || '';
+    const estEl = h('small', {}), est = () => { const m = Math.round((+cnt.value || 20) * (+tr.value || 3) * 1.75 + (+cnt.value || 20) * .4); estEl.textContent = `about ${m >= 90 ? (m / 60).toFixed(1) + ' hours' : m + ' minutes'} on the PC · only the finished songs reach the library`; };
+    est();
+    box.append(h('div', { class: 'evo-who' }, trained.map(c => h('label', {}, h('input', { type: 'checkbox', checked: EVO.nightWho.has(c.slug), onchange: e => { e.target.checked ? EVO.nightWho.add(c.slug) : EVO.nightWho.delete(c.slug); } }), h('span', {}, c.name)))),
+      dir, h('div', { class: 'acts' }, cnt, h('span', { class: 'gym-note' }, 'songs'), tr), estEl,
+      h('div', { class: 'acts' }, h('button', { class: 'hot', disabled: !trained.length, title: 'Both machines are kept awake while it runs. Leave Zvoid open.', onclick: async () => {
+        if (!EVO.nightWho.size) return toast('tick at least one creature', true);
+        try { EVO.night = await api('/api/night', { json: { creatures: [...EVO.nightWho], count: +cnt.value || 20, tries: +tr.value || 3, direction: dir.value } }); evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'make the collection ▸')),
+      N.msg && N.finished ? h('small', { title: N.msg }, N.msg) : null);
   }
   return box;
 }
@@ -89,7 +96,7 @@ function evoDraw() {
     fed.length ? h('div', { class: 'acts', id: 'evo-new' }, from, h('button', { title: 'Begin from a passage of one of this creature\'s own tracks', onclick: () => evoStart({ creature: from.value, direction: (s && s.direction) || 'primal music of the future' }) }, 'from its tracks ▸')) : null,
     h('p', { class: 'gym-note' }, 'Or open the library and press “evolve” on any clip.'),
     h('h3', {}, 'night shift'),
-    h('p', { class: 'gym-note' }, 'Leave it running and wake up to a set of whole songs. Each one is new: its own tempo, sounds, shape and chants, made through the creature. They land in the library as “night …”.'),
+    h('p', { class: 'gym-note' }, 'Leave it running and wake up to a collection. Every song starts as its own idea, is made, measured, rewritten and made again; only the finished songs reach the library.'),
     evoNightBox(trained, s),
     h('h3', {}, 'sessions'),
     h('div', { class: 'evo-list' }, EVO.list.length ? EVO.list.map(x => h('button', { class: 'evo-row' + (s && x.id === s.id ? ' cur' : ''), onclick: async () => { EVO.s = await api('/api/evolve/' + x.id); evoDraw(); evoPoll(); } },

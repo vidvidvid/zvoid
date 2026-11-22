@@ -109,6 +109,31 @@ def available() -> bool:
     return _claude() is not None
 
 
+def think(system: str, prompt: str, schema: dict, timeout: int = 300) -> dict:
+    """One question to Claude with a fixed answer shape, for the parts of the program that plan in words (song ideas, how to
+    revise a song from its measurements). No tools, no memory of earlier questions. Raises if Claude is not there or fails."""
+    exe = _claude()
+    if not exe:
+        raise RuntimeError("Claude is not installed")
+    cmd = [exe, "-p", "--output-format", "json", "--tools", "", "--strict-mcp-config", "--disable-slash-commands",
+           "--setting-sources", "", "--system-prompt", system, "--json-schema", json.dumps(schema)]
+    if os.environ.get("ZVOID_CLAUDE_MODEL"):
+        cmd += ["--model", os.environ["ZVOID_CLAUDE_MODEL"]]
+    cwd = os.path.join(tempfile.gettempdir(), "zvoid-chat")
+    os.makedirs(cwd, exist_ok=True)
+    r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout, cwd=cwd)
+    try:
+        data = json.loads(r.stdout)
+    except ValueError:
+        raise RuntimeError((r.stderr or r.stdout or "Claude returned nothing").strip()[-400:])
+    if data.get("is_error"):
+        raise RuntimeError(str(data.get("result") or "Claude error")[:400])
+    out = data.get("structured_output")
+    if not isinstance(out, dict):
+        out = json.loads(data.get("result") or "")
+    return out
+
+
 def ask(engines, name: str, message: str, patch: dict, session: str | None) -> dict:
     exe = _claude()
     if not exe:
