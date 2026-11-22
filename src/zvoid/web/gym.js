@@ -430,8 +430,9 @@ function gymBuild() {
     right.append(
       h('h3', {}, 'food'),
       h('div', { class: 'food' }, c.food.length ? c.food.map(f => {
+        const title = foodTitle(c, f.name);
         const cap = h('input', { spellcheck: 'false', placeholder: 'caption for this track (optional)', onchange: () => api('/api/gym/' + c.slug, { method: 'PUT', json: { captions: { [f.name]: cap.value } } }) }); cap.value = f.caption || '';
-        return h('div', { class: 'food-row' + (Gym.playing === f.name ? ' playing' : ''), style: `--c:hsl(${c.look ? c.look.hue + ((f.bright ?? .3) - .3) * 70 : hueOf(f.bright ?? .3)},90%,60%)` }, h('button', { class: 'food-play', title: 'Play this track to the entity', onclick: () => gymPlay(c.slug, f.name) }, Gym.playing === f.name ? '■' : '▶'), h('div', {}, h('b', { title: f.name + '\nDrag it onto the creature, or double-click, to make it sing from this track', class: 'food-grab', onpointerdown: e => gymThrow(e, f.name), ondblclick: () => gymSing(c, null, f.name) }, f.name), h('small', {}, `${Math.round(f.secs)}s · ~${Math.round(f.bpm || 0)} bpm · bass ${Math.round((f.low || 0) * 100)}% · bright ${Math.round((f.bright || 0) * 100)}%`), cap),
+        return h('div', { class: 'food-row' + (Gym.playing === f.name ? ' playing' : ''), style: `--c:hsl(${c.look ? c.look.hue + ((f.bright ?? .3) - .3) * 70 : hueOf(f.bright ?? .3)},90%,60%)` }, h('button', { class: 'food-play', title: 'Play this track to the entity', onclick: () => gymPlay(c.slug, f.name) }, Gym.playing === f.name ? '■' : '▶'), h('div', {}, h('b', { title: f.name + '\nDrag it onto the creature, or double-click, to make it sing from this track', class: 'food-grab', onpointerdown: e => gymThrow(e, f.name), ondblclick: () => gymSing(c, null, f.name) }, title[1]), title[0] ? h('small', { class: 'food-from' }, title[0]) : null, h('small', {}, `${Math.round(f.secs)}s · ~${Math.round(f.bpm || 0)} bpm · bass ${Math.round((f.low || 0) * 100)}% · bright ${Math.round((f.bright || 0) * 100)}%`), cap),
           h('button', { title: 'Sing from this track: the creature makes a new clip out of a passage of it', disabled: running, onclick: () => gymSing(c, null, f.name) }, '♪'),
           h('button', { title: 'Take this track away', disabled: running, onclick: () => gymDo(() => api(`/api/gym/${c.slug}/food/${encodeURIComponent(f.name)}`, { method: 'DELETE' })) }, '×'));
       }) : h('p', { class: 'gym-note' }, 'Nothing yet. Drop audio files anywhere on this screen.')),
@@ -575,6 +576,12 @@ setInterval(() => {                                                             
 /* Ask a limb to sing: ACE-Step makes a short new clip in that limb's style (through the creature's adapter if it has trained),
    and the creature performs it. Until it has trained, you hear what the plain model makes of that limb's description. */
 try { const v = localStorage.getItem('zvoid.stray'); if (v != null && v !== '') Gym.stray = +v; } catch (e) {}
+function foodTitle(c, name) {                          // "Artist - Album - 12 Song.mp3" shows as the song, with artist and album small underneath, when several tracks share that beginning
+  const stem = name.replace(/\.[a-z0-9]{2,5}$/i, ''), parts = stem.split(/\s+-\s+/);
+  if (!c._pre || c._preN !== c.food.length) { c._pre = {}; c._preN = c.food.length; for (const f of c.food) { const q = f.name.replace(/\.[a-z0-9]{2,5}$/i, '').split(/\s+-\s+/); for (let k = 1; k < q.length; k++) { const key = q.slice(0, k).join(' - '); c._pre[key] = (c._pre[key] || 0) + 1; } } }
+  for (let k = parts.length - 1; k >= 1; k--) { const key = parts.slice(0, k).join(' - '); if (c._pre[key] >= 3) return [key, parts.slice(k).join(' - ')]; }
+  return ['', stem];
+}
 function gymThrow(e, name) {                           // drag a track by its name and let go over the creature: it sings from that one. Done by hand, because the app's window has no built-in drag
   if (e.button) return;
   const x0 = e.clientX, y0 = e.clientY; let ghost = null;
