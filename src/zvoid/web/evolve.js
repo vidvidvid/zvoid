@@ -338,7 +338,7 @@ function evoNightMap(N0, sh0) {
     g.globalCompositeOperation = 'source-over'; g.textAlign = 'center'; g.shadowColor = 'rgba(4,4,12,.95)'; g.shadowBlur = 5;
     who.forEach(c => { const [x, y] = P[c]; g.font = `600 12px ${mono}`; g.fillStyle = col(c, 76, .95); g.fillText(c.replace(/-/g, ' ').toUpperCase().split('').join(' '), x, y + (y > cy ? 74 : -62)); });
     ideas.forEach((x, i) => { const [px, py] = pos[i], s = state[i], on = hot === i, r = s.st === 'wait' ? 10 : (GL ? 17 : 13) + (GL ? 10 : 9) * (((s.e || {}).score || {}).total || .5);
-      g.font = `${on || s.playing ? 600 : 400} 10.5px ${mono}`; g.fillStyle = on || s.playing ? '#fff' : s.st === 'wait' ? 'rgba(120,116,150,.75)' : 'rgba(205,202,228,.92)'; g.fillText(x.name || x.title, px, py + r + 16); });
+      g.font = `${on || s.playing ? 600 : 400} 10.5px ${mono}`; g.fillStyle = on || s.playing ? '#fff' : s.st === 'wait' ? 'rgba(120,116,150,.75)' : 'rgba(205,202,228,.92)'; { const nm = [...(x.name || x.title)]; g.fillText(on || s.playing || nm.length <= 22 ? nm.join('') : nm.slice(0, 21).join('') + '…', px, py + r + 16); } });
     g.shadowBlur = 0;
     if (hot >= 0 && ideas[hot]) { const x = ideas[hot], e = done[hot + 1], cs = pos[hot][2], words = String(x.idea || '').split(' '), lines = ['']; words.forEach(w => { if ((lines[lines.length - 1] + ' ' + w).length > 44) lines.push(w); else lines[lines.length - 1] = (lines[lines.length - 1] + ' ' + w).trim(); });
       const head = `${String(hot + 1).padStart(2, '0')} · ${x.name || x.title} · ${x.bpm} bpm`, body = lines.slice(0, 5).map((l, q) => l + (q === 4 && lines.length > 5 ? '…' : '')), carved = e && e.carving && e.carving.length ? `${e.carving.filter(c => c.kept).length} of ${e.carving.length} carvings kept` : '';
