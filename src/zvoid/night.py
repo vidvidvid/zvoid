@@ -111,23 +111,34 @@ DIR = OUTPUTS_DIR / "_night"      # tries live here, outside the library; only t
 VEC = ("tonal", "dist", "steady", "harm", "voice", "attack", "change", "noise", "dyn", "low", "bright", "wide")
 
 IDEAS_SCHEMA = {"type": "object", "required": ["songs"], "properties": {"songs": {"type": "array", "items": {"type": "object",
-    "required": ["title", "creature", "idea", "caption", "lyrics", "bpm", "duration"],
+    "required": ["title", "creature", "idea", "caption", "lyrics", "bpm", "duration", "starts", "ends"],
     "properties": {"title": {"type": "string"}, "creature": {"type": "string"}, "idea": {"type": "string"}, "caption": {"type": "string"},
+                   "starts": {"type": "string", "enum": ["peak", "depth", "void"]}, "ends": {"type": "string", "enum": ["peak", "depth", "void"]},
                    "lyrics": {"type": "string"}, "bpm": {"type": "integer"}, "duration": {"type": "integer"}}}}}}
 REVISE_SCHEMA = {"type": "object", "required": ["keep", "caption", "lyrics", "bpm", "note"],
                  "properties": {"keep": {"type": "boolean"}, "caption": {"type": "string"}, "lyrics": {"type": "string"}, "bpm": {"type": "integer"}, "note": {"type": "string"}}}
-HOUSE = """You write song plans for ACE-Step, a text-to-music model, played through "creatures" (adapters trained on one artist's sound).
-How a plan is written:
-- caption: comma-separated tags. It MUST begin with one or two of the chosen creature's own words, exactly as given (they wake the adapter up). Then the tempo ("148 bpm"), then 9-14 concrete sound tags: which drums and how they behave, the low end, the noises and instruments, the voices, how the song moves, the mood. Never a genre name, never an artist or band name: those pull the model back to music that already exists.
-- lyrics: section tags in square brackets, each with a short hint of what happens, e.g. "[intro - one drum, breathing]", "[chorus - everyone, full stomp]". Under each tag, 1-4 lines of chant syllables or invented words (HA! oom-ka, zra ko mi). No real words in any language. A chorus repeats the same lines each time it returns. 5-9 sections.
-- Say in the section hints where drums come in, drop out and come back: these songs need drums that arrive and leave, not a wash of texture.
+HOUSE = """You write plans for ACE-Step, a text-to-music model, played through "creatures" (adapters trained on one artist's sound).
+
+WHAT THESE PIECES ARE (the artist's own words, follow them over any habit of songwriting):
+"The songs should mimic emotions. They are raw and real, but it is really difficult to understand and comprehend their structure and source. They are infinite, never ending, morphing into one another. The only constant emotions are peaks and the bottomless depths, where everything is the same for an infinitely short or long period of time. It is bouncing us between these extremes. And there is also emptiness, the void, which we sometimes can notice and sometimes it just absorbs us."
+So a piece is not a song with verses and choruses. It is a passage through three states, in any order and for any length:
+- PEAK: everything at once, overwhelming, relentless, and for as long as it lasts it does not change.
+- DEPTH: the bottom. Heavy, slow, sunk, and for as long as it lasts it does not change.
+- VOID: emptiness. Nothing, or one small dry sound alone in nothing. Sometimes it is noticed: everything is cut dead and the silence is a shock. Sometimes it absorbs: the sounds thin out one by one until, without a moment you could point to, there is nothing left.
+  The artist on silence: "We don't have to force the silences. They need to be tasteful and make sense, if they appear." So the void is rare and earned. MOST PIECES HAVE NO VOID SECTION AT ALL. In a set of ten, at most three contain one, and then usually a single brief one; only a piece that is ABOUT emptiness dwells in it. Never put a silence in because a plan "should" have one, and never chop a piece up with stops. The bounce between PEAK and DEPTH is the main thing.
+Between states it MORPHS: one thing turns into another so that you cannot say where it changed, or it is thrown from one extreme to the other with no warning. Durations must be uneven and unpredictable: a state may last four seconds or seventy. Never a regular plan, never a repeated chorus, never an intro that sets up or an outro that resolves: a piece begins already inside a state and ends inside one, unfinished, so the next can continue from it.
+
+HOW A PLAN IS WRITTEN:
+- caption: comma-separated tags. It MUST begin with one or two of the chosen creature's own words, exactly as given (they wake the adapter up). Then the tempo ("148 bpm"), then 9-14 concrete sound tags: which drums and how they behave, the low end, the noises, the voices, how it moves between extremes, the feeling. Never a genre name, never an artist or band name: those pull the model back to music that already exists.
+- lyrics: the passage, as section tags in square brackets naming the state and what happens, e.g. "[peak - everything, full stomp, no change]", "[depth - sunk, slow sub hits, growled breath]", "[morph - the drums melt into the voices]", "[thrown - from the bottom straight to the top]", and only where it is earned "[void - nothing, one dry click]". Under each tag, 0-4 lines of chant syllables or invented words. No real words in any language. 5-9 sections of very uneven length.
 - duration: 110 to 190 seconds. bpm: 55 to 190.
-What makes a result fail here: no rhythm at all, one unbroken texture, plain noise. Every song needs a pulse somewhere and a shape with contrast.
-Three things the artist heard go wrong, and how to avoid them:
-- A constant hum under the whole song. A tag is applied to the WHOLE song, not to one section, so any tag that names something sustained lays a bed under everything: never write drone, hum, pad, sustained, swell, wash, ambience, room, echo, reverb, wide, hollow pipe, held note. The low end must be struck, not held: "sub hits that stop dead", "short sub thuds". Always include tags for dryness and edges: "dry", "close", "tight", "gated", "hard cuts", "dead silence between hits".
+
+THREE THINGS THE ARTIST HEARD GO WRONG, AND HOW TO AVOID THEM:
+- A constant hum under the whole piece. A tag is applied to the WHOLE piece, not to one section, so any tag that names something sustained lays a bed under everything, and then there is no void and no depth, only a wash: never write drone, hum, pad, sustained, swell, wash, ambience, room, echo, reverb, wide, hollow pipe, held note. The low end must be struck, not held: "sub hits that stop dead", "short sub thuds". Always include tags for dryness and edges: "dry", "close", "tight", "punchy". The depth is heaviness, not a hum.
 - Smooth, soulful singing appearing from nowhere. The model sings anything voice-like in its default pop style unless told otherwise. Describe every voice as shouted, barked, chanted in unison, whispered, growled, rasped or throat-sung, and add "no melody in the voices, spoken rhythm". Never write wailing, singing, sung, humming, choir, soulful, high voice, female voice, crooning.
-- In the lyrics, the same: syllables must start with hard consonants and be short (ka, tu, gra, zok, thum, tek, bra). No long open vowels and no vowel runs (not ee-yah, ah-ee-yo, oh-oh, yeah), and no trailing dots that stretch a sound. They are shouted, not sung.
-The goal is a song as clear and sharp as a knife: every sound has an edge, and between sounds there is nothing."""
+- In the lyrics, the same: syllables start with hard consonants and are short (ka, tu, gra, zok, thum, tek, bra). No long open vowels and no vowel runs (not ee-yah, ah-ee-yo, oh-oh, yeah), and no trailing dots that stretch a sound.
+Drums come and go: present and hard at the peaks, a few heavy ones in the depths. The piece the artist has liked most so far was a frantic, drum-led chase in stop-start bursts: drums carrying it is a good thing.
+Every sound has an edge, as clear and sharp as a knife."""
 
 
 def _sides(slug: str) -> str:
@@ -143,10 +154,12 @@ def ideas(creatures: list[str], count: int, direction: str, rng) -> list[dict]:
             n = min(10, count - len(out))
             prompt = (f"Plan {n} songs for one collection of {count}. Direction from the artist: {direction or 'music nobody has heard before'}\n\n"
                       "Creatures to use, spread evenly over the songs (one creature per song):\n" + "\n".join(_sides(c) for c in creatures) + "\n\n"
-                      "The songs must be " + str(n) + " different IDEAS, not variations of one: vary the tempo widely (some very slow, some frantic, some that change), "
-                      "what leads (drums, a voice, the bass, a noise, silence), how dense it is, the form, and the mood. No two songs may share a tempo band, a lead and a form.\n"
-                      + ("Already planned, so do not repeat their ideas:\n" + "\n".join(f'- {x["title"]}: {x["idea"]} ({x["bpm"]} bpm, {x["creature"]})' for x in out) + "\n" if out else "")
-                      + 'For each: a short title of invented words, the creature, "idea" (one plain sentence saying what makes this one different), caption, lyrics, bpm, duration.')
+                      "They are " + str(n) + " different FEELINGS, not variations of one: vary the tempo widely (some very slow, some frantic, some that lurch), what carries it (drums, a voice, the low end, a noise, emptiness), "
+                      "how long it stays at the peak, in the depth and in the void, and how it gets from one to another (melting, or thrown). No two may share a tempo band, a carrier and a path.\n"
+                      "The whole collection is ONE passage that never ends: each piece begins in the state the one before it ended in. "
+                      + (f'The first of these must start in "{out[-1].get("ends", "depth")}", where the last one stopped.\n' if out else "The first may start anywhere.\n")
+                      + ("Already planned, so do not repeat their feelings:\n" + "\n".join(f'- {x["title"]}: {x["idea"]} ({x["bpm"]} bpm, {x["creature"]}, {x.get("starts")} → {x.get("ends")})' for x in out) + "\n" if out else "")
+                      + 'For each: a short title of invented words, the creature, "idea" (one plain sentence: the feeling, and what makes this one different), "starts" and "ends" (peak, depth or void), caption, lyrics, bpm, duration.')
             got = chat.think(HOUSE, prompt, IDEAS_SCHEMA, 420).get("songs") or []
             if not got:
                 break
@@ -193,6 +206,15 @@ def measure(path: str) -> dict:
     e = np.sqrt((m[:len(m) // h * h].reshape(-1, h) ** 2).mean(1)) if len(m) > h * 3 else np.array([1.0])
     db = 20 * np.log10(e + 1e-6)
     out = dict({k: round(float(f.get(k, 0)), 3) for k in (*VEC, "bpm", "secs", "loud")}, contrast=round(float(db.max() - db.min()), 1), sections=[round(float(v), 1) for v in db - db.max()][:60])
+    try:                                                               # does it reach extremes? how far its slow rise and fall spans, and how much of it sits at the top or the bottom
+        hop1 = sr // 10
+        e10 = 20 * np.log10(np.sqrt((m[:len(m) // hop1 * hop1].reshape(-1, hop1) ** 2).mean(1)) + 1e-6)
+        slow = np.convolve(np.pad(e10, 20, mode="edge"), np.hanning(41) / np.hanning(41).sum(), "valid")
+        top, bot = float(np.percentile(slow, 97)), float(np.percentile(slow, 3))
+        out["range"] = round(top - bot, 1)                               # dB between its peaks and its depths: 6 is a wall of sound, 25 is a real fall
+        out["at_extremes"] = round(float(np.mean((slow > top - (top - bot) * .2) | (slow < bot + (top - bot) * .2))), 2) if top - bot > 1 else 0.0
+    except Exception:
+        out.update(range=0.0, at_extremes=0.0)
     try:                                                               # is there a bed under everything? a tone that never goes away, and no moment of real quiet
         N = 16384
         S = np.abs(np.fft.rfft(np.stack([m[i:i + N] * np.hanning(N) for i in range(0, len(m) - N, N)]), axis=1))
@@ -285,12 +307,187 @@ def polish(path: str) -> list:
     return [round(f0, 1) for f0, _ in cuts]
 
 
+def silences(path: str, amount: float = 1.0) -> dict:
+    """Cut real silence into a song. The model never quite stops: where a song is meant to go quiet it only gets a little
+    quieter, so there is always something sounding. This follows the song's own loudness and pushes down whatever falls
+    well below the sounds around it: tails, beds, the murmur between hits. Loud sounds are not touched, so hits keep their
+    full weight and gain an edge, and the gaps between them become actual gaps. `amount` 0 = nothing, 1 = firm, 2 = hard."""
+    import numpy as np
+    import soundfile as sf
+    x, sr = sf.read(path, always_2d=True, dtype="float32")
+    hop, win = int(sr * .005), int(sr * .02)
+    m = np.abs(x).max(1)
+    n = (len(m) - win) // hop
+    if n < 200 or amount <= 0:
+        return {"changed": False}
+    idx = np.arange(n)[:, None] * hop + np.arange(0, win, 4)[None]
+    e = np.sqrt((m[idx] ** 2).mean(1)) + 1e-7                           # level every 5 ms
+    span = int(1.5 / .005)
+    ref = np.lib.stride_tricks.sliding_window_view(np.pad(e, span, mode="edge"), 2 * span + 1)[:, ::10].max(1)   # the loudest thing within a second and a half
+    top = float(np.percentile(e, 95))
+    d = e / np.maximum(ref, top * .2)                                   # how loud this moment is next to what surrounds it
+    thr, p = .2, 1.2 * amount                                           # under about -14 dB of its surroundings, it is pushed down further
+    g = np.where(d < thr, (d / thr) ** p, 1.0)
+    look = 3                                                            # open 15 ms early, so the front of a hit is never shaved
+    g = np.lib.stride_tricks.sliding_window_view(np.pad(g, (0, look), mode="edge"), look + 1).max(1)
+    rel, out, cur = np.exp(-.005 / .05), np.empty_like(g), 1.0          # close over about 50 ms: a tail, not a click
+    for i, v in enumerate(g):
+        cur = v if v > cur else cur * rel + v * (1 - rel)
+        out[i] = cur
+    gain = np.interp(np.arange(len(x)), np.arange(n) * hop + win // 2, out).astype("float32")
+    y = x * gain[:, None]
+    sf.write(path, y, sr, subtype=sf.info(path).subtype)
+    one = sr
+    lv = lambda a: np.sqrt((a.mean(1)[:len(a) // one * one].reshape(-1, one) ** 2).mean(1))
+    fl = lambda a: float(20 * np.log10(np.percentile(lv(a)[2:-2], 3) / (lv(a).max() + 1e-9) + 1e-7))
+    return {"changed": True, "quietest_before": round(fl(x), 1), "quietest_after": round(fl(y), 1), "silent_share": round(float((gain < .05).mean()), 3),
+            "loud_kept": round(float(20 * np.log10(np.sqrt((y ** 2).mean()) / (np.sqrt((x ** 2).mean()) + 1e-9))), 2)}
+
+
+def gaps(path: str, bpm: float = 0, n: int = 4) -> dict:
+    """Put real silences into a song, where they do the most: just before it comes back in. The songs here are walls of
+    sound (no moment is much quieter than the next), so silence cannot be uncovered, it has to be made. The biggest
+    re-entries are found (where the level steps up and stays up), and the beat or two before each is cut to nothing, ending
+    exactly on the hit. The hit lands harder for it, and the song gets its stops."""
+    import numpy as np
+    import soundfile as sf
+    x, sr = sf.read(path, always_2d=True, dtype="float32")
+    m = x.mean(1)
+    hop = int(sr * .05)
+    k = len(m) // hop
+    if k < 600:
+        return {"gaps": []}
+    e = 20 * np.log10(np.sqrt((m[:k * hop].reshape(k, hop) ** 2).mean(1)) + 1e-6)     # level every 50 ms
+    w = 40                                                                            # two seconds each side
+    c = np.concatenate([[0], np.cumsum(e)])
+    jump = np.full(k, -99.0)
+    idx = np.arange(w, k - w)
+    jump[idx] = (c[idx + w] - c[idx]) / w - (c[idx] - c[idx - w]) / w                 # how much louder the next two seconds are than the last two
+    beat = 60.0 / bpm if bpm and 50 <= bpm <= 200 else .5
+    length = float(min(.9, max(.3, beat * (2 if beat < .45 else 1))))                 # about half a second: one beat, or two fast ones
+    picked = []
+    for i in np.argsort(-jump):
+        if jump[i] < 1.5 or len(picked) >= n:
+            break
+        t = i * .05
+        if t < 8 or t > k * .05 - 6 or any(abs(t - q) < 14 for q in picked):
+            continue
+        picked.append(t)
+    out, y = [], x.copy()
+    for t in sorted(picked):
+        a0, a1 = int((t - .35) * sr), int((t + .35) * sr)                              # land the end of the gap exactly on the hit
+        seg = np.abs(m[a0:a1])
+        f = sr // 200
+        env = seg[:len(seg) // f * f].reshape(-1, f).max(1)
+        hit = a0 + int(np.argmax(np.diff(env, prepend=env[0]))) * f
+        g0, g1 = hit - int(length * sr), hit - int(.004 * sr)
+        if g0 < sr:
+            continue
+        fade = int(.012 * sr)
+        y[g0:g0 + fade] *= np.linspace(1, 0, fade, dtype="float32")[:, None]
+        y[g0 + fade:g1] = 0
+        out.append({"at": round(g0 / sr, 2), "seconds": round((g1 - g0) / sr, 2), "step_db": round(float(jump[int(round(t / .05))]), 1)})
+    if out:
+        sf.write(path, y, sr, subtype=sf.info(path).subtype)
+    return {"gaps": out}
+
+
+def extremes(path: str, target: float = 30.0, most: float = 3.5) -> dict:
+    """Stretch a song toward its extremes. The model's loud and quiet passages are only a few dB apart; here the song's own
+    slow rise and fall (over a couple of seconds) is exaggerated, so its peaks stay at full weight and its low passages
+    sink toward nothing: the bottomless depths, and the bounce between the two. Hits inside a passage keep their shape,
+    because only the slow movement is stretched, not each sound."""
+    import numpy as np
+    import soundfile as sf
+    x, sr = sf.read(path, always_2d=True, dtype="float32")
+    m = x.mean(1)
+    hop = int(sr * .1)
+    k = len(m) // hop
+    if k < 300:
+        return {"changed": False}
+    e = 20 * np.log10(np.sqrt((m[:k * hop].reshape(k, hop) ** 2).mean(1)) + 1e-6)
+    w = 20                                                              # two seconds: slow enough that single hits do not move it
+    slow = np.convolve(np.pad(e, w, mode="edge"), np.hanning(2 * w + 1) / np.hanning(2 * w + 1).sum(), "valid")
+    hi, lo = float(np.percentile(slow, 97)), float(np.percentile(slow, 3))
+    had = hi - lo
+    if had < 1.5:
+        return {"changed": False, "range_before": round(had, 1)}        # one level throughout: there is nothing to stretch
+    ratio = float(min(most, max(1.0, target / had)))
+    gdb = np.minimum(0, (slow - hi) * (ratio - 1))                      # at its peaks nothing changes; the further below, the further down
+    gain = np.interp(np.arange(len(x)), np.arange(k) * hop + hop // 2, 10 ** (gdb / 20)).astype("float32")
+    sf.write(path, x * gain[:, None], sr, subtype=sf.info(path).subtype)
+    return {"changed": True, "range_before": round(had, 1), "range_after": round(had * ratio, 1), "ratio": round(ratio, 2)}
+
+
+def finish(raw: str, dst: str, bpm: float) -> dict:
+    """From a take as the model made it to the piece as it is heard: the machine's buzz out, and its own slow rise and fall
+    made a little deeper, so a low passage really is lower than a peak. Nothing is cut and no silence is added.
+    The raw take is not changed."""
+    shutil.copy(raw, dst)
+    info = {}
+    for name, fn in (("buzz", lambda: polish(dst)), ("extremes", lambda: extremes(dst, 15.0, 1.8))):   # no silences are cut in: the artist does not want them forced
+        try:
+            info[name] = fn()
+        except Exception as ex:
+            info[name] = "skipped: " + str(ex)[:120]
+    return info
+
+
+def river(paths: list, out: str, cross: float = 7.0) -> float:
+    """The whole collection as one piece that never stops: each ending melts into the next beginning."""
+    import numpy as np
+    import soundfile as sf
+    acc, sr = None, 48000
+    for p in paths:
+        x, sr = sf.read(p, always_2d=True, dtype="float32")
+        if x.shape[1] == 1:
+            x = np.repeat(x, 2, 1)
+        if acc is None:
+            acc = x
+            continue
+        n = int(min(cross * sr, len(acc) / 3, len(x) / 3))
+        t = np.linspace(0, np.pi / 2, n, dtype="float32")[:, None]
+        acc = np.concatenate([acc[:-n], acc[-n:] * np.cos(t) + x[:n] * np.sin(t), x[n:]])
+    if acc is None:
+        return 0.0
+    sf.write(out, acc, sr, subtype="PCM_16")
+    return len(acc) / sr
+
+
+def drier(path: str, keep: float = .45) -> dict:
+    """Turn down what is held and keep what is struck. Sound is split into the part that stays (tones, beds, the hum under
+    everything) and the part that happens (hits, clicks, the front of a shout); the staying part is turned down to `keep`
+    of its level. Needs the ACE-Step environment's audio tools, so it runs there."""
+    code = (
+        "import sys, numpy as np, soundfile as sf\n"
+        "from scipy.ndimage import median_filter\n"
+        "from scipy.signal import stft, istft\n"
+        "p, keep = sys.argv[1], float(sys.argv[2])\n"
+        "x, sr = sf.read(p, always_2d=True, dtype='float32')\n"
+        "f, t, Z = stft(x.T, sr, nperseg=2048, noverlap=1536)\n"
+        "M = np.abs(Z).mean(0)\n"
+        "H = median_filter(M, size=(1, 31)); P = median_filter(M, size=(31, 1))\n"
+        "mh = H**2 / (H**2 + P**2 + 1e-12)\n"
+        "g = (1 - mh) + mh * keep\n"
+        "_, y = istft(Z * g[None], sr, nperseg=2048, noverlap=1536)\n"
+        "y = y.T[:len(x)].astype('float32')\n"
+        "y *= float(np.abs(x).max()) / (float(np.abs(y).max()) or 1.0)\n"
+        "sf.write(p, y, sr, subtype=sf.info(p).subtype)\n"
+        "print('ok')\n")
+    from .paths import ENVS_DIR
+    r = subprocess.run([str(ENVS_DIR / "ace_step" / "bin" / "python"), "-c", code, path, str(keep)], capture_output=True, text=True, timeout=300)
+    if r.returncode:
+        raise RuntimeError((r.stderr or "could not process").strip()[-300:])
+    return {"keep": keep}
+
+
 def score(m: dict, others: list[dict]) -> dict:
-    """A stand-in for judgement, made of things that can be measured: does it have drums and a pulse, is its structure
-    defined (distinct blocks that hold and return), does it have contrast, and is it unlike the songs already finished.
-    It cannot tell a good song from a dull one."""
+    """A stand-in for judgement, made of things that can be measured, in the artist's terms: does it reach extremes (a real
+    distance between its peaks and its depths, and time spent at them), is it clear (no tone that never stops, real quiet),
+    does it have drums, do its states hold while they last, and is it unlike the pieces already finished.
+    It cannot tell whether a piece moves anyone."""
     drums = .5 * min(1, max(0, (m["attack"] - .06) / .22)) + .5 * min(1, m["steady"] / .6)
-    shape = min(1, m["contrast"] / 9)
+    ext = .7 * min(1, float(m.get("range", 0)) / 12) + .3 * min(1, float(m.get("at_extremes", 0)) / .6)
     far, near = 1.0, None
     for o in others:
         d = (sum((m[k] - o["m"][k]) ** 2 for k in VEC) / len(VEC) + ((m["bpm"] - o["m"]["bpm"]) / 200) ** 2) ** .5
@@ -298,9 +495,9 @@ def score(m: dict, others: list[dict]) -> dict:
             far, near = d, o["title"]
     variety = min(1, far / .22) if others else 1.0
     defn = float(m.get("definition", 0))
-    clear = .5 * min(1, max(0, (-float(m.get("floor", -30)) - 10) / 22)) + .5 * min(1, max(0, 1 - (float(m.get("hum", 0)) - 7) / 9))   # real quiet between sounds, and no tone that never stops
-    return {"total": round(.25 * drums + .25 * defn + .2 * clear + .1 * shape + .2 * variety, 3), "drums": round(drums, 2), "definition": round(defn, 2), "clarity": round(clear, 2),
-            "shape": round(shape, 2), "variety": round(variety, 2), "nearest": near}
+    clear = min(1, max(0, 1 - (float(m.get("hum", 0)) - 7) / 9))           # no tone that never stops. Silence is not rewarded for its own sake.
+    return {"total": round(.25 * ext + .2 * clear + .2 * drums + .1 * defn + .25 * variety, 3), "extremes": round(ext, 2), "clarity": round(clear, 2), "drums": round(drums, 2),
+            "definition": round(defn, 2), "variety": round(variety, 2), "nearest": near, "shape": round(ext, 2)}
 
 
 def revise(song: dict, m: dict, sc: dict, tries_left: int, rng) -> dict:
@@ -312,11 +509,12 @@ def revise(song: dict, m: dict, sc: dict, tries_left: int, rng) -> dict:
                   f'- sharp drum hits: {m["attack"]} ({said(m["attack"], .12, .3)}; under 0.12 means almost no drums can be found)\n'
                   f'- steady pulse: {m["steady"]} ({said(m["steady"], .3, .7)})\n- tempo found: {m["bpm"]} bpm (asked for {song["bpm"]})\n'
                   f'- clear pitches vs noise: tonal {m["tonal"]}, hiss {m["noise"]}\n- voice-like movement: {m["voice"]}\n- how squashed and distorted: {m["dist"]}\n'
-                  f'- loudness through the song in 5-second steps, in dB below its loudest: {m["sections"]}\n  (contrast {m["contrast"]} dB; under 4 means it never really changes)\n'
+                  f'- loudness through the piece in 5-second steps, in dB below its loudest: {m["sections"]}\n'
+                  f'  (its peaks and depths are {m.get("range")} dB apart: under 6 it is a wall of sound with no depth at all; and {m.get("at_extremes")} of its time is spent at one extreme or the other)\n'
                   + f'- a constant tone under everything: {m.get("hum")} dB at {m.get("hum_hz")} Hz (under 8 is clean, over 12 is a hum the artist hears and dislikes)\n'
-                  f'- its quietest second: {m.get("floor")} dB below its loudest (-12 means the sound never lets go; -30 or lower means real silences)\n'
+                  f'- its quietest second: {m.get("floor")} dB below its loudest (for information only: silence is not a goal, and must not be added unless this piece is about emptiness)\n'
                   + (f'- the finished song it is most like: "{sc["nearest"]}" (variety {sc["variety"]}, 1 = very different)\n' if sc.get("nearest") else "")
-                  + f"\nTries left for this song: {tries_left}. The artist heard a song that measured 0.12 for drum hits and said it needed more drums, so merely detectable is not enough: aim for drum hits of 0.2 or more in the parts where drums play. Answer keep=true only if drum hits are at least 0.2, contrast is at least 5 dB, the constant tone is under 10 dB, its quietest second is below -20 dB, and it is unlike the others (still return the caption, lyrics and bpm unchanged).\n"
+                  + f"\nTries left for this song: {tries_left}. The artist heard a song that measured 0.12 for drum hits and said it needed more drums, so merely detectable is not enough: aim for drum hits of 0.2 or more in the parts where drums play. Answer keep=true only if its peaks and depths are at least 7 dB apart, the constant tone is under 10 dB, drum hits are at least 0.2, and it is unlike the others (still return the caption, lyrics and bpm unchanged).\n"
                   "Otherwise rewrite the caption and lyrics to fix what the numbers show, keeping the idea and the creature's words at the front. Say in one sentence what you changed and why.")
         r = chat.think(HOUSE, prompt, REVISE_SCHEMA, 240)
         if r.get("keep"):
@@ -347,8 +545,8 @@ def chisel_plan(song: dict, m: dict, tried: list, rng) -> dict:
                   f'- a constant tone under everything: {m.get("hum")} dB at {m.get("hum_hz")} Hz (over 12 is a hum the artist hears); its quietest second is {m.get("floor")} dB below its loudest (-12 means it never lets go)\n'
                   f'- how defined its structure measures: {m.get("definition")} of 1. Drums overall: {m["attack"]} (the artist wants 0.2 or more). In the 5-second timeline, a stretch with real drums reads about 0.2 to 0.4, and under 0.1 means none.\n'
                   + ("- stretches already reworked, do not pick these again: " + ", ".join(f"{a:.0f}-{b:.0f}s" for a, b in tried) + "\n" if tried else "")
-                  + "\nPick ONE stretch of 12 to 30 seconds to make again, the one whose remaking would most sharpen the song into a defined structure: a chorus that does not stand out from the verse, "
-                  "a stretch where the plan asks for drums and there are none, a blur between two sections, a return that does not sound like what it returns to, or a stretch where the plan asks for silence or a drop and the level in the timeline barely falls (there the caption should ask for almost nothing: one dry sound and dead silence around it). Leave silences that are already silent alone. "
+                  + "\nPick ONE stretch of 12 to 30 seconds to make again, the one whose remaking would most push the piece toward its extremes: a peak that is not overwhelming enough, a depth that is not heavy enough, "
+                  "a stretch that is merely in-between, or a peak whose drums are missing. Do not add silences: only if the plan itself has a void section and the timeline shows that it is not empty may that one be made emptier. "
                   f'Give start and end in seconds, and a caption for JUST that stretch: it must begin with "{words}", then say concretely what plays there (which drums and how, the low end, the voices, the noise). '
                   "No genre or artist names. In the note, one sentence: which section this is and what it should become.")
         r = chat.think(HOUSE, prompt, CHISEL_SCHEMA, 240)
@@ -432,7 +630,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
             _state["msg"] = f"writing {count} different ideas…"
             job.update(msg=_state["msg"])
             plan = ideas(creatures, count, direction, rng)
-            sheet["ideas"] = [{k: x[k] for k in ("title", "creature", "idea", "bpm", "duration")} for x in plan]
+            sheet["ideas"] = [{k: x.get(k) for k in ("title", "creature", "idea", "bpm", "duration", "starts", "ends")} for x in plan]
             save()
             done = []                                              # finished songs: {title, m}
             for n, song in enumerate(plan, 1):
@@ -491,20 +689,20 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     run = library.new_run_dir("ace_step", label)
                     src = Path(best["path"])
                     dst = run / f"{n:02d} {re.sub(r'[^A-Za-z0-9 _-]+', '', best['song']['title']).strip() or 'song'}{src.suffix}"
-                    shutil.move(str(src), str(dst))
+                    work = d / "as made"                            # every piece as the model made it, untouched: what carving works on, and what can always be gone back to
+                    work.mkdir(exist_ok=True)
+                    raw = work / dst.name
+                    shutil.move(str(src), str(raw))
                     shutil.rmtree(src.parent, ignore_errors=True)
+                    entry["finish"] = finish(str(raw), str(dst), best["m"].get("bpm") or best["song"]["bpm"])
                     library.write_meta(run, {"engine": "ace_step", "engine_name": "night shift", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "label": label,
                                              "params": best["params"], "outputs": [{"path": str(dst), "kind": "audio", "label": best["song"]["title"]}],
                                              "info": {"idea": best["song"]["idea"], "score": best["sc"]}, "seconds": 0})
-                    done.append({"title": best["song"]["title"], "m": best["m"], "n": n, "path": str(dst), "song": best["song"], "sc": best["sc"], "strength": strength, "entry": entry,
+                    done.append({"title": best["song"]["title"], "m": best["m"], "n": n, "path": str(dst), "raw": str(raw), "song": best["song"], "sc": best["sc"], "strength": strength, "entry": entry,
                                  "tried": [], "misses": 0, "carved": 0})
-                    first = d / "first takes"                       # the song before any carving, kept so it can always be gone back to
+                    first = d / "first takes"                       # the piece before any carving
                     first.mkdir(exist_ok=True)
-                    shutil.copy(dst, first / dst.name)
-                    try:
-                        entry["buzz_cut_hz"] = polish(str(dst))        # the model's own fixed-pitch buzz comes out of the song in the library; the first take keeps it, untouched
-                    except Exception as ex:
-                        print("[night] could not filter the buzz: " + str(ex)[:200], flush=True)
+                    shutil.copy(raw, first / dst.name)
                     entry.update(path=str(dst), score=best["sc"], carving=[])
                     _state["made"] = len(done)
                     _state["songs"].append({"n": n, "name": best["song"]["title"], "path": str(dst), "creature": best["song"]["creature"], "idea": best["song"]["idea"]})
@@ -531,7 +729,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         s_["tried"].append((cp["start"], cp["end"]))
                         _state["msg"] = base + f" · remaking {cp['start']:.0f}–{cp['end']:.0f}s"
                         where.mkdir()
-                        params = gym.bred_boost(coerce(e.spec, {"task": "repaint", "src_audio": s_["path"], "repaint_start": cp["start"], "repaint_end": cp["end"], "caption": cp["caption"],
+                        params = gym.bred_boost(coerce(e.spec, {"task": "repaint", "src_audio": s_["raw"], "repaint_start": cp["start"], "repaint_end": cp["end"], "caption": cp["caption"],
                                                                 "lyrics": s_["song"]["lyrics"], "duration": round(float(s_["m"].get("secs") or s_["song"]["duration"]), 1), "thinking": False, "batch": 1,
                                                                 "seed": rng.randint(1, 2 ** 31 - 1), "creature": s_["song"]["creature"], "creature_strength": s_["strength"]}))
                         outs = []
@@ -548,11 +746,8 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         s_["entry"]["carving"].append({"round": rnd, "from": cp["start"], "to": cp["end"], "why": cp["note"], "kept": better, "broken": why or None,
                                                        "before": s_["sc"]["total"], "after": sc2["total"] if sc2 else None, "definition": [s_["sc"]["definition"], sc2["definition"] if sc2 else None]})
                         if better:
-                            shutil.copy(outs[0]["path"], s_["path"])            # the song in the library is now the carved one
-                            try:
-                                polish(s_["path"])
-                            except Exception:
-                                pass
+                            shutil.copy(outs[0]["path"], s_["raw"])             # the working copy is now the carved one,
+                            s_["entry"]["finish"] = finish(s_["raw"], s_["path"], m2.get("bpm") or s_["song"]["bpm"])   # and the piece in the library is made from it again
                             s_.update(m=m2, sc=sc2, misses=0, carved=s_["carved"] + 1)
                             s_["entry"]["score"] = sc2
                             _state["carved"] += 1
@@ -570,6 +765,16 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     finally:
                         shutil.rmtree(where, ignore_errors=True)
                     save()
+            if len(done) >= 2:                                  # and the whole of it as one piece that never stops
+                try:
+                    _state["msg"] = "joining them into one piece…"
+                    label = f"{tag} · the whole passage as one"
+                    run = library.new_run_dir("ace_step", label)
+                    secs = river([s_["path"] for s_ in sorted(done, key=lambda q: q["n"])], str(run / "the whole passage.wav"))
+                    library.write_meta(run, {"engine": "ace_step", "engine_name": "night shift", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "label": label, "params": {},
+                                             "outputs": [{"path": str(run / "the whole passage.wav"), "kind": "audio", "label": "the whole passage"}], "info": {"seconds": round(secs)}, "seconds": 0})
+                except Exception as ex:
+                    print("[night] could not join them: " + str(ex)[:300], flush=True)
             _state["msg"] = (f"stopped: {_state['made']} songs are in the library" if _state["stop"] else "stopped: " + _state["error"] if _state["error"]
                              else f"done: {_state['made']} songs are in the library as “{tag}”" + (f", {_state['carved']} carvings kept of {_state['carves']} tried" if _state.get("carves") else ""))
         except Exception as ex:
