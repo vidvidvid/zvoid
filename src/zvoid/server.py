@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from . import chat, evolve, gym, library
+from . import chat, evolve, gym, library, night
 from .engines import discover, env_size
 from .paths import NAME, OUTPUTS_DIR, PATCHES_DIR, UPLOADS_DIR, WEB_DIR
 
@@ -267,6 +267,20 @@ def create_app():
     def evolve_delete(sid: str):
         evo(evolve.remove, sid)
         return {"ok": True}
+
+    # ---- night shift: a set of songs made while you sleep
+    @app.get("/api/night")
+    def night_status():
+        return night.status()
+
+    @app.post("/api/night")
+    def night_start(body: dict):
+        return evo(night.start, engines, jobs, _coerce, str(body.get("creature") or ""), int(body.get("count") or 10), str(body.get("direction") or ""))
+
+    @app.post("/api/night/stop")
+    def night_stop():
+        night.stop()
+        return night.status()
 
     @app.get("/api/busy")
     def busy():

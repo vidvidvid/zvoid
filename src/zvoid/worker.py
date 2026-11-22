@@ -53,7 +53,20 @@ class Ctx:
         return "cpu"
 
 
+def _stay_awake():
+    """On Windows, ask the system not to fall asleep while this worker is alive (a long run overnight would stop dead otherwise).
+    It is a request made by this process, and it ends with it: no setting of the machine is changed."""
+    try:
+        import ctypes
+        import sys as _sys
+        if _sys.platform == "win32":
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)   # continuous + system required
+    except Exception:
+        pass
+
+
 def main():
+    _stay_awake()
     engine_dir = sys.argv[1]
     sys.path.insert(0, engine_dir)
     sys.path.insert(1, os.path.join(os.path.dirname(os.path.abspath(engine_dir)), "_common"))

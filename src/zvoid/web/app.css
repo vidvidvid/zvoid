@@ -518,3 +518,8 @@ body.throwing, body.throwing * { cursor: grabbing !important; user-select: none 
 .node-foot .passes { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; font: 9.5px var(--mono); color: var(--muted); letter-spacing: .06em; }
 .node-foot .passes button { all: unset; cursor: pointer; min-width: 16px; text-align: center; padding: 1px 3px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
 .node-foot .passes button.on { color: #05050a; background: var(--c); border-color: transparent; font-weight: 700; }
+
+#evo-night { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+#evo-night small { font: 10px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#evo-night input { background: var(--ink); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: 12px var(--mono); }
+.evo-night-msg { font: 600 12px var(--sans); }

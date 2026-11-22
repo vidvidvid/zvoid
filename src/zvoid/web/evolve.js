@@ -43,6 +43,28 @@ async function evoStart(body) {
   if (b) b.classList.remove('busy');
 }
 const evoSave = patch => api('/api/evolve/' + EVO.s.id, { method: 'PUT', json: patch }).then(s => { EVO.s = s; }).catch(() => {});
+function evoNightBox(trained, s) {
+  const N = EVO.night || {}, box = h('div', { id: 'evo-night' });
+  if (N.running) {
+    const left = N.per && N.count > N.made ? ` · about ${Math.max(1, Math.round((N.count - N.made) * N.per / 60))} min left` : '';
+    box.append(h('div', { class: 'evo-night-msg' }, `${N.made} of ${N.count} made${N.thrown ? ` · ${N.thrown} thrown away` : ''}${left}`), h('div', { class: 'evo-bar' }, h('i', { style: `width:${Math.round(N.made / N.count * 100)}%` })),
+      h('small', {}, N.msg || ''), h('div', { class: 'acts' }, h('button', { onclick: () => api('/api/night/stop', { method: 'POST' }).then(evoNightPoll) }, '■ stop after this song')));
+  } else {
+    const who = h('select', {}, trained.map(c => h('option', { value: c.slug }, c.name))), cnt = h('input', { type: 'number', min: 1, max: 200, value: 10, style: 'width:64px' });
+    if (N.creature && trained.some(c => c.slug === N.creature)) who.value = N.creature; else if (s && s.creature) who.value = s.creature;
+    box.append(h('div', { class: 'acts' }, who, cnt, h('span', { class: 'gym-note' }, 'songs')),
+      h('div', { class: 'acts' }, h('button', { class: 'hot', disabled: !trained.length, title: 'About a minute and a half per song on the PC. Both machines are kept awake while it runs. Do not close Zvoid.', onclick: async () => { try { EVO.night = await api('/api/night', { json: { creature: who.value, count: +cnt.value || 10, direction: (s && s.direction) || '' } }); evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'start ▸')),
+      N.msg && N.finished ? h('small', {}, N.msg) : null);
+  }
+  return box;
+}
+async function evoNightPoll() {
+  clearTimeout(EVO.nightT);
+  try { const was = JSON.stringify([(EVO.night || {}).running, (EVO.night || {}).made, (EVO.night || {}).thrown]); EVO.night = await api('/api/night');
+    const b = $('#btn-evo'); if (b) b.textContent = EVO.night.running ? `⟲ evolve · night ${EVO.night.made}/${EVO.night.count}` : '⟲ evolve';
+    if (EVO.open) { if (JSON.stringify([EVO.night.running, EVO.night.made, EVO.night.thrown]) !== was) evoDraw(); else { const m = document.querySelector('#evo-night small'); if (m && EVO.night.running) m.textContent = EVO.night.msg || ''; } } } catch (e) {}
+  EVO.nightT = setTimeout(evoNightPoll, EVO.night && EVO.night.running ? 3000 : 20000);
+}
 function evoMark() { document.querySelectorAll('#evo .evo-pp').forEach(b => { const on = b.dataset.path === LIB.playing; b.textContent = on ? '■' : '▶'; b.closest('.evo-card, .evo-step').classList.toggle('playing', on); }); }
 
 function evoCard(n, opts) {
@@ -66,6 +88,9 @@ function evoDraw() {
     h('h3', {}, 'start a new one'),
     fed.length ? h('div', { class: 'acts', id: 'evo-new' }, from, h('button', { title: 'Begin from a passage of one of this creature\'s own tracks', onclick: () => evoStart({ creature: from.value, direction: (s && s.direction) || 'primal music of the future' }) }, 'from its tracks ▸')) : null,
     h('p', { class: 'gym-note' }, 'Or open the library and press “evolve” on any clip.'),
+    h('h3', {}, 'night shift'),
+    h('p', { class: 'gym-note' }, 'Leave it running and wake up to a set of whole songs. Each one is new: its own tempo, sounds, shape and chants, made through the creature. They land in the library as “night …”.'),
+    evoNightBox(trained, s),
     h('h3', {}, 'sessions'),
     h('div', { class: 'evo-list' }, EVO.list.length ? EVO.list.map(x => h('button', { class: 'evo-row' + (s && x.id === s.id ? ' cur' : ''), onclick: async () => { EVO.s = await api('/api/evolve/' + x.id); evoDraw(); evoPoll(); } },
       h('b', {}, x.name), h('small', {}, `${x.rounds} round${x.rounds === 1 ? '' : 's'}${x.creature ? ' · ◍ ' + x.creature.replace(/-/g, ' ') : ''}${x.live ? ' · running' : ''}`),
@@ -99,4 +124,5 @@ function evoDraw() {
   keepAt.forEach(([q, y]) => { const o = $(q); if (o && y) o.scrollTop = y; });
 }
 $('#btn-evo').onclick = () => (EVO.open ? closeEvo() : openEvo());
+evoNightPoll();
 addEventListener('keydown', e => { if (e.key === 'Escape' && EVO.open && !/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')) closeEvo(); });
