@@ -122,7 +122,12 @@ How a plan is written:
 - lyrics: section tags in square brackets, each with a short hint of what happens, e.g. "[intro - one drum, breathing]", "[chorus - everyone, full stomp]". Under each tag, 1-4 lines of chant syllables or invented words (HA! oom-ka, zra ko mi). No real words in any language. A chorus repeats the same lines each time it returns. 5-9 sections.
 - Say in the section hints where drums come in, drop out and come back: these songs need drums that arrive and leave, not a wash of texture.
 - duration: 110 to 190 seconds. bpm: 55 to 190.
-What makes a result fail here: no rhythm at all, one unbroken texture, plain noise. Every song needs a pulse somewhere and a shape with contrast."""
+What makes a result fail here: no rhythm at all, one unbroken texture, plain noise. Every song needs a pulse somewhere and a shape with contrast.
+Three things the artist heard go wrong, and how to avoid them:
+- A constant hum under the whole song. A tag is applied to the WHOLE song, not to one section, so any tag that names something sustained lays a bed under everything: never write drone, hum, pad, sustained, swell, wash, ambience, room, echo, reverb, wide, hollow pipe, held note. The low end must be struck, not held: "sub hits that stop dead", "short sub thuds". Always include tags for dryness and edges: "dry", "close", "tight", "gated", "hard cuts", "dead silence between hits".
+- Smooth, soulful singing appearing from nowhere. The model sings anything voice-like in its default pop style unless told otherwise. Describe every voice as shouted, barked, chanted in unison, whispered, growled, rasped or throat-sung, and add "no melody in the voices, spoken rhythm". Never write wailing, singing, sung, humming, choir, soulful, high voice, female voice, crooning.
+- In the lyrics, the same: syllables must start with hard consonants and be short (ka, tu, gra, zok, thum, tek, bra). No long open vowels and no vowel runs (not ee-yah, ah-ee-yo, oh-oh, yeah), and no trailing dots that stretch a sound. They are shouted, not sung.
+The goal is a song as clear and sharp as a knife: every sound has an edge, and between sounds there is nothing."""
 
 
 def _sides(slug: str) -> str:
@@ -188,6 +193,20 @@ def measure(path: str) -> dict:
     e = np.sqrt((m[:len(m) // h * h].reshape(-1, h) ** 2).mean(1)) if len(m) > h * 3 else np.array([1.0])
     db = 20 * np.log10(e + 1e-6)
     out = dict({k: round(float(f.get(k, 0)), 3) for k in (*VEC, "bpm", "secs", "loud")}, contrast=round(float(db.max() - db.min()), 1), sections=[round(float(v), 1) for v in db - db.max()][:60])
+    try:                                                               # is there a bed under everything? a tone that never goes away, and no moment of real quiet
+        N = 16384
+        S = np.abs(np.fft.rfft(np.stack([m[i:i + N] * np.hanning(N) for i in range(0, len(m) - N, N)]), axis=1))
+        fq2 = np.fft.rfftfreq(N, 1 / sr)
+        low10 = np.percentile(20 * np.log10(S + 1e-7), 10, axis=0)         # the level each pitch keeps even in the quietest tenth of the song
+        around = np.median(np.lib.stride_tricks.sliding_window_view(np.pad(low10, 40, mode="edge"), 81), axis=1)
+        keep = (fq2 > 30) & (fq2 < 3000)
+        out["hum"] = round(float(np.max((low10 - around)[keep])), 1)      # dB a constant tone stands above its surroundings: under 8 is nothing, over 12 is a hum you hear
+        out["hum_hz"] = round(float(fq2[keep][int(np.argmax((low10 - around)[keep]))]), 1)
+        one = sr
+        e1 = np.sqrt((m[:len(m) // one * one].reshape(-1, one) ** 2).mean(1))
+        out["floor"] = round(float(20 * np.log10(np.percentile(e1[2:-2] if len(e1) > 8 else e1, 3) / (e1.max() + 1e-9) + 1e-6)), 1)   # its quietest second, in dB below its loudest: -12 means it never lets go, -35 means real silences
+    except Exception:
+        out.update(hum=0.0, hum_hz=0.0, floor=-30.0)
     try:
         win = 2048
         fr = m[:len(m) // win * win].reshape(-1, win) * np.hanning(win)
@@ -231,6 +250,41 @@ def measure(path: str) -> dict:
     return out
 
 
+def polish(path: str) -> list:
+    """Take out the machine's own buzz. ACE-Step builds sound in frames, 25 a second, and leaves thin constant tones at
+    multiples of 25 Hz that sit under the whole song. Where such a tone is really there (it stands out even in the song's
+    quietest moments), a very narrow cut is made at exactly that pitch. Notes the music holds are not on that grid and are
+    left alone. Returns the pitches that were cut."""
+    import numpy as np
+    import soundfile as sf
+    x, sr = sf.read(path, always_2d=True, dtype="float32")
+    m, N = x.mean(1), 32768
+    if len(m) < N * 6:
+        return []
+    S = np.abs(np.fft.rfft(np.stack([m[i:i + N] * np.hanning(N) for i in range(0, len(m) - N, N)]), axis=1))
+    fq = np.fft.rfftfreq(N, 1 / sr)
+    low = np.percentile(20 * np.log10(S + 1e-7), 10, axis=0)
+    prom = low - np.median(np.lib.stride_tricks.sliding_window_view(np.pad(low, 60, mode="edge"), 121), axis=1)
+    cuts = []
+    for k in range(4, 161):                                            # 100 Hz .. 4 kHz on the 25 Hz grid
+        f0 = k * 25.0
+        near = np.abs(fq - f0) <= 1.6
+        if near.any() and float(prom[near].max()) > 10:
+            cuts.append((float(fq[near][int(np.argmax(prom[near]))]), float(prom[near].max())))
+    cuts = sorted(cuts, key=lambda c: -c[1])[:16]
+    if not cuts:
+        return []
+    n = len(x)
+    F = np.fft.rfftfreq(n, 1 / sr)
+    gain = np.ones(len(F), "float32")
+    for f0, pr in cuts:
+        depth = 1 - 10 ** (-min(30.0, pr + 6) / 20)                       # cut it down to the level of what surrounds it, a little more
+        gain *= 1 - depth * np.exp(-.5 * ((F - f0) / .9) ** 2).astype("float32")
+    y = np.stack([np.fft.irfft(np.fft.rfft(x[:, c]) * gain, n) for c in range(x.shape[1])], 1).astype("float32")
+    sf.write(path, y, sr, subtype=sf.info(path).subtype)
+    return [round(f0, 1) for f0, _ in cuts]
+
+
 def score(m: dict, others: list[dict]) -> dict:
     """A stand-in for judgement, made of things that can be measured: does it have drums and a pulse, is its structure
     defined (distinct blocks that hold and return), does it have contrast, and is it unlike the songs already finished.
@@ -244,7 +298,9 @@ def score(m: dict, others: list[dict]) -> dict:
             far, near = d, o["title"]
     variety = min(1, far / .22) if others else 1.0
     defn = float(m.get("definition", 0))
-    return {"total": round(.3 * drums + .3 * defn + .15 * shape + .25 * variety, 3), "drums": round(drums, 2), "definition": round(defn, 2), "shape": round(shape, 2), "variety": round(variety, 2), "nearest": near}
+    clear = .5 * min(1, max(0, (-float(m.get("floor", -30)) - 10) / 22)) + .5 * min(1, max(0, 1 - (float(m.get("hum", 0)) - 7) / 9))   # real quiet between sounds, and no tone that never stops
+    return {"total": round(.25 * drums + .25 * defn + .2 * clear + .1 * shape + .2 * variety, 3), "drums": round(drums, 2), "definition": round(defn, 2), "clarity": round(clear, 2),
+            "shape": round(shape, 2), "variety": round(variety, 2), "nearest": near}
 
 
 def revise(song: dict, m: dict, sc: dict, tries_left: int, rng) -> dict:
@@ -257,8 +313,10 @@ def revise(song: dict, m: dict, sc: dict, tries_left: int, rng) -> dict:
                   f'- steady pulse: {m["steady"]} ({said(m["steady"], .3, .7)})\n- tempo found: {m["bpm"]} bpm (asked for {song["bpm"]})\n'
                   f'- clear pitches vs noise: tonal {m["tonal"]}, hiss {m["noise"]}\n- voice-like movement: {m["voice"]}\n- how squashed and distorted: {m["dist"]}\n'
                   f'- loudness through the song in 5-second steps, in dB below its loudest: {m["sections"]}\n  (contrast {m["contrast"]} dB; under 4 means it never really changes)\n'
+                  + f'- a constant tone under everything: {m.get("hum")} dB at {m.get("hum_hz")} Hz (under 8 is clean, over 12 is a hum the artist hears and dislikes)\n'
+                  f'- its quietest second: {m.get("floor")} dB below its loudest (-12 means the sound never lets go; -30 or lower means real silences)\n'
                   + (f'- the finished song it is most like: "{sc["nearest"]}" (variety {sc["variety"]}, 1 = very different)\n' if sc.get("nearest") else "")
-                  + f"\nTries left for this song: {tries_left}. The artist heard a song that measured 0.12 for drum hits and said it needed more drums, so merely detectable is not enough: aim for drum hits of 0.2 or more in the parts where drums play. Answer keep=true only if drum hits are at least 0.2, contrast is at least 5 dB and it is unlike the others (still return the caption, lyrics and bpm unchanged).\n"
+                  + f"\nTries left for this song: {tries_left}. The artist heard a song that measured 0.12 for drum hits and said it needed more drums, so merely detectable is not enough: aim for drum hits of 0.2 or more in the parts where drums play. Answer keep=true only if drum hits are at least 0.2, contrast is at least 5 dB, the constant tone is under 10 dB, its quietest second is below -20 dB, and it is unlike the others (still return the caption, lyrics and bpm unchanged).\n"
                   "Otherwise rewrite the caption and lyrics to fix what the numbers show, keeping the idea and the creature's words at the front. Say in one sentence what you changed and why.")
         r = chat.think(HOUSE, prompt, REVISE_SCHEMA, 240)
         if r.get("keep"):
@@ -286,10 +344,11 @@ def chisel_plan(song: dict, m: dict, tried: list, rng) -> dict:
                   "It exists as audio now. Nobody has heard it; this is what can be measured:\n"
                   f"- level in 5-second steps (dB below its loudest): {line(lev)}\n- drum hits in 5-second steps (0 none .. 1 hard): {line(hits)}\n"
                   f'- its kinds of sound, one letter per 2.5 seconds: {m.get("kinds", "")}\n  (a defined song reads like AAAABBBBAAAACCCCBBBB: clear blocks that hold and return. A wash reads like ABACBADC or AAAAAAAAAAAA.)\n'
+                  f'- a constant tone under everything: {m.get("hum")} dB at {m.get("hum_hz")} Hz (over 12 is a hum the artist hears); its quietest second is {m.get("floor")} dB below its loudest (-12 means it never lets go)\n'
                   f'- how defined its structure measures: {m.get("definition")} of 1. Drums overall: {m["attack"]} (the artist wants 0.2 or more). In the 5-second timeline, a stretch with real drums reads about 0.2 to 0.4, and under 0.1 means none.\n'
                   + ("- stretches already reworked, do not pick these again: " + ", ".join(f"{a:.0f}-{b:.0f}s" for a, b in tried) + "\n" if tried else "")
                   + "\nPick ONE stretch of 12 to 30 seconds to make again, the one whose remaking would most sharpen the song into a defined structure: a chorus that does not stand out from the verse, "
-                  "a stretch where the plan asks for drums and there are none, a blur between two sections, a return that does not sound like what it returns to. Leave deliberate silences and quiet breakdowns alone. "
+                  "a stretch where the plan asks for drums and there are none, a blur between two sections, a return that does not sound like what it returns to, or a stretch where the plan asks for silence or a drop and the level in the timeline barely falls (there the caption should ask for almost nothing: one dry sound and dead silence around it). Leave silences that are already silent alone. "
                   f'Give start and end in seconds, and a caption for JUST that stretch: it must begin with "{words}", then say concretely what plays there (which drums and how, the low end, the voices, the noise). '
                   "No genre or artist names. In the note, one sentence: which section this is and what it should become.")
         r = chat.think(HOUSE, prompt, CHISEL_SCHEMA, 240)
