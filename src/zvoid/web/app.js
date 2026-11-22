@@ -625,7 +625,7 @@ function libWaveDraw(cv) {
   const pk = LIB.peaks.get(cv.dataset.path), dpr = devicePixelRatio || 1, w = cv.clientWidth, hgt = cv.clientHeight; if (!w) return;
   if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(hgt * dpr); }
   const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, hgt);
-  const mid = hgt / 2, on = LIB.playing === cv.dataset.path, A = LIB.audio, prog = on && A && A.duration ? A.currentTime / A.duration : -1;
+  const mid = hgt / 2, on = LIB.playing === cv.dataset.path, A = LIB.audio, prog = on && A && A.duration ? clamp((LIB.est != null ? LIB.est : A.currentTime) / A.duration, 0, 1) : -1;
   if (!pk || !pk.hi) { g.fillStyle = '#26243a'; g.fillRect(0, mid - .5, w, 1); return; }
   const n = pk.hi.length, bw = 2, gap = 1, cols = Math.floor(w / (bw + gap)), top = Math.max(.05, ...pk.hi.map(Math.abs), ...pk.lo.map(Math.abs));
   for (let c = 0; c < cols; c++) { const i0 = Math.floor(c / cols * n), i1 = Math.max(i0 + 1, Math.floor((c + 1) / cols * n)); let lo = 0, hi = 0; for (let i = i0; i < i1; i++) { lo = Math.min(lo, pk.lo[i]); hi = Math.max(hi, pk.hi[i]); }
@@ -643,10 +643,24 @@ function libWave(it) {
   requestAnimationFrame(() => libWaveDraw(cv));
   return cv;
 }
-setInterval(() => { if (!LIB.playing || !LIB.audio || LIB.audio.paused) return; if (!LIB.cv || !LIB.cv.isConnected || LIB.cv.dataset.path !== LIB.playing) LIB.cv = [...document.querySelectorAll('.lib-wave')].find(c => c.dataset.path === LIB.playing) || null; if (LIB.cv) libWaveDraw(LIB.cv); }, 66);   // the playhead moves
-{ let last = performance.now(), told = 0;                // if the window freezes while a clip plays, say so in the log, with what was open: that is how a lag gets found
+{ let t0 = 0, at = 0, seen = -1;                        // the playhead: drawn every frame, and carried by the clock between the player's own time reports, which arrive in coarse steps (worst just after a clip starts). That is what made it stutter.
+  const step = () => { requestAnimationFrame(step);
+    const A = LIB.audio; if (!LIB.playing || !A) { LIB.est = null; seen = -1; return; }
+    const now = performance.now(), ct = A.currentTime, moving = !A.paused && !A.seeking && A.readyState >= 3;
+    let est = moving && seen >= 0 ? t0 + (now - at) / 1000 : ct;
+    if (seen < 0 || !moving || Math.abs(ct - est) > .3) { t0 = ct; at = now; est = ct; }              // just started, paused, jumped, or drifted: take the player's word
+    else if (ct !== seen) { t0 += (ct - est) * .15; }                                                  // otherwise lean gently toward each new report
+    seen = ct; LIB.est = Math.max(0, est);
+    if (!LIB.cv || !LIB.cv.isConnected || LIB.cv.dataset.path !== LIB.playing) LIB.cv = [...document.querySelectorAll('.lib-wave')].find(c => c.dataset.path === LIB.playing) || null;
+    if (LIB.cv) libWaveDraw(LIB.cv); };
+  requestAnimationFrame(step); }
+{ let last = performance.now(), told = 0, sum = 0, cnt = 0, worst = 0, since = last;   // if the window drags while a clip plays, say so in the log, with what was open: that is how a lag gets found
   const beat = () => { const now = performance.now(), gap = now - last; last = now;
-    if (gap > 220 && LIB.playing && !document.hidden && now - told > 3000) { told = now; _clog(`[lag] the window froze for ${Math.round(gap)} ms while the library was playing · vivarium ${typeof Gym !== 'undefined' && Gym.open ? 'open' : 'closed'} · ${document.querySelectorAll('.lib-row').length} rows · ${Object.keys(S.nodes).length} modules · run panel ${RUNP.timer ? 'ticking' : 'idle'}`); }
+    if (LIB.playing && !document.hidden) { sum += gap; cnt++; worst = Math.max(worst, gap);
+      if (now - since > 2500) { const avg = sum / cnt;
+        if ((avg > 26 || worst > 120) && now - told > 8000) { told = now; _clog(`[lag] while the library was playing: ${Math.round(1000 / avg)} frames a second, worst gap ${Math.round(worst)} ms · vivarium ${typeof Gym !== 'undefined' && Gym.open ? 'open' : 'closed'} · drawer ${drawerKind || 'none'} · ${document.querySelectorAll('.lib-row').length} rows · ${Object.keys(S.nodes).length} modules · run panel ${RUNP.timer ? 'ticking' : 'idle'}`); }
+        sum = cnt = worst = 0; since = now; } }
+    else { sum = cnt = worst = 0; since = now; }
     requestAnimationFrame(beat); };
   requestAnimationFrame(beat); }
 window.addEventListener('resize', () => document.querySelectorAll('.lib-wave').forEach(libWaveDraw));

@@ -320,15 +320,16 @@ function gymFrame() {
   if (cv && NEB.ok) {                                    // GPU nebula
     if (Gym.cur && NEB.shot && NEB.shot.rec) nebFrame(Gym.cur, t, null);          // a time-lapse frame, off-screen
     const busyGpu = Gym.cur && Gym.cur.training && Gym.cur.training.state === 'running' && !Gym.cur.training.remote;   // while it trains the trainer needs the GPU: draw the live view at half the frame rate, steadily, instead of fighting for it
-    NEB.qMax = 1; NEB.half = !!busyGpu; Gym.fno = (Gym.fno || 0) + 1;                       // resolution is never capped: only the frame rate is halved while the trainer needs the GPU
-    if (Gym.cur && !(busyGpu && Gym.fno % 2)) nebFrame(Gym.cur, t, Gym.mouse, true);
+    const covered = typeof drawerKind !== 'undefined' && !!drawerKind;            // the library or the engines list is open over it: the creature steps back to half its frame rate so that panel stays quick
+    NEB.qMax = 1; NEB.half = !!(busyGpu || covered); Gym.fno = (Gym.fno || 0) + 1;                       // resolution is never capped: only the frame rate is halved while the trainer needs the GPU
+    if (Gym.cur && !((busyGpu || covered) && Gym.fno % 2)) nebFrame(Gym.cur, t, Gym.mouse, true);
   } else if (cv) {                                       // fallback: the older 2D renderer
     const d = devicePixelRatio || 1, w = cv.clientWidth, hh = cv.clientHeight;
     if (cv.width !== Math.round(w * d)) { cv.width = Math.round(w * d); cv.height = Math.round(hh * d); }
     const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0);
     if (Gym.cur) drawCreature(g, w, hh, Gym.cur, t, Gym.mouse); else g.clearRect(0, 0, w, hh);
   }
-  document.querySelectorAll('canvas.mini-creature').forEach(m => {
+  if (!(typeof drawerKind !== 'undefined' && drawerKind) || Gym.fno % 6 === 0) document.querySelectorAll('canvas.mini-creature').forEach(m => {
     const c = Gym.list.find(x => x.slug === m.dataset.slug); if (!c) return;
     const g = m.getContext('2d'); if (m.width !== 112) { m.width = 112; m.height = 112; } g.setTransform(2, 0, 0, 2, 0, 0); drawMini(g, 56, 56, c, t);
   });
