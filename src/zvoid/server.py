@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from . import chat, gym, library
+from . import chat, evolve, gym, library
 from .engines import discover, env_size
 from .paths import NAME, OUTPUTS_DIR, PATCHES_DIR, UPLOADS_DIR, WEB_DIR
 
@@ -217,6 +217,54 @@ def create_app():
 
         threading.Thread(target=work, daemon=True).start()
         return {"id": job["id"], "seed": job["seed"]}
+
+    # ---- evolve: breed a sound over rounds, the listener picks what lives
+    def evo(fn, *a, **k):
+        try:
+            return fn(*a, **k)
+        except FileNotFoundError as ex:
+            raise HTTPException(404, str(ex))
+        except (ValueError, RuntimeError) as ex:
+            raise HTTPException(400, str(ex))
+
+    @app.get("/api/evolve")
+    def evolve_list():
+        return evolve.sessions()
+
+    @app.post("/api/evolve")
+    def evolve_start(body: dict):
+        src = str(_inside_outputs(body["source"])) if body.get("source") else ""
+        return evo(evolve.start, src, str(body.get("creature") or ""), str(body.get("direction") or ""), str(body.get("name") or ""), body.get("limb"))
+
+    @app.get("/api/evolve/{sid}")
+    def evolve_get(sid: str):
+        return evo(evolve.get, sid)
+
+    @app.put("/api/evolve/{sid}")
+    def evolve_update(sid: str, body: dict):
+        return evo(evolve.update, sid, body)
+
+    @app.post("/api/evolve/{sid}/round")
+    def evolve_round(sid: str, body: dict):
+        return evo(evolve.round_, sid, engines, jobs, _coerce, int(body.get("n") or 4))
+
+    @app.post("/api/evolve/{sid}/pick")
+    def evolve_pick(sid: str, body: dict):
+        return evo(evolve.pick, sid, str(body.get("node")))
+
+    @app.post("/api/evolve/{sid}/keep")
+    def evolve_keep(sid: str, body: dict):
+        return evo(evolve.keep, sid, str(body.get("node")))
+
+    @app.post("/api/evolve/{sid}/stop")
+    def evolve_stop(sid: str):
+        evolve.stop(sid, jobs)
+        return {"ok": True}
+
+    @app.delete("/api/evolve/{sid}")
+    def evolve_delete(sid: str):
+        evo(evolve.remove, sid)
+        return {"ok": True}
 
     @app.get("/api/busy")
     def busy():

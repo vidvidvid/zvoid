@@ -535,8 +535,8 @@ function runPanelDraw() {
       busy ? h('button', { title: 'Stop every running step', onclick: () => ids.forEach(i => stopNode(i)) }, '■ stop') : null,
       h('button', { title: 'Hide', onclick: () => { RUNP.open = false; runPanelDraw(); } }, '×'))),
     RUNP.done && sinks.length ? h('div', { class: 'runp-results' }, h('h5', {}, sinks.length > 1 ? 'results' : 'result'), ...sinks.map(i => { const a = firstAudio(i), [eng, what] = name(i);
-      return h('div', { class: 'runp-res' }, h('button', { class: 'runp-play', title: 'Play / stop', onclick: () => libPlay({ path: a.path }) }, '▶'), h('div', {}, h('div', { class: 'runp-name' }, h('b', {}, eng), h('span', {}, what)), libWave({ path: a.path }))); })) : null,
-    h('div', { class: 'runp-list' }, ...ids.map(row)));
+      return h('div', { class: 'runp-res' }, h('button', { class: 'runp-play', title: 'Play / stop', onclick: () => libPlay({ path: a.path }) }, '▶'), h('div', {}, h('div', { class: 'runp-name' }, h('b', {}, eng), h('span', {}, what)), libWave({ path: a.path }))); })) : '',
+    h('div', { class: 'runp-list' }, ...ids.map(row)));   // '' and not null: a bare null handed to replaceChildren is printed as the word
 }
 function stopNode(id) { const r = R[id]; if (r && r.jobId) api(`/api/jobs/${r.jobId}/cancel`, { method: 'POST' }); }
 async function runAll() {
@@ -610,7 +610,8 @@ const libSize = n => n > 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n > 1e6 ? (n / 1e6
 function libMark() {                                   // playing or not: mark the rows that are there, without building the whole list again
   let found = !LIB.playing;
   document.querySelectorAll('#lib-list .lib-row').forEach(r => { const on = r.dataset.path === LIB.playing; found = found || on; if (on !== r.classList.contains('playing')) { r.classList.toggle('playing', on); const b = r.querySelector('button.lib-pp'); if (b) b.textContent = on ? '■' : '▶'; const w = r.querySelector('.lib-wave'); if (w) libWaveDraw(w); } });
-  if (!found) libraryDraw();
+  if (!found && $('#lib-list')) libraryDraw();
+  if (typeof evoMark === 'function') evoMark();
 }
 /* the library's player. A clip is read into memory and started from there, so it sounds the instant you click and its position is known exactly (the browser's own streaming player was slow to start in the app's window, and vague about where it was) */
 function libPos() { const p = LIB.p; if (!p || !p.buf) return [0, 0]; const d = p.buf.duration; return [p.paused ? p.off : Math.min(d, p.off + ac().currentTime - p.t0), d]; }
@@ -727,6 +728,7 @@ function libraryDraw() {
   const tools = it => h('div', { class: 'lib-tools' },
     h('button', { class: 'lib-star' + (it.star ? ' on' : ''), title: it.star ? 'Remove the star' : 'Star this as a keeper', onclick: () => libStar(it) }, it.star ? '★' : '☆'),
     it.kind === 'audio' && h('button', { title: 'Add to the canvas as a sample', onclick: () => { addNode('sample', undefined, undefined, { file: { path: it.path, name: it.name } }); toast('added to the canvas'); } }, '+ canvas'),
+    it.kind === 'audio' && h('button', { title: 'Evolve this sound: breed it over rounds, picking the mutation that lives', onclick: () => evoStart({ source: it.path, creature: it.creature || '', name: it.title, direction: 'primal music of the future' }) }, '⟲'),
     h('button', { title: 'Rename (or double-click the name)', onclick: e => libRename(it, e.currentTarget.closest('.lib-row, .lib-tile').querySelector('.lib-what')) }, '✎'),
     h('button', { title: 'Show in Finder', onclick: () => api('/api/reveal', { json: { path: it.path } }) }, '↗'),
     h('button', { class: 'lib-del', title: 'Move to the Trash (⌘Z brings it back)', onclick: () => libTrash(it) }, '×'));

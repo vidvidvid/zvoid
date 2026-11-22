@@ -1,0 +1,102 @@
+/* Evolve: breed a sound over rounds. Each round makes four mutations of the current parent; you pick the one that is most
+   alive and it becomes the parent of the next round. The family tree is kept, so any earlier sound can be grown again. */
+const EVO = { open: false, list: [], s: null, timer: 0, auto: true, creatures: [] };
+const evoEl = () => $('#evo');
+const evoIt = path => ({ path, kind: 'audio', size: 0, name: path.split('/').pop() });
+
+async function openEvo(sid) {
+  if (typeof Gym !== 'undefined' && Gym.open) closeGym();
+  EVO.open = true; evoEl().hidden = false; openDrawer(null);
+  try { EVO.creatures = await api('/api/gym'); } catch (e) { EVO.creatures = []; }
+  await evoList();
+  const want = sid || (EVO.s && EVO.s.id) || (EVO.list[0] && EVO.list[0].id);
+  if (want) { try { EVO.s = await api('/api/evolve/' + want); } catch (e) { EVO.s = null; } }
+  evoDraw(); evoPoll();
+}
+function closeEvo() { EVO.open = false; evoEl().hidden = true; clearTimeout(EVO.timer); }
+async function evoList() { try { EVO.list = await api('/api/evolve'); } catch (e) { EVO.list = []; } }
+async function evoPoll() {
+  clearTimeout(EVO.timer); if (!EVO.open) return;
+  if (EVO.s && EVO.s.live) {
+    try { const s = await api('/api/evolve/' + EVO.s.id), sig = x => JSON.stringify([x.live && [x.live.done, x.live.error], Object.keys(x.nodes).length, x.head]), was = sig(EVO.s), had = EVO.s.live;
+      EVO.s = s; if (sig(s) !== was) evoDraw(); else evoLive();
+      if (had && !s.live) { evoList().then(evoDraw); } } catch (e) {}
+  }
+  EVO.timer = setTimeout(evoPoll, EVO.s && EVO.s.live ? 450 : 2500);
+}
+function evoLive() {                                     // only the progress line changes while a mutation is being made
+  const el = $('#evo-live'), l = EVO.s && EVO.s.live; if (!el || !l) return;
+  el.querySelector('span').textContent = l.error ? 'it failed: ' + l.error : `round ${l.round} · ${l.msg}`;
+  el.querySelector('i').style.width = Math.round(((l.done + (l.frac || 0)) / l.total) * 100) + '%';
+}
+async function evoDo(fn) { try { const r = await fn(); if (r && r.nodes) EVO.s = r; evoDraw(); evoPoll(); return r; } catch (e) { toast(String(e.message || e), true); } }
+const evoRound = () => evoDo(() => api(`/api/evolve/${EVO.s.id}/round`, { json: { n: 4 } }));
+async function evoPick(nid, grow) {
+  await evoDo(() => api(`/api/evolve/${EVO.s.id}/pick`, { json: { node: nid } }));
+  if (grow && EVO.auto && EVO.s && !EVO.s.live) evoRound();
+}
+async function evoKeep(nid) { try { const r = await api(`/api/evolve/${EVO.s.id}/keep`, { json: { node: nid } }); toast('kept in the library as “' + r.title + '”'); EVO.s = await api('/api/evolve/' + EVO.s.id); evoDraw(); } catch (e) { toast(String(e.message || e), true); } }
+async function evoStart(body) {
+  const b = $('#evo-new'); if (b) b.classList.add('busy');
+  try { const s = await api('/api/evolve', { json: body }); EVO.s = s; await evoList(); if (!EVO.open) return openEvo(s.id); evoDraw(); evoPoll(); toast('started: make the first round'); }
+  catch (e) { toast('could not start: ' + (e.message || e), true); }
+  if (b) b.classList.remove('busy');
+}
+const evoSave = patch => api('/api/evolve/' + EVO.s.id, { method: 'PUT', json: patch }).then(s => { EVO.s = s; }).catch(() => {});
+function evoMark() { document.querySelectorAll('#evo .evo-pp').forEach(b => { const on = b.dataset.path === LIB.playing; b.textContent = on ? '■' : '▶'; b.closest('.evo-card, .evo-step').classList.toggle('playing', on); }); }
+
+function evoCard(n, opts) {
+  const it = evoIt(n.path), live = EVO.s.live;
+  return h('div', { class: 'evo-card' + (LIB.playing === n.path ? ' playing' : '') + (opts.cur ? ' cur' : ''), data: { node: n.id } },
+    h('div', { class: 'evo-top' }, h('button', { class: 'evo-pp', data: { path: n.path }, title: 'Play / stop (space pauses)', onclick: () => libPlay(it) }, LIB.playing === n.path ? '■' : '▶'),
+      h('b', {}, opts.label || n.step || 'sound'), h('small', {}, (n.ideas || []).join(' · ') || (n.round ? 'the parent, lightly changed' : n.what))),
+    libWave(it),
+    h('div', { class: 'evo-acts' },
+      opts.pick && h('button', { class: 'hot', disabled: !!live, title: 'This one lives: it becomes the parent of the next round', onclick: () => evoPick(n.id, true) }, 'pick ▸'),
+      opts.back && h('button', { disabled: !!live, title: 'Go back to this sound and grow a different branch from it', onclick: () => evoPick(n.id, false) }, 'grow from here'),
+      h('button', { title: n.kept ? 'Already in the library' : 'Put this sound in the library', disabled: !!n.kept, onclick: () => evoKeep(n.id) }, n.kept ? 'kept ✓' : 'keep')));
+}
+function evoDraw() {
+  const el = evoEl(); if (!EVO.open) return;
+  const s = EVO.s, trained = EVO.creatures.filter(c => c.trained), fed = EVO.creatures.filter(c => c.food && c.food.length);
+  const from = h('select', {}, fed.map(c => h('option', { value: c.slug }, c.name)));
+  const left = h('div', { id: 'evo-left' },
+    h('div', { class: 'drawer-head' }, h('span', {}, 'evolve'), h('button', { onclick: closeEvo, title: 'Back to the canvas (esc)' }, '← canvas')),
+    h('p', { class: 'gym-note' }, 'Breed a sound. Each round makes four mutations of the current one. Pick the one that is most alive and it becomes the parent of the next round.'),
+    h('h3', {}, 'start a new one'),
+    fed.length ? h('div', { class: 'acts', id: 'evo-new' }, from, h('button', { title: 'Begin from a passage of one of this creature\'s own tracks', onclick: () => evoStart({ creature: from.value, direction: (s && s.direction) || 'primal music of the future' }) }, 'from its tracks ▸')) : null,
+    h('p', { class: 'gym-note' }, 'Or open the library and press “evolve” on any clip.'),
+    h('h3', {}, 'sessions'),
+    h('div', { class: 'evo-list' }, EVO.list.length ? EVO.list.map(x => h('button', { class: 'evo-row' + (s && x.id === s.id ? ' cur' : ''), onclick: async () => { EVO.s = await api('/api/evolve/' + x.id); evoDraw(); evoPoll(); } },
+      h('b', {}, x.name), h('small', {}, `${x.rounds} round${x.rounds === 1 ? '' : 's'}${x.creature ? ' · ◍ ' + x.creature.replace(/-/g, ' ') : ''}${x.live ? ' · running' : ''}`),
+      h('span', { class: 'evo-x', title: 'Move this session to the Trash', onclick: async e => { e.stopPropagation(); try { await api('/api/evolve/' + x.id, { method: 'DELETE' }); if (s && s.id === x.id) EVO.s = null; await evoList(); evoDraw(); } catch (er) { toast(String(er.message || er), true); } } }, '×')))
+      : h('p', { class: 'gym-note' }, 'None yet.')));
+  if (!s) { el.replaceChildren(left, h('div', { id: 'evo-main' }, h('div', { class: 'evo-empty' }, 'Start a session on the left, or press “evolve” on a clip in the library.'))); return; }
+  const N = s.nodes, head = N[s.head], line = []; for (let n = head; n; n = N[n.parent]) line.unshift(n);
+  const kids = Object.values(N).filter(n => n.parent === head.id).sort((a, b) => ['close', 'near', 'far', 'wild'].indexOf(a.step) - ['close', 'near', 'far', 'wild'].indexOf(b.step) || a.id.localeCompare(b.id));
+  const live = s.live, dir = h('textarea', { rows: 2, spellcheck: 'false', placeholder: 'where it should head, in a few words: primal music of the future, ritual drums, voices that are not human', onchange: () => evoSave({ direction: dir.value }) }); dir.value = s.direction || '';
+  const cre = h('select', { onchange: () => evoSave({ creature: cre.value }) }, h('option', { value: '' }, 'no creature (the plain model)'), trained.map(c => h('option', { value: c.slug }, c.name))); cre.value = s.creature || '';
+  const main = h('div', { id: 'evo-main' },
+    h('div', { class: 'evo-head' }, h('h2', {}, s.name), h('small', {}, `round ${head.round} · ${Object.keys(N).length - 1} sound${Object.keys(N).length === 2 ? '' : 's'} made`)),
+    h('div', { class: 'evo-ctl' },
+      h('label', {}, h('span', {}, 'direction'), dir),
+      h('label', {}, h('span', {}, 'played through'), cre),
+      h('label', { title: 'How far each round strays from its parent. Left: small careful steps. Right: big leaps and more strange ideas.' }, h('span', {}, 'steps: careful ↔ wild'), h('input', { type: 'range', min: 0, max: 1, step: .05, value: s.wild == null ? .5 : s.wild, onchange: e => evoSave({ wild: +e.target.value }) })),
+      h('label', { class: 'evo-auto', title: 'When you pick one, the next round starts by itself' }, h('input', { type: 'checkbox', checked: EVO.auto, onchange: e => { EVO.auto = e.target.checked; } }), h('span', {}, 'keep going after a pick'))),
+    h('h3', {}, 'its line so far'),
+    h('div', { class: 'evo-line' }, line.map((n, i) => h('div', { class: 'evo-step' + (n.id === head.id ? ' head' : '') + (LIB.playing === n.path ? ' playing' : ''), data: { node: n.id } },
+      h('button', { class: 'evo-pp', data: { path: n.path }, onclick: () => libPlay(evoIt(n.path)) }, LIB.playing === n.path ? '■' : '▶'),
+      h('div', { class: 'evo-step-t' }, h('b', {}, n.round ? 'round ' + n.round : 'start'), h('small', {}, n.what || '')), libWave(evoIt(n.path)),
+      n.id !== head.id ? h('button', { disabled: !!live, title: 'Go back to this sound and grow a different branch from it', onclick: () => evoPick(n.id, false) }, 'grow from here') : h('span', { class: 'evo-now' }, 'the parent now'),
+      h('button', { title: n.kept ? 'Already in the library' : 'Put this sound in the library', disabled: !!n.kept, onclick: () => evoKeep(n.id) }, n.kept ? 'kept ✓' : 'keep')))),
+    h('h3', {}, kids.length || live ? `round ${head.round + 1}: which one is most alive?` : 'next'),
+    live ? h('div', { id: 'evo-live' }, h('span', {}, live.error ? 'it failed: ' + live.error : `round ${live.round} · ${live.msg}`), h('div', { class: 'evo-bar' }, h('i', { style: `width:${Math.round((live.done + (live.frac || 0)) / live.total * 100)}%` })),
+      h('button', { onclick: () => api(`/api/evolve/${s.id}/stop`, { method: 'POST' }) }, '■ stop')) : null,
+    h('div', { class: 'evo-cards' }, kids.map(n => evoCard(n, { pick: true }))),
+    !live ? h('div', { class: 'acts evo-go' }, h('button', { class: kids.length ? '' : 'hot', onclick: evoRound }, kids.length ? 'none of these: make four more ▸' : 'make a round ▸')) : null);
+  const keepAt = ['#evo-left', '#evo-main'].map(q => { const o = $(q); return [q, o ? o.scrollTop : 0]; });
+  el.replaceChildren(left, main);
+  keepAt.forEach(([q, y]) => { const o = $(q); if (o && y) o.scrollTop = y; });
+}
+$('#btn-evo').onclick = () => (EVO.open ? closeEvo() : openEvo());
+addEventListener('keydown', e => { if (e.key === 'Escape' && EVO.open && !/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')) closeEvo(); });

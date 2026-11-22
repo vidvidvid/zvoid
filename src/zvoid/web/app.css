@@ -472,3 +472,38 @@ body.throwing, body.throwing * { cursor: grabbing !important; user-select: none 
 .lib-rename { width: 100%; box-sizing: border-box; background: var(--ink); color: var(--text); border: 1px solid var(--violet); border-radius: 5px; padding: 2px 6px; font: inherit; outline: none; }
 
 #bar button { white-space: nowrap; }
+
+/* ---------- evolve ---------- */
+#evo { position: fixed; inset: 0; z-index: 35; display: grid; grid-template-columns: 300px 1fr; background: #05050af7; }
+#evo[hidden] { display: none; }
+#evo-left { display: flex; flex-direction: column; gap: 10px; padding: 8px 16px 16px; overflow: auto; border-right: 1px solid var(--line); background: #07070dcc; }
+#evo-left > * { flex-shrink: 0; } #evo h3 { margin: 10px 0 0; font: 10px var(--mono); letter-spacing: .22em; text-transform: uppercase; color: var(--muted); }
+#evo button { padding: 5px 10px; border: 1px solid var(--line-hi); border-radius: 8px; background: transparent; color: var(--text); font: 11.5px var(--mono); cursor: pointer; }
+#evo button:hover:not(:disabled) { border-color: var(--violet); } #evo button:disabled { opacity: .35; cursor: default; }
+#evo button.hot { background: var(--acid); color: #05050a; border-color: transparent; font-weight: 700; }
+#evo select, #evo textarea { background: var(--ink); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: 12px var(--sans); min-width: 0; }
+#evo .acts { display: flex; gap: 6px; align-items: center; } #evo .acts select { flex: 1; } #evo-new.busy { opacity: .5; pointer-events: none; }
+.evo-list { display: grid; gap: 6px; }
+#evo .evo-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; text-align: left; padding: 8px 10px; border-radius: 10px; }
+#evo .evo-row.cur { border-color: var(--violet); box-shadow: 0 0 24px -12px var(--violet); }
+.evo-row b { font: 600 12px var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .evo-row small { grid-column: 1; font: 10px var(--mono); color: var(--muted); }
+.evo-row .evo-x { grid-row: 1 / span 2; grid-column: 2; align-self: center; color: var(--muted); padding: 2px 6px; } .evo-row .evo-x:hover { color: #fff; }
+#evo-main { overflow: auto; padding: 18px 28px 40px; display: flex; flex-direction: column; gap: 10px; }
+.evo-empty { margin: auto; color: var(--muted); font: 12px var(--mono); letter-spacing: .08em; }
+.evo-head { display: flex; align-items: baseline; gap: 14px; } .evo-head h2 { margin: 0; font: 300 24px var(--sans); letter-spacing: .12em; text-transform: uppercase; } .evo-head small { font: 10.5px var(--mono); color: var(--muted); }
+.evo-ctl { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 12px; align-items: end; }
+.evo-ctl label { display: grid; gap: 4px; min-width: 0; } .evo-ctl label > span { font: 10px var(--mono); color: var(--muted); letter-spacing: .08em; } .evo-ctl input[type=range] { accent-color: var(--violet); width: 100%; }
+.evo-ctl .evo-auto { display: flex; align-items: center; gap: 6px; padding-bottom: 6px; }
+.evo-line { display: grid; gap: 6px; }
+.evo-step { display: grid; grid-template-columns: 30px 190px 1fr auto auto; gap: 10px; align-items: center; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.evo-step.head { border-color: color-mix(in srgb, var(--cyan) 55%, transparent); } .evo-step.playing, .evo-card.playing { box-shadow: 0 0 26px -12px var(--cyan); }
+.evo-step-t { display: grid; min-width: 0; } .evo-step-t b { font: 600 11.5px var(--sans); } .evo-step-t small { font: 10px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evo-step .lib-wave { width: 100%; height: 34px; } .evo-now { font: 10px var(--mono); color: var(--cyan); letter-spacing: .06em; }
+#evo .evo-pp { width: 28px; height: 28px; padding: 0; border-radius: 50%; }
+.evo-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.evo-card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line-hi); border-radius: 12px; background: #0b0b14; }
+.evo-top { display: grid; grid-template-columns: 30px auto 1fr; gap: 10px; align-items: center; } .evo-top b { font: 700 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; } .evo-top small { font: 11px var(--sans); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evo-card .lib-wave { width: 100%; height: 70px; cursor: pointer; } .evo-acts { display: flex; gap: 6px; }
+#evo-live { display: grid; grid-template-columns: 1fr 200px auto; gap: 12px; align-items: center; font: 11px var(--mono); color: var(--muted); }
+.evo-bar { height: 3px; background: #1a1a2e; border-radius: 2px; overflow: hidden; } .evo-bar i { display: block; height: 100%; background: var(--acid); transition: width .4s; }
+.evo-go { margin-top: 4px; }
