@@ -501,6 +501,10 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     first = d / "first takes"                       # the song before any carving, kept so it can always be gone back to
                     first.mkdir(exist_ok=True)
                     shutil.copy(dst, first / dst.name)
+                    try:
+                        entry["buzz_cut_hz"] = polish(str(dst))        # the model's own fixed-pitch buzz comes out of the song in the library; the first take keeps it, untouched
+                    except Exception as ex:
+                        print("[night] could not filter the buzz: " + str(ex)[:200], flush=True)
                     entry.update(path=str(dst), score=best["sc"], carving=[])
                     _state["made"] = len(done)
                     _state["songs"].append({"n": n, "name": best["song"]["title"], "path": str(dst), "creature": best["song"]["creature"], "idea": best["song"]["idea"]})
@@ -545,6 +549,10 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                                                        "before": s_["sc"]["total"], "after": sc2["total"] if sc2 else None, "definition": [s_["sc"]["definition"], sc2["definition"] if sc2 else None]})
                         if better:
                             shutil.copy(outs[0]["path"], s_["path"])            # the song in the library is now the carved one
+                            try:
+                                polish(s_["path"])
+                            except Exception:
+                                pass
                             s_.update(m=m2, sc=sc2, misses=0, carved=s_["carved"] + 1)
                             s_["entry"]["score"] = sc2
                             _state["carved"] += 1
