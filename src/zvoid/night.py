@@ -121,17 +121,20 @@ HOUSE = """You write plans for ACE-Step, a text-to-music model, played through "
 
 WHAT THESE PIECES ARE (the artist's own words, follow them over any habit of songwriting):
 "The songs should mimic emotions. They are raw and real, but it is really difficult to understand and comprehend their structure and source. They are infinite, never ending, morphing into one another. The only constant emotions are peaks and the bottomless depths, where everything is the same for an infinitely short or long period of time. It is bouncing us between these extremes. And there is also emptiness, the void, which we sometimes can notice and sometimes it just absorbs us."
-So a piece is not a song with verses and choruses. It is a passage through three states, in any order and for any length:
+And: "I want something that is danceable, where people can lose themselves to it. Basically various types of rave, punk, electro."
+So every piece is DANCE MUSIC first. There is a beat you can move to, a kick and a pulse, and it keeps going: people lose themselves through repetition, through a groove that does not let go. The emotional states below happen ON TOP OF that beat, not instead of it. A piece without a danceable pulse has failed, however interesting it is.
+A piece is not a song with verses and choruses. It is a passage through three states, in any order and for any length:
 - PEAK: everything at once, overwhelming, relentless, and for as long as it lasts it does not change.
-- DEPTH: the bottom. Heavy, slow, sunk, and for as long as it lasts it does not change.
+- DEPTH: the bottom. Heavy and sunk, and for as long as it lasts it does not change. The beat does not stop here: it strips down (the kick alone, or half-time, or kick and one low thud) and keeps the floor moving.
 - VOID: emptiness. Nothing, or one small dry sound alone in nothing. Sometimes it is noticed: everything is cut dead and the silence is a shock. Sometimes it absorbs: the sounds thin out one by one until, without a moment you could point to, there is nothing left.
   The artist on silence: "We don't have to force the silences. They need to be tasteful and make sense, if they appear." So the void is rare and earned. MOST PIECES HAVE NO VOID SECTION AT ALL. In a set of ten, at most three contain one, and then usually a single brief one; only a piece that is ABOUT emptiness dwells in it. Never put a silence in because a plan "should" have one, and never chop a piece up with stops. The bounce between PEAK and DEPTH is the main thing.
 Between states it MORPHS: one thing turns into another so that you cannot say where it changed, or it is thrown from one extreme to the other with no warning. Durations must be uneven and unpredictable: a state may last four seconds or seventy. Never a regular plan, never a repeated chorus, never an intro that sets up or an outro that resolves: a piece begins already inside a state and ends inside one, unfinished, so the next can continue from it.
 
 HOW A PLAN IS WRITTEN:
-- caption: comma-separated tags. It MUST begin with one or two of the chosen creature's own words, exactly as given (they wake the adapter up). Then the tempo ("148 bpm"), then 9-14 concrete sound tags: which drums and how they behave, the low end, the noises, the voices, how it moves between extremes, the feeling. Never a genre name, never an artist or band name: those pull the model back to music that already exists.
+- caption: comma-separated tags. It MUST begin with one or two of the chosen creature's own words, exactly as given (they wake the adapter up). Then the tempo ("148 bpm"), then ONE or TWO words for the kind of dance music it is, then 9-14 concrete sound tags: the kick and how it drives (four-on-the-floor, breakbeat, galloping, stomping), the other drums, the low end, the noises, the voices, how it moves between extremes, the feeling. Always say "danceable" and name the kick.
+  The kinds to draw from, and to VARY across the collection so no two neighbours are the same kind: rave, hardcore rave, acid, techno, electro, electro-punk, punk, digital hardcore, gabber, jungle, breakbeat, footwork, industrial dance, body music, hard trance, ghetto house. Mix two where it suits ("punk rave", "acid electro"). Never an artist or band name.
 - lyrics: the passage, as section tags in square brackets naming the state and what happens, e.g. "[peak - everything, full stomp, no change]", "[depth - sunk, slow sub hits, growled breath]", "[morph - the drums melt into the voices]", "[thrown - from the bottom straight to the top]", and only where it is earned "[void - nothing, one dry click]". Under each tag, 0-4 lines of chant syllables or invented words. No real words in any language. 5-9 sections of very uneven length.
-- duration: 110 to 190 seconds. bpm: 55 to 190.
+- duration: 120 to 190 seconds. bpm: 118 to 190 (dance tempos; a heavy half-time piece may be written at 85-100 only if its kick still makes people move).
 
 THREE THINGS THE ARTIST HEARD GO WRONG, AND HOW TO AVOID THEM:
 - A constant hum under the whole piece. A tag is applied to the WHOLE piece, not to one section, so any tag that names something sustained lays a bed under everything, and then there is no void and no depth, only a wash: never write drone, hum, pad, sustained, swell, wash, ambience, room, echo, reverb, wide, hollow pipe, held note. The low end must be struck, not held: "sub hits that stop dead", "short sub thuds". Always include tags for dryness and edges: "dry", "close", "tight", "punchy". The depth is heaviness, not a hum.
@@ -154,7 +157,7 @@ def ideas(creatures: list[str], count: int, direction: str, rng) -> list[dict]:
             n = min(10, count - len(out))
             prompt = (f"Plan {n} songs for one collection of {count}. Direction from the artist: {direction or 'music nobody has heard before'}\n\n"
                       "Creatures to use, spread evenly over the songs (one creature per song):\n" + "\n".join(_sides(c) for c in creatures) + "\n\n"
-                      "They are " + str(n) + " different FEELINGS, not variations of one: vary the tempo widely (some very slow, some frantic, some that lurch), what carries it (drums, a voice, the low end, a noise, emptiness), "
+                      "They are " + str(n) + " different FEELINGS and " + str(n) + " different kinds of dance floor, not variations of one: vary the kind of dance music, the tempo across the whole dance range, what rides on the beat (a voice, the low end, a noise, more drums), "
                       "how long it stays at the peak, in the depth and in the void, and how it gets from one to another (melting, or thrown). No two may share a tempo band, a carrier and a path.\n"
                       "The whole collection is ONE passage that never ends: each piece begins in the state the one before it ended in. "
                       + (f'The first of these must start in "{out[-1].get("ends", "depth")}", where the last one stopped.\n' if out else "The first may start anywhere.\n")
@@ -189,7 +192,9 @@ def _fit(x: dict, rng) -> dict:
     if not any(w in cap for w in words):
         limbs = c.get("limbs") or []
         cap = (rng.choices(limbs, weights=[max(1, l.get("count", 1)) for l in limbs])[0]["trigger"] if limbs else words[0]) + ", " + cap
-    x.update(caption=cap[:900], bpm=int(max(55, min(190, int(x.get("bpm") or 120)))), duration=int(max(100, min(200, int(x.get("duration") or 150)))),
+    if "danceable" not in cap:
+        cap += ", danceable, driving kick"
+    x.update(caption=cap[:900], bpm=int(max(84, min(190, int(x.get("bpm") or 140)))), duration=int(max(100, min(200, int(x.get("duration") or 150)))),
              title=" ".join(str(x.get("title") or "untitled").split())[:40], lyrics=str(x.get("lyrics") or "[Instrumental]")[:3000])
     return x
 
@@ -482,11 +487,12 @@ def drier(path: str, keep: float = .45) -> dict:
 
 
 def score(m: dict, others: list[dict]) -> dict:
-    """A stand-in for judgement, made of things that can be measured, in the artist's terms: does it reach extremes (a real
-    distance between its peaks and its depths, and time spent at them), is it clear (no tone that never stops, real quiet),
-    does it have drums, do its states hold while they last, and is it unlike the pieces already finished.
-    It cannot tell whether a piece moves anyone."""
-    drums = .5 * min(1, max(0, (m["attack"] - .06) / .22)) + .5 * min(1, m["steady"] / .6)
+    """A stand-in for judgement, made of things that can be measured, in the artist's terms: can it be danced to (a steady
+    pulse and real drum hits at a dance tempo), is it clear (no tone that never stops), does it reach extremes, do its
+    states hold, and is it unlike the pieces already finished. It cannot tell whether a piece moves anyone."""
+    drums = .5 * min(1, max(0, (m["attack"] - .06) / .22)) + .5 * min(1, m["steady"] / .45)
+    tempo = 1.0 if 110 <= m["bpm"] <= 190 or 55 <= m["bpm"] < 95 else .6          # found tempo in a dance range (or its half)
+    dance = drums * tempo
     ext = .7 * min(1, float(m.get("range", 0)) / 12) + .3 * min(1, float(m.get("at_extremes", 0)) / .6)
     far, near = 1.0, None
     for o in others:
@@ -496,7 +502,7 @@ def score(m: dict, others: list[dict]) -> dict:
     variety = min(1, far / .22) if others else 1.0
     defn = float(m.get("definition", 0))
     clear = min(1, max(0, 1 - (float(m.get("hum", 0)) - 7) / 9))           # no tone that never stops. Silence is not rewarded for its own sake.
-    return {"total": round(.25 * ext + .2 * clear + .2 * drums + .1 * defn + .25 * variety, 3), "extremes": round(ext, 2), "clarity": round(clear, 2), "drums": round(drums, 2),
+    return {"total": round(.35 * dance + .2 * clear + .15 * ext + .05 * defn + .25 * variety, 3), "dance": round(dance, 2), "extremes": round(ext, 2), "clarity": round(clear, 2), "drums": round(drums, 2),
             "definition": round(defn, 2), "variety": round(variety, 2), "nearest": near, "shape": round(ext, 2)}
 
 
@@ -507,14 +513,14 @@ def revise(song: dict, m: dict, sc: dict, tries_left: int, rng) -> dict:
         prompt = (f'Song: "{song["title"]}" for the creature {song["creature"]}. Its idea: {song["idea"]}\n\nCAPTION\n{song["caption"]}\n\nLYRICS\n{song["lyrics"]}\n\n'
                   f"It was made, and measured (nobody has heard it; these numbers are all there is):\n"
                   f'- sharp drum hits: {m["attack"]} ({said(m["attack"], .12, .3)}; under 0.12 means almost no drums can be found)\n'
-                  f'- steady pulse: {m["steady"]} ({said(m["steady"], .3, .7)})\n- tempo found: {m["bpm"]} bpm (asked for {song["bpm"]})\n'
+                  f'- steady pulse: {m["steady"]} ({said(m["steady"], .25, .5)}; this is what people dance to: under 0.25 there is no beat to follow, 0.45 and over is a floor that moves)\n- tempo found: {m["bpm"]} bpm (asked for {song["bpm"]})\n'
                   f'- clear pitches vs noise: tonal {m["tonal"]}, hiss {m["noise"]}\n- voice-like movement: {m["voice"]}\n- how squashed and distorted: {m["dist"]}\n'
                   f'- loudness through the piece in 5-second steps, in dB below its loudest: {m["sections"]}\n'
                   f'  (its peaks and depths are {m.get("range")} dB apart: under 6 it is a wall of sound with no depth at all; and {m.get("at_extremes")} of its time is spent at one extreme or the other)\n'
                   + f'- a constant tone under everything: {m.get("hum")} dB at {m.get("hum_hz")} Hz (under 8 is clean, over 12 is a hum the artist hears and dislikes)\n'
                   f'- its quietest second: {m.get("floor")} dB below its loudest (for information only: silence is not a goal, and must not be added unless this piece is about emptiness)\n'
                   + (f'- the finished song it is most like: "{sc["nearest"]}" (variety {sc["variety"]}, 1 = very different)\n' if sc.get("nearest") else "")
-                  + f"\nTries left for this song: {tries_left}. The artist heard a song that measured 0.12 for drum hits and said it needed more drums, so merely detectable is not enough: aim for drum hits of 0.2 or more in the parts where drums play. Answer keep=true only if its peaks and depths are at least 7 dB apart, the constant tone is under 10 dB, drum hits are at least 0.2, and it is unlike the others (still return the caption, lyrics and bpm unchanged).\n"
+                  + f"\nTries left for this song: {tries_left}. The artist heard a song that measured 0.12 for drum hits and said it needed more drums, so merely detectable is not enough: aim for drum hits of 0.2 or more in the parts where drums play. It must be danceable above all. Answer keep=true only if the steady pulse is at least 0.4, drum hits are at least 0.2, the constant tone is under 10 dB, and it is unlike the others (still return the caption, lyrics and bpm unchanged).\n"
                   "Otherwise rewrite the caption and lyrics to fix what the numbers show, keeping the idea and the creature's words at the front. Say in one sentence what you changed and why.")
         r = chat.think(HOUSE, prompt, REVISE_SCHEMA, 240)
         if r.get("keep"):
@@ -545,7 +551,7 @@ def chisel_plan(song: dict, m: dict, tried: list, rng) -> dict:
                   f'- a constant tone under everything: {m.get("hum")} dB at {m.get("hum_hz")} Hz (over 12 is a hum the artist hears); its quietest second is {m.get("floor")} dB below its loudest (-12 means it never lets go)\n'
                   f'- how defined its structure measures: {m.get("definition")} of 1. Drums overall: {m["attack"]} (the artist wants 0.2 or more). In the 5-second timeline, a stretch with real drums reads about 0.2 to 0.4, and under 0.1 means none.\n'
                   + ("- stretches already reworked, do not pick these again: " + ", ".join(f"{a:.0f}-{b:.0f}s" for a, b in tried) + "\n" if tried else "")
-                  + "\nPick ONE stretch of 12 to 30 seconds to make again, the one whose remaking would most push the piece toward its extremes: a peak that is not overwhelming enough, a depth that is not heavy enough, "
+                  + "\nPick ONE stretch of 12 to 30 seconds to make again, the one whose remaking would most help the piece as dance music that reaches extremes: a stretch where the beat falls apart or the kick goes missing (unless that is a planned void), a peak that is not overwhelming enough, a depth that is not heavy enough, "
                   "a stretch that is merely in-between, or a peak whose drums are missing. Do not add silences: only if the plan itself has a void section and the timeline shows that it is not empty may that one be made emptier. "
                   f'Give start and end in seconds, and a caption for JUST that stretch: it must begin with "{words}", then say concretely what plays there (which drums and how, the low end, the voices, the noise). '
                   "No genre or artist names. In the note, one sentence: which section this is and what it should become.")
