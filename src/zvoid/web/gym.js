@@ -415,9 +415,8 @@ function gymBuild() {
     const far = Gym.remote && Gym.remote.configured ? Gym.remote : null;
     if (Gym.remote === undefined) { Gym.remote = null; api('/api/gym_remote').then(r => { Gym.remote = r; Gym.key = ''; gymPoll(); }).catch(() => {}); }
     const where = h('select', {}, [h('option', { value: 'mac' }, 'this Mac'), far ? h('option', { value: 'pc', disabled: !far.reachable }, far.name + (far.reachable ? '' : ' (not reachable)')) : null]);
-    let saved = 'mac'; try { saved = localStorage.getItem('zvoid.trainWhere') || 'mac'; } catch (e) {}
-    where.value = far && far.reachable && saved === 'pc' ? 'pc' : 'mac';
-    where.addEventListener('change', () => { try { localStorage.setItem('zvoid.trainWhere', where.value); } catch (e) {} est(); });
+    where.value = far && far.reachable && Gym.where !== 'mac' ? 'pc' : 'mac';       // the stronger machine by default; a choice made by hand holds until the app is closed
+    where.addEventListener('change', () => { Gym.where = where.value; est(); });
     const estEl = h('div', { class: 'gym-est' });
     const est = () => {
       const budget = +maxT.value || 0, fs = budget && budget < c.food.length ? c.food.slice().sort((a, b) => (a.core || 0) - (b.core || 0)).slice(0, budget) : c.food;
