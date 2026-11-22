@@ -545,3 +545,18 @@ body.throwing, body.throwing * { cursor: grabbing !important; user-select: none 
 .night-mark { font: 10px var(--mono); padding: 3px 7px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; }
 .night-mark:hover { color: var(--text, #e9e7f5); border-color: var(--muted); }
 .night-mark.on { color: #07070d; background: var(--cyan); border-color: var(--cyan); } .night-mark.away.on { background: #ff5c8a; border-color: #ff5c8a; }
+
+.night-talk { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 14px; margin: 0 0 12px; }
+@media (max-width: 1100px) { .night-talk { grid-template-columns: 1fr; } }
+.night-talk > div { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.night-talk .talk-ask { border-color: color-mix(in srgb, var(--cyan) 45%, transparent); box-shadow: 0 0 30px -18px var(--cyan); }
+.night-talk h4 { margin: 0 0 8px; font: 600 12.5px/1.45 var(--sans, inherit); letter-spacing: 0; text-transform: none; color: var(--text, #e9e7f5); }
+.night-talk .talk-know h4 { font: 10px var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+.night-talk ul { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.5; color: var(--text, #e9e7f5); } .night-talk li { margin: 0 0 4px; }
+.talk-link { margin-top: 6px; padding: 0; border: 0; background: none; color: var(--muted); font: 10.5px var(--mono); text-decoration: underline; cursor: pointer; }
+.talk-pieces { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0 0 10px; } .talk-piece { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; } .talk-piece.playing b { color: var(--cyan); }
+.talk-opts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.talk-opt { font-size: 11.5px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--text, #e9e7f5); cursor: pointer; text-align: left; }
+.talk-opt:hover { border-color: var(--muted); } .talk-opt.on { background: var(--cyan); border-color: var(--cyan); color: #07070d; }
+.night-talk textarea { width: 100%; box-sizing: border-box; margin: 0 0 8px; font-size: 12px; resize: vertical; }
+.talk-think { animation: night-pulse 1.2s ease-in-out infinite; }

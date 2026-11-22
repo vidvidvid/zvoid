@@ -205,6 +205,128 @@ def mark(sid: str, n: int, v: int) -> dict:
     return marks_of(sid)
 
 
+TASTE = DIR / "taste.json"     # the conversation about taste: what was asked and answered, and what has been understood from it
+QUESTION_SCHEMA = {"type": "object", "required": ["text", "pieces", "options"],
+                   "properties": {"text": {"type": "string"}, "pieces": {"type": "array", "items": {"type": "integer"}}, "options": {"type": "array", "items": {"type": "string"}}}}
+UNDERSTAND_SCHEMA = {"type": "object", "required": ["understanding", "open"],
+                     "properties": {"understanding": {"type": "array", "items": {"type": "string"}}, "open": {"type": "array", "items": {"type": "string"}}}}
+LISTENER = """You are learning one artist's taste by asking them. A program makes pieces of music for them overnight, played by "creatures" (adapters trained on one artist's sound each, sometimes merged). You cannot hear anything; the artist can. Only their ears can say what is good, so your job is to find out what they hear and want, precisely enough that the next night's pieces can be planned from it.
+What the artist has said they are after: danceable pieces people lose themselves in; the pulse is the familiar part ("the primal ape"), while the sounds, textures and the form of a piece are foreign, fluid and always morphing; emotions as peaks and bottomless depths; the sound released, never choked; new forms, flow, groove, energy, otherworldliness.
+HOW TO ASK: one short question at a time, in plain warm words, the way a friend in the studio would ask. No jargon and no numbers. Ask about what they HEARD, never about measurements.
+The most useful question is one whose answer separates two explanations: if they liked a fast piece with shouting, was it the speed or the shouting? Compare two pieces when that separates things best.
+"pieces": the numbers of the pieces they should listen to for this question (none, one, or two for a comparison).
+"options": three to five short things they can tap as an answer, each one a concrete property that really is in the plans of the pieces named (the stop-start drums, the crowd shouting, how fast it is, the merge of two creatures, the bright metal noises), or for a comparison the two titles plus "neither" and "both". Never vague ones like "the vibe" or "the energy". They can also answer in their own words.
+Never ask again what the conversation has already settled, and do not flatter. Whenever you mention a piece, to them or in your summary, call it by its title, never by its number alone.
+WHEN SUMMARISING: "understanding" is five to eight short plain statements of what you now believe about their taste, each one specific enough to plan a piece from and each one supported by something they actually said or marked; put the most certain first, and say "probably" where you are guessing. Drop a statement the moment they contradict it. "open" is up to four things you still do not know and would ask next."""
+
+
+def _talk() -> dict:
+    try:
+        return {"understanding": [], "open": [], "talk": [], **dict(json.loads(TASTE.read_text()))}
+    except Exception:
+        return {"understanding": [], "open": [], "talk": []}
+
+
+def _talk_save(t: dict):
+    TASTE.parent.mkdir(parents=True, exist_ok=True)
+    TASTE.write_text(json.dumps(t, indent=1, ensure_ascii=False))
+
+
+def _pieces(sid: str) -> list:
+    """The finished pieces of a collection as the listener needs them: name, who plays, tempo, the idea, what it was made from, the artist's mark."""
+    if not re.fullmatch(r"[a-z0-9]{6,16}", sid) or not (DIR / sid / "collection.json").exists():
+        raise FileNotFoundError("no such collection")
+    sheet, mk, names = json.loads((DIR / sid / "collection.json").read_text()), marks_of(sid), {}
+    try:
+        names = json.loads((DIR / sid / "names.json").read_text())
+    except Exception:
+        pass
+    out = []
+    for e in sheet.get("songs", []):
+        n = int(e.get("n") or 0)
+        plan = (sheet.get("ideas") or [])[n - 1] if 0 < n <= len(sheet.get("ideas") or []) else {}
+        cap = ""
+        try:
+            cap = str((json.loads((Path(e["path"]).parent / "meta.json").read_text()).get("params") or {}).get("caption") or "")
+        except Exception:
+            pass
+        out.append({"n": n, "title": names.get(str(n)) or e.get("title", ""), "creatures": [c for c in [e.get("creature"), *(e.get("mix") or [])] if c], "bpm": plan.get("bpm"), "idea": e.get("idea", ""),
+                    "caption": cap[:260], "mark": int(mk.get(str(n), 0)), "path": e.get("path")})
+    return out
+
+
+def _told(t: dict, sid: str, ps: list) -> str:
+    """Everything the listener knows, as text: the pieces, the marks, the conversation so far, and what it believed last time."""
+    word = {1: "MORE like this", -1: "NOT this", 0: "no mark yet"}
+    return ("THE PIECES OF THIS COLLECTION\n" + "\n".join(f'{p["n"]}. "{p["title"]}" ({" × ".join(p["creatures"])}, {p["bpm"]} bpm) [{word[p["mark"]]}]: {p["idea"]} Made from: {p["caption"]}' for p in ps)
+            + "\n\nTHE CONVERSATION SO FAR (oldest first)\n" + ("\n".join(f'- You asked: {x.get("q", "")}' + (f' (about: {", ".join(x.get("titles") or [])})' if x.get("titles") else "")
+                                                                    + f'\n  They answered: {"; ".join(x.get("picks") or []) or "(tapped nothing)"}' + (f' and said: "{x["text"]}"' if x.get("text") else "") for x in t["talk"][-24:]) or "(nothing yet)")
+            + "\n\nWHAT YOU BELIEVED AFTER THE LAST ANSWER\n" + ("\n".join("- " + u for u in t["understanding"]) or "(nothing yet)")
+            + ("\nStill open: " + "; ".join(t["open"]) if t["open"] else "") + "\n\n")
+
+
+def taste_view(sid: str = "") -> dict:
+    t = _talk()
+    return {"understanding": t["understanding"], "open": t["open"], "asked": t.get("asked"), "answers": len(t["talk"])}
+
+
+def question(sid: str, n: int = 0) -> dict:
+    """The program asks the artist one thing. Right after a mark it asks what it is about that piece; otherwise it picks
+    whatever would teach it most: an unmarked piece to listen to, two pieces to compare, or something it is unsure of."""
+    t, ps = _talk(), _pieces(sid)
+    if not ps:
+        raise RuntimeError("there are no finished pieces to ask about yet")
+    p = next((x for x in ps if x["n"] == int(n)), None) if n else None
+    prompt = _told(t, sid, ps) + (
+        (f'They have just marked piece {p["n"]}, "{p["title"]}", as {"MORE like this" if p["mark"] >= 0 else "NOT this"}. Ask what it is about this piece that makes them say so, with options taken from what is really in its plan. Set pieces to [{p["n"]}].'
+         if p else "Ask the next most useful question. Prefer, in this order: a comparison of two pieces that would separate two explanations of their marks; a piece with no mark yet that would test what you believe; one of your open questions put directly."))
+    q = chat.think(LISTENER, prompt, QUESTION_SCHEMA, 180)
+    have = {x["n"] for x in ps}
+    q = {"id": uuid.uuid4().hex[:8], "sid": sid, "text": " ".join(str(q.get("text") or "").split())[:400], "pieces": [int(x) for x in (q.get("pieces") or []) if int(x) in have][:2],
+         "options": [" ".join(str(o).split())[:80] for o in (q.get("options") or []) if str(o).strip()][:5]}
+    if not q["text"]:
+        raise RuntimeError("no question came back")
+    t["asked"] = q
+    _talk_save(t)
+    return taste_view(sid)
+
+
+def answer(sid: str, picks: list, text: str = "", correction: bool = False) -> dict:
+    """The artist answers (taps, their own words, or both), or corrects what the program said it understood. The program
+    then writes down again, from everything said so far, what it now believes."""
+    t = _talk()
+    q = None if correction else t.pop("asked", None)
+    text = " ".join(str(text or "").split())[:1200]
+    picks = [" ".join(str(x).split())[:80] for x in (picks or [])][:6]
+    if not correction and not q:
+        raise RuntimeError("there is no question waiting")
+    if not picks and not text:
+        raise RuntimeError("tap an answer or write one")
+    ps = _pieces(sid or (q or {}).get("sid") or "") if (sid or (q or {}).get("sid")) else []
+    title = {p["n"]: p["title"] for p in ps}
+    t["talk"].append({"when": time.strftime("%Y-%m-%d %H:%M"), "sid": sid, "q": "You told them what you understood, and they corrected it." if correction else q["text"],
+                      "pieces": [] if correction else q["pieces"], "titles": [] if correction else [title.get(n, str(n)) for n in q["pieces"]], "picks": picks, "text": text})
+    _talk_save(t)                                            # the answer is safe even if the summary below fails
+    try:
+        u = chat.think(LISTENER, _told(t, sid, ps) + "Write down again what you now believe about their taste, from everything above. The newest answer counts most, and a correction overrides what you believed.", UNDERSTAND_SCHEMA, 240)
+        t["understanding"] = [" ".join(str(x).split())[:300] for x in (u.get("understanding") or []) if str(x).strip()][:8]
+        t["open"] = [" ".join(str(x).split())[:200] for x in (u.get("open") or []) if str(x).strip()][:4]
+        _talk_save(t)
+    except Exception as ex:
+        print("[night] could not rewrite what is understood: " + str(ex)[:200], flush=True)
+    return taste_view(sid)
+
+
+def understood() -> str:
+    """What asking the artist has taught the program, for the briefs of new plans and of carvings."""
+    t = _talk()
+    if not t["understanding"]:
+        return ""
+    said = [f'"{x["text"]}"' for x in t["talk"][-12:] if x.get("text")]
+    return ("WHAT THE ARTIST HAS TOLD THE PROGRAM ABOUT THEIR TASTE, WHEN IT ASKED THEM (follow this over your own preferences):\n" + "\n".join("- " + u for u in t["understanding"])
+            + ("\nIn their own words: " + " / ".join(said[-6:]) if said else "") + "\n\n")
+
+
 def taste() -> str:
     """What the artist's ears have said so far, as a part of the brief for new plans: the pieces marked "more like this"
     (a star in the library on a night's piece counts too) and the ones marked "not this"."""
@@ -221,10 +343,10 @@ def taste() -> str:
         pass
     liked, away = [v for v in every.values() if v.get("mark", 0) > 0], [v for v in every.values() if v.get("mark", 0) < 0]
     if not liked and not away:
-        return ""
+        return understood()
     line = lambda v: (f'- "{v.get("title", "")}" ({" × ".join(v.get("creatures") or [])}' + (f', {v["bpm"]} bpm' if v.get("bpm") else "") + f'): {v.get("idea", "")}'
                       + (f' [made from: {v["caption"][:220]}]' if v.get("caption") else ""))
-    return ("WHAT THE ARTIST MARKED AFTER LISTENING (their ears are the only judge of taste; this outweighs anything that can be measured):\n"
+    return (understood() + "WHAT THE ARTIST MARKED AFTER LISTENING (their ears are the only judge of taste; this outweighs anything that can be measured):\n"
             + ("More like these. Work out what they have in common (which creatures and merges, what carries them, how they move, what their sounds are made of) and go further in that direction, without repeating any of them:\n"
                + "\n".join(line(v) for v in liked[-12:]) + "\n" if liked else "")
             + ("Not these. Work out what they share and stay away from it:\n" + "\n".join(line(v) for v in away[-12:]) + "\n" if away else "") + "\n")
@@ -737,7 +859,7 @@ def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: st
                   f'- a constant tone under everything: {m.get("hum")} dB at {m.get("hum_hz")} Hz (over 12 is a hum the artist hears); its quietest second is {m.get("floor")} dB below its loudest (-12 means it never lets go)\n'
                   f'- how defined its structure measures: {m.get("definition")} of 1. Drums overall: {m["attack"]} (the artist wants 0.2 or more). In the 5-second timeline, a stretch with real drums reads about 0.2 to 0.4, and under 0.1 means none.\n'
                   f'- how released it is: {m.get("air")} percent of its energy is above 6 kHz (0.5 is choked and muffled, 2 or more is open) and its stereo width is {m.get("width")} (0.25 is nearly mono, 0.4 is open)\n'
-                  + hist
+                  + hist + understood()
                   + ("- stretches already reworked, do not pick these again: " + ", ".join(f"{a:.0f}-{b:.0f}s" for a, b in tried) + "\n" if tried else "")
                   + (f"\nThis time look especially at {lens}." if lens else "")
                   + (f"\nFor this stretch ANOTHER CREATURE takes over: {_sides(guest)}. Write the stretch for what that creature would do with it, so the piece becomes a meeting of the two." if guest else "")

@@ -292,6 +292,19 @@ def create_app():
     def night_mark(body: dict):
         return evo(night.mark, str(body.get("id") or ""), int(body.get("n") or 0), int(body.get("mark") or 0))
 
+    @app.get("/api/night/taste")
+    def night_taste(id: str = ""):
+        """The conversation about taste: what the program understands so far, and the question it is waiting on."""
+        return night.taste_view(id)
+
+    @app.post("/api/night/question")
+    def night_question(body: dict):
+        return evo(night.question, str(body.get("id") or ""), int(body.get("n") or 0))
+
+    @app.post("/api/night/answer")
+    def night_answer(body: dict):
+        return evo(night.answer, str(body.get("id") or ""), [str(x) for x in (body.get("picks") or [])], str(body.get("text") or ""), bool(body.get("correction")))
+
     @app.post("/api/night/stop")
     def night_stop():
         night.stop()
