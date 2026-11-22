@@ -126,6 +126,7 @@ And, to be clear about that: "It should not limit itself to matching these genre
 And, after hearing the first pieces: "There is a recurring feeling of the sound choking. We should go the opposite way: the sound should in general feel released. Chiselling should mean the same: making the sound more clear, releasing it, the way a statue is released from the block of stone."
 And on what is familiar and what is foreign: "There has to be familiarity, still. That is what I wanted to capture in the list of genres that make people dance. That is the primal ape. The sounds and textures, the approaches to the structure of the song, all that can be foreign."
 So the split is exact: the PULSE is familiar (a body recognises it at once and moves, as it always has), and EVERYTHING ELSE is foreign: what the sounds are made of, their textures, the voices, and the form the piece takes, fluid and always morphing. Never make the beat strange in order to be new, and never make the sounds or the form ordinary in order to be danceable.
+And: "The percussion is barely audible in most songs." So the DRUMS ARE THE FRONT of every piece: the loudest thing in it, ahead of the voices, the noises and the low end. Everything else is placed behind them.
 So the sound itself is OPEN: a clear bright top end, space around every hit, each sound allowed to ring out and be let go. Never squeezed, muffled, boxed in or pressed flat. Even the heaviest depth breathes.
 So every piece must make a body move, but it must NOT be an example of any existing genre. Do not imitate rave, punk, electro or drum and bass. Take what works in them and build something that has no name:
 - from rave: a pulse that never lets go; long stretches where nothing changes and that is the point; tension wound up and then let off all at once.
@@ -429,6 +430,8 @@ def _fit(x: dict, rng) -> dict:
         cap += ", danceable, driving kick"
     if "open" not in cap:
         cap += ", clear open sound, bright crisp top end, wide"
+    if "drums in front" not in cap:
+        cap += ", loud drums in front of everything"
     x.update(caption=cap[:900], bpm=int(max(84, min(190, int(x.get("bpm") or 140)))), duration=int(max(100, min(200, int(x.get("duration") or 150)))),
              title=" ".join(str(x.get("title") or "untitled").split())[:40], lyrics=str(x.get("lyrics") or "[Instrumental]")[:3000])
     return x
@@ -722,7 +725,8 @@ def finish(raw: str, dst: str, bpm: float) -> dict:
     The raw take is not changed."""
     shutil.copy(raw, dst)
     info = {}
-    for name, fn in (("buzz", lambda: polish(dst)), ("extremes", lambda: extremes(dst, 12.0, 1.4)), ("release", lambda: release(dst))):   # no silences are cut in: the artist does not want them forced
+    for name, fn in (("buzz", lambda: polish(dst)), ("extremes", lambda: extremes(dst, 12.0, 1.4)), ("release", lambda: release(dst)),
+                     ("drums", lambda: drums_forward(dst, _measure(raw).get("attack", .2)))):   # no silences are cut in: the artist does not want them forced
         try:
             info[name] = fn()
         except Exception as ex:
@@ -778,6 +782,37 @@ def drier(path: str, keep: float = .45) -> dict:
     return {"keep": keep}
 
 
+def drums_forward(path: str, attack: float, want: float = .26) -> dict:
+    """Bring the percussion to the front. The sound is split into what is struck (hits, clicks, the crack of a snare) and
+    what is held; when a piece's drums measure weaker than the artist wants, the struck part is turned up (by up to 7 dB,
+    more the weaker they are) and the piece is brought back to the loudness it had, so everything else sits behind the
+    drums. A piece whose drums are already in front is left alone. Runs in the ACE-Step environment, which has the tools."""
+    up = float(min(7.0, max(0.0, (want - float(attack)) / .1 * 6.0)))
+    if up < 1.0:
+        return {"changed": False, "drums": attack}
+    code = (
+        "import sys, numpy as np, soundfile as sf\n"
+        "from scipy.ndimage import median_filter\n"
+        "from scipy.signal import stft, istft\n"
+        "p, up = sys.argv[1], float(sys.argv[2])\n"
+        "x, sr = sf.read(p, always_2d=True, dtype='float32')\n"
+        "f, t, Z = stft(x.T, sr, nperseg=2048, noverlap=1536)\n"
+        "M = np.abs(Z).mean(0)\n"
+        "H = median_filter(M, size=(1, 31)); P = median_filter(M, size=(31, 1))\n"
+        "mp = P**2 / (H**2 + P**2 + 1e-12)\n"
+        "g = 1 + (10 ** (up / 20) - 1) * mp\n"
+        "_, y = istft(Z * g[None], sr, nperseg=2048, noverlap=1536)\n"
+        "y = y.T[:len(x)].astype('float32')\n"
+        "y *= float(np.abs(x).max()) / (float(np.abs(y).max()) or 1.0)\n"
+        "sf.write(p, y, sr, subtype=sf.info(p).subtype)\n"
+        "print('ok')\n")
+    from .paths import ENVS_DIR
+    r = subprocess.run([str(ENVS_DIR / "ace_step" / "bin" / "python"), "-c", code, path, str(up)], capture_output=True, text=True, timeout=300)
+    if r.returncode:
+        raise RuntimeError((r.stderr or "could not process").strip()[-300:])
+    return {"changed": True, "up_db": round(up, 1), "drums": attack}
+
+
 def score(m: dict, others: list[dict]) -> dict:
     """A stand-in for judgement, made of things that can be measured, in the artist's terms: can it be danced to (a steady
     pulse and real drum hits at a dance tempo), is it clear (no tone that never stops), does it reach extremes, do its
@@ -795,7 +830,7 @@ def score(m: dict, others: list[dict]) -> dict:
     defn = float(m.get("definition", 0))
     opened = .7 * min(1, max(0, (float(m.get("air", 1.0)) - .5) / 1.7)) + .3 * min(1, max(0, (float(m.get("width", .35)) - .2) / .22))   # released, not choked: a top end and some width
     clear = min(1, max(0, 1 - (float(m.get("hum", 0)) - 7) / 9))           # no tone that never stops. Silence is not rewarded for its own sake.
-    return {"total": round(.3 * dance + .15 * clear + .18 * opened + .09 * ext + .03 * defn + .25 * variety, 3), "open": round(opened, 2), "dance": round(dance, 2), "extremes": round(ext, 2), "clarity": round(clear, 2), "drums": round(drums, 2),
+    return {"total": round(.36 * dance + .13 * clear + .14 * opened + .09 * ext + .03 * defn + .25 * variety, 3), "open": round(opened, 2), "dance": round(dance, 2), "extremes": round(ext, 2), "clarity": round(clear, 2), "drums": round(drums, 2),
             "definition": round(defn, 2), "variety": round(variety, 2), "nearest": near, "shape": round(ext, 2)}
 
 
@@ -864,9 +899,10 @@ def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: st
                   + (f"\nThis time look especially at {lens}." if lens else "")
                   + (f"\nFor this stretch ANOTHER CREATURE takes over: {_sides(guest)}. Write the stretch for what that creature would do with it, so the piece becomes a meeting of the two." if guest else "")
                   + "\nChiselling means RELEASING the piece from the block, as a sculptor frees a statue: every carving must leave the sound clearer and more open than it found it, never denser. "
+                  "The drums are the front of the piece: a carving must leave them at least as loud and as present as it found them, never thinner or further back. "
                   "Pick ONE stretch of 12 to 30 seconds to make again, the one whose remaking would most free the piece as dance music that reaches extremes: a stretch that is choked or a lump of sound, a stretch where the beat falls apart or the kick goes missing (unless that is a planned void), a peak that is not overwhelming enough, a depth that is not heavy enough, "
                   "a stretch that is merely in-between, or a peak whose drums are missing. Do not add silences: only if the plan itself has a void section and the timeline shows that it is not empty may that one be made emptier. "
-                  f'Give start and end in seconds, and a caption for JUST that stretch: it must begin with "{words}", then say concretely what plays there (which drums and how, the low end, the voices, the noise), fewer things rather than more, and end with "clear open sound, bright crisp top end, wide, every hit rings out". '
+                  f'Give start and end in seconds, and a caption for JUST that stretch: it must begin with "{words}", then say concretely what plays there (which drums and how, the low end, the voices, the noise), fewer things rather than more, and end with "loud drums in front of everything, clear open sound, bright crisp top end, wide, every hit rings out". '
                   "No genre or artist names. In the note, one sentence: which section this is and what it should become.")
         r = chat.think(HOUSE, prompt, CHISEL_SCHEMA, 240)
         a, b = float(r["start"]), float(r["end"])
@@ -1146,7 +1182,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         why = broken(outs[0]["path"], float(s_["song"]["duration"]))
                         m2 = None if why else measure(outs[0]["path"])
                         sc2 = None if why else score(m2, [o for o in done if o is not s_])
-                        better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .002
+                        better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .002 and m2["attack"] >= s_["m"]["attack"] - .015   # a carving that costs the piece its drums is never kept, whatever else it gains
                         s_["entry"]["carving"].append({"round": rnd, "lens": LENSES[cycle % len(LENSES)].split(":")[0], "from": cp["start"], "to": cp["end"], "why": cp["note"], "by": guest or "", "kept": better, "broken": why or None,
                                                        "before": s_["sc"]["total"], "after": sc2["total"] if sc2 else None, "definition": [s_["sc"]["definition"], sc2["definition"] if sc2 else None]})
                         if better:
