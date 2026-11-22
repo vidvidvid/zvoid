@@ -499,9 +499,9 @@ body.throwing, body.throwing * { cursor: grabbing !important; user-select: none 
 .evo-step.head { border-color: color-mix(in srgb, var(--cyan) 55%, transparent); } .evo-step.playing, .evo-card.playing { box-shadow: 0 0 26px -12px var(--cyan); }
 .evo-step-t { display: grid; min-width: 0; } .evo-step-t b { font: 600 11.5px var(--sans); } .evo-step-t small { font: 10px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .evo-step .lib-wave { width: 100%; height: 34px; } .evo-now { font: 10px var(--mono); color: var(--cyan); letter-spacing: .06em; }
-#evo .evo-pp { width: 28px; height: 28px; padding: 0; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 0; line-height: 0; }
-#evo .evo-pp::before { content: ''; width: 9px; height: 10px; margin-left: 2px; background: currentColor; clip-path: polygon(0 0, 100% 50%, 0 100%); }
-#evo .playing .evo-pp::before { width: 8px; height: 8px; margin-left: 0; clip-path: none; }
+#evo .evo-pp { width: 28px; height: 28px; padding: 0; border-radius: 50%; flex: none; position: relative; font-size: 0; line-height: 0; }
+#evo .evo-pp::before { content: ''; position: absolute; left: 50%; top: 50%; width: 9px; height: 10px; transform: translate(-40%, -50%); background: currentColor; clip-path: polygon(0 0, 100% 50%, 0 100%); }
+#evo .playing .evo-pp::before { width: 8px; height: 8px; transform: translate(-50%, -50%); clip-path: none; }
 .evo-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
 .evo-card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line-hi); border-radius: 12px; background: #0b0b14; }
 .evo-top { display: grid; grid-template-columns: 30px auto 1fr; gap: 10px; align-items: center; } .evo-top b { font: 700 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; } .evo-top small { font: 11px var(--sans); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
