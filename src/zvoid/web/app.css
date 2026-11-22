@@ -261,6 +261,9 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px;
 #gym h3 { margin: 10px 0 0; font: 600 10px var(--mono); letter-spacing: .3em; text-transform: uppercase; color: var(--muted); }
 #gym label { display: grid; gap: 4px; } #gym label span { font: 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
 .gym-note { margin: 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.gym-wait { padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--violet) 45%, transparent); border-radius: 8px; }
+.gym-wait b { color: var(--text, #eee); font-weight: 600; }
+.gym-wait a { color: var(--violet); }
 .gym-list { display: grid; gap: 6px; flex: 1; align-content: start; overflow: auto; }
 #gym .creature-row { display: flex; align-items: center; gap: 10px; text-align: left; padding: 6px 10px 6px 6px; letter-spacing: 0; }
 #gym .creature-row.cur { border-color: var(--violet); box-shadow: 0 0 30px -12px var(--violet); }

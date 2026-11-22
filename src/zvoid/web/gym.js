@@ -309,6 +309,8 @@ async function gymLoad(slug) {
 }
 async function gymPoll() {
   if (!Gym.open || !Gym.cur) return;
+  const o = gymOther(Gym.cur);                           // the one that is training elsewhere: keep watching it, so this creature unlocks when it ends
+  if (o) api('/api/gym/' + o.slug).then(r => { const i = Gym.list.findIndex(x => x.slug === r.slug); if (i >= 0) Gym.list[i] = r; if (!r.training || !/running|stopping/.test(r.training.state)) gymRender(); }).catch(() => {});
   try { const c = await api('/api/gym/' + Gym.cur.slug); if (Gym.cur && c.slug === Gym.cur.slug) { Gym.cur = c; Gym.polledAt = performance.now(); const i = Gym.list.findIndex(x => x.slug === c.slug); if (i >= 0) Gym.list[i] = c; gymRender(); } } catch {}
 }
 function gymFrame() {
@@ -335,10 +337,11 @@ function gymFrame() {
 const dur = s => s < 90 ? Math.max(1, Math.round(s)) + 's' : s < 5400 ? Math.round(s / 60) + ' min' : (s / 3600).toFixed(1) + ' h';
 const stageName = c => !c.food.length ? 'seed' : !c.epochs ? 'dormant' : c.epochs < 60 ? 'awakening' : c.epochs < 250 ? 'forming' : c.epochs < 800 ? 'ascendant' : 'ancient';
 
+function gymOther(c) { return Gym.list.find(x => (!c || x.slug !== c.slug) && x.training && /running|stopping/.test(x.training.state)) || null; }   // another creature that is training right now: only one trains at a time
 function gymRender() {
   Gym.list.forEach(gymFx); if (Gym.cur) gymFx(Gym.cur);
   const c = Gym.cur, tr = c && c.training, running = !!(tr && /running|stopping/.test(tr.state));
-  const key = JSON.stringify([Gym.playing, Gym.list.map(x => [x.slug, x.food.length, x.epochs, x.trained]), c && c.slug, c && c.food.map(f => f.name), running, c && c.trained]);
+  const key = JSON.stringify([Gym.playing, Gym.list.map(x => [x.slug, x.food.length, x.epochs, x.trained]), c && c.slug, c && c.food.map(f => f.name), running, c && c.trained, (gymOther(c) || {}).slug]);
   if (key !== Gym.key) { Gym.key = key; gymBuild(); }
   if (!c) return;
   $('#gym-stats').textContent = `${stageName(c)} · ate ${c.food.length} track${c.food.length === 1 ? '' : 's'} (${c.minutes} min) · trained ${c.epochs} epoch${c.epochs === 1 ? '' : 's'}` + (c.history.length ? ` · loss ${c.history[c.history.length - 1][1].toFixed(3)}` : '');
@@ -423,6 +426,7 @@ function gymBuild() {
         `${fs.length} track${fs.length === 1 ? '' : 's'} · ${Math.round(audio / 60)} min of audio per epoch. ` + (pc ? (c.pace_pc ? `Timed on ${far.name}.` : `A rough guess for ${far.name} until the first epoch has been timed.`) + ' This Mac stays free for the creature.' : c.pace ? 'Timed on this Mac.' : 'A rough guess until the first epoch has been timed.') + ' More tracks or longer tracks = slower epochs.');
     };
     [ep, maxd, maxT].forEach(i => i.addEventListener('input', est)); est();
+    const other = running ? null : gymOther(c), wait = other ? `“${other.name}” is training right now. Only one creature trains at a time.` : '';
     const go = fresh => { Gym.more = +ep.value || 100; gymDo(() => api(`/api/gym/${c.slug}/train`, { json: { epochs: Gym.more, rank: +rank.value, lr: +lr.value, max_duration: +maxd.value, max_tracks: +maxT.value || 0, fresh, where: where.value } })); };
     right.append(
       h('h3', {}, 'food'),
@@ -452,9 +456,10 @@ function gymBuild() {
       h('div', { id: 'gym-status' }),
       h('div', { class: 'acts' },
         running ? h('button', { class: 'stop', onclick: () => api(`/api/gym/${c.slug}/stop`, { method: 'POST' }).then(gymPoll) }, '■ stop')
-          : h('button', { class: 'hot', disabled: !c.food.length, onclick: () => go(false) }, c.epochs ? 'train more ▸' : 'train ▸'),
-        !running && c.epochs ? h('button', { title: 'Forget everything it learned and train again from zero', onclick: () => { if (confirm(`Erase what “${c.name}” has learned and start over? Its food stays.`)) go(true); } }, 'start over') : null,
+          : h('button', { class: 'hot', disabled: !c.food.length || !!other, title: wait, onclick: () => go(false) }, c.epochs ? 'train more ▸' : 'train ▸'),
+        !running && c.epochs ? h('button', { disabled: !!other, title: wait || 'Forget everything it learned and train again from zero', onclick: () => { if (confirm(`Erase what “${c.name}” has learned and start over? Its food stays.`)) go(true); } }, 'start over') : null,
         !running && c.trained && Gym.list.some(x => x.slug !== c.slug && x.trained) ? h('button', { title: 'Breed it with another trained creature. The child sounds like the average of both, inherits links to all their food, and can be trained further.', onclick: e => gymBreed(c, e) }, 'breed…') : null),
+      other ? h('p', { class: 'gym-note gym-wait' }, h('b', {}, `“${other.name}” is training right now.`), ' Only one creature trains at a time. You can still feed this one; training unlocks when the other finishes or is stopped. ', h('a', { href: '#', onclick: e => { e.preventDefault(); Gym.cur = other; Gym.key = ''; gymRender(); } }, 'show it')) : null,
       h('p', { class: 'gym-note' }, 'On this Mac, training uses the Apple GPU and pauses the ace-step module. Stopping keeps the last saved checkpoint.'),
       ...(!running ? [h('div', { class: 'acts gym-end' }, h('button', { class: 'danger', data: { label: 'delete creature' }, title: 'Deletes what it learned and its list of tracks. Your original audio files are not touched.', onclick: e => gymDelete(e.currentTarget, c) }, 'delete creature'))] : []));
   }
