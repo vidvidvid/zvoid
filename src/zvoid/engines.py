@@ -215,7 +215,20 @@ class Engine:
         self._proc = None
 
     def run(self, params: dict, out_dir: Path):
-        """Generator: yields ("progress", msg, frac) and finally ("result", outputs, info)."""
+        """Generator: yields ("progress", msg, frac) and finally ("result", outputs, info).
+        The PC does one thing at a time: its graphics card holds one big model, and starting a second engine there while
+        another is at work made them send the same files at once and push each other out of memory."""
+        if self.where != "pc":
+            yield from self._run(params, out_dir)
+            return
+        while not _FAR_TURN.acquire(timeout=1):
+            yield ("progress", "waiting for the PC: another module is using it…", None)
+        try:
+            yield from self._run(params, out_dir)
+        finally:
+            _FAR_TURN.release()
+
+    def _run(self, params: dict, out_dir: Path):
         with self._lock:
             if self.running and bool(self._far) != (self.where == "pc"):
                 self.stop()                                   # it was moved to the other machine since it last ran
@@ -259,6 +272,7 @@ def _stream(cmd, log):
 
 
 _ALL: dict = {}
+_FAR_TURN = threading.Lock()      # whose turn it is on the PC
 
 
 def discover() -> dict[str, Engine]:
