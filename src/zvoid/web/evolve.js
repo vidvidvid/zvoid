@@ -161,6 +161,7 @@ function nightForm(g, x, y, R, plan, hue, hue2, t, sd, a0, span, e) {
 const NIGHT_FRAG = `#version 300 es
 precision highp float;
 uniform vec2 uRes; uniform float uT; uniform int uNB, uNF;
+uniform vec3 uSky; uniform vec4 uLook;
 uniform vec4 uB0[96], uB1[96], uB2[96], uB3[96];
 uniform vec4 uF0[48], uF1[48], uF2[48];
 out vec4 o;
@@ -223,14 +224,18 @@ vec3 fil(vec2 p, vec4 f0, vec4 f1, vec4 f2, vec2 w) {
 }
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) / uRes.x * 1000.;
-  vec2 w = vec2(fbm(p * .011 + vec2(uT * .05, 3.)), fbm(p * .011 + vec2(7., -uT * .045))) - .47;
-  vec3 c = vec3(.10, .07, .2) * pow(fbm(p * .004 + w * .9 + uT * .01), 3.) * 1.1;
+  vec2 w = (vec2(fbm(p * .011 + vec2(uT * .05, 3.)), fbm(p * .011 + vec2(7., -uT * .045))) - .47) * uLook.y;
+  float hz = pow(fbm(p * .004 + w * .9 + uT * .01), 3.);
+  if (uLook.x > .5 && uLook.x < 1.5) { hz = pow(fbm(vec2(p.x * .0013 + uT * .008, p.y * .013) + w * .5), 3.) * 1.35; }
+  else if (uLook.x > 1.5 && uLook.x < 2.5) { vec2 q = p - vec2(500., 500. * uRes.y / uRes.x); float an = atan(q.y, q.x); hz = pow(fbm(vec2(cos(an), sin(an)) * 1.9 + length(q) * .0022 - uT * .02 + w * .4), 3.) * 1.3; }
+  else if (uLook.x > 2.5) { vec2 q = p * .006 + w * .6; float cell = abs(fbm(q) - fbm(q + 3.7)); hz = pow(1. - smoothstep(0., .2, cell), 3.) * .42 + pow(fbm(p * .003 + uT * .01), 3.) * .5; }
+  vec3 c = uSky * hz * uLook.w;
   vec2 g = floor(p / 8.); float st = h21(g);
-  if (st > .986) { vec2 sp = (g + .5 + (vec2(h21(g + 3.), h21(g + 7.)) - .5) * .7) * 8.; float dd = length(p - sp); c += vec3(.7, .76, 1.) * exp(-dd * dd * 1.1) * (.35 + .3 * sin(uT * .8 + st * 700.)); }
+  if (st > uLook.z) { vec2 sp = (g + .5 + (vec2(h21(g + 3.), h21(g + 7.)) - .5) * .7) * 8.; float dd = length(p - sp); c += vec3(.7, .76, 1.) * exp(-dd * dd * 1.1) * (.35 + .3 * sin(uT * .8 + st * 700.)); }
   for (int i = 0; i < 48; i++) { if (i >= uNF) break; c += fil(p, uF0[i], uF1[i], uF2[i], w); }
   for (int i = 0; i < 96; i++) { if (i >= uNB) break; c += body(p, uB0[i], uB1[i], uB2[i], uB3[i], w); }
   c = 1. - exp(-c * 1.3);
-  o = vec4(c + vec3(.016, .014, .032), 1.);
+  o = vec4(c + uSky * .155, 1.);
 }`;
 let NIGHTGL;
 function nightGL() {
@@ -245,14 +250,23 @@ function nightGL() {
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
     gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
     const loc = gl.getAttribLocation(prog, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0); gl.useProgram(prog);
-    const U = {}; ['uRes', 'uT', 'uNB', 'uNF', 'uB0', 'uB1', 'uB2', 'uB3', 'uF0', 'uF1', 'uF2'].forEach(k => { U[k] = gl.getUniformLocation(prog, k); });
+    const U = {}; ['uRes', 'uT', 'uNB', 'uNF', 'uB0', 'uB1', 'uB2', 'uB3', 'uF0', 'uF1', 'uF2', 'uSky', 'uLook'].forEach(k => { U[k] = gl.getUniformLocation(prog, k); });
     canvas.addEventListener('webglcontextlost', () => { NIGHTGL = undefined; });
     NIGHTGL = { canvas, gl, U, b: [0, 1, 2, 3].map(() => new Float32Array(96 * 4)), f: [0, 1, 2].map(() => new Float32Array(48 * 4)) };
   } catch (e) { console.warn('night shader: ' + e.message); NIGHTGL = null; }
   return NIGHTGL;
 }
+/* Every run has a sky of its own, so no two collections look alike: its colour, what the haze is shaped like (clouds, strata, rays
+   from the middle, a web), how much everything sways, how many stars, and how the creatures are set around the edge. All of it
+   follows from the run itself, so a run always looks the same. The first collection keeps the sky it was made under. */
+function nightLook(id) {
+  if (!id || id === 'cd5d7ef917') return { sky: [.10, .07, .2], v: [0, 1, .986, 1.1], rot: 0, rx: 395, ry: 160 };
+  const u = k => hash(id + k), c = hsl2rgb(u('h') * 360, .8, .5).map(x => x * .27 + .012);
+  return { sky: c, v: [1 + Math.floor(u('p') * 3), .65 + u('w') * 1.0, .976 + u('s') * .016, 1.05 + u('g') * .5], rot: u('r') * 6.2832, rx: 372 + u('x') * 26, ry: 150 + u('y') * 20 };
+}
 /* B: bodies as rows of sixteen numbers, F: filaments as rows of twelve */
-function nightPaint(G, cw, ch, t, B, F) {
+function nightPaint(G, cw, ch, t, B, F, look) {
+  look = look || nightLook(''); G.gl.uniform3f(G.U.uSky, look.sky[0], look.sky[1], look.sky[2]); G.gl.uniform4f(G.U.uLook, look.v[0], look.v[1], look.v[2], look.v[3]);
   const gl = G.gl; if (G.canvas.width !== cw || G.canvas.height !== ch) { G.canvas.width = cw; G.canvas.height = ch; }
   const nb = Math.min(96, B.length), nf = Math.min(48, F.length);
   for (let i = 0; i < nb; i++) for (let k = 0; k < 4; k++) G.b[k].set(B[i].slice(k * 4, k * 4 + 4), i * 4);
@@ -265,7 +279,7 @@ function nightPaint(G, cw, ch, t, B, F) {
 function evoNightMap(N0, sh0) {
   const W = NIGHT_W, H = NIGHT_H, cx = W / 2, cy = H / 2 - 14, ideas = (sh0 && sh0.ideas) || [], who = (N0.creatures || (sh0 && sh0.creatures) || []);
   const look = c => { const x = EVO.creatures.find(q => q.slug === c); return (x && x.look) || { plan: Math.floor(hash(c + 'p') * 6), hue: hash(c) * 360, hue2: hash(c + '2') * 360 }; };
-  const L = {}, P = {}; who.forEach((c, i) => { const a = -Math.PI / 2 + i / who.length * Math.PI * 2; P[c] = [cx + Math.cos(a) * 395, cy + 4 + Math.sin(a) * 160]; L[c] = look(c); });
+  const L = {}, P = {}; const sky = nightLook(N0.id); who.forEach((c, i) => { const a = -Math.PI / 2 + sky.rot + i / who.length * Math.PI * 2; P[c] = [cx + Math.cos(a) * sky.rx, cy + 4 + Math.sin(a) * sky.ry]; L[c] = look(c); });
   const col = (c, l = 62, a = 1) => `hsla(${L[c].hue},92%,${l}%,${a})`;
   const pos = ideas.map((x, i) => { const cs = [x.creature, ...(x.mix || [])].filter(c => P[c]), k = cs.length || 1, a = i * 2.39996, j = 26 + (i % 5) * 9;
     let px = cs.reduce((s, c) => s + P[c][0], 0) / k, py = cs.reduce((s, c) => s + P[c][1], 0) / k;
@@ -342,7 +356,7 @@ function evoNightMap(N0, sh0) {
           dot(px, py, 22 * (1 - fr) + 6, 'rgba(220,245,255,.6)'); }
         g.shadowBlur = 0; }
     });
-    if (GL) nightPaint(GL, Math.round(cw * .75), Math.round(ch * .75), t, B, F);
+    if (GL) nightPaint(GL, Math.round(cw * .75), Math.round(ch * .75), t, B, F, sky);
     /* words */
     g.globalCompositeOperation = 'source-over'; g.textAlign = 'center'; g.shadowColor = 'rgba(4,4,12,.95)'; g.shadowBlur = 5;
     who.forEach(c => { const [x, y] = P[c]; g.font = `600 12px ${mono}`; g.fillStyle = col(c, 76, .95); g.fillText(c.replace(/-/g, ' ').toUpperCase().split('').join(' '), x, y + (y > cy ? 74 : -62)); });
@@ -420,7 +434,7 @@ async function evoMarkPiece(n, v) {
 const albUrl = (a, name) => `/api/night/albumfile?album=${encodeURIComponent(a)}&name=${encodeURIComponent(name)}`;
 /* A picture grown from the pieces themselves: every piece is the merged body of the creatures that play it, in their own
    colours and forms, drawn by the same shader as the night. One piece fills its cover; an album shows all of its pieces. */
-function evoCoverBlob(pieces, title, sub) {
+function evoCoverBlob(pieces, title, sub, cid) {
   const G = nightGL(); if (!G || !pieces.length) return Promise.resolve(null);
   const S = 1200, one = pieces.length === 1, B = [], F = [], at = [], rgb = (hu, l = .6) => hsl2rgb(hu, .95, l);
   const look = c => { const x = (EVO.creatures || []).find(q => q.slug === c); return (x && x.look) || { plan: Math.floor(hash(c + 'p') * 6), hue: hash(c) * 360, hue2: hash(c + '2') * 360 }; };
@@ -436,7 +450,7 @@ function evoCoverBlob(pieces, title, sub) {
       F.push([px, py, x, y, ...rgb(L.hue, .62), .34 + hash(key + 'i' + j) * .4, (hash('b' + key + j) - .5) * .6, hash('f' + key + j), j % 3 ? 0 : .5, j % 3 ? 0 : 1]); } });
   if (!one) at.forEach(([x, y, cs], i) => { const nx = at.slice(i + 1).find(o => o[2].some(c => cs.includes(c))) || at[(i + 1) % at.length];      // threads run between pieces that share a creature
     if (F.length < 48 && nx) F.push([x, y, nx[0], nx[1], ...rgb(look(cs[0]).hue, .62), .42, (hash('b' + i) - .5) * .5, hash('f' + i + title), i % 4 ? 0 : .5, i % 4 ? 0 : 1]); });
-  nightPaint(G, S, S, 40 + hash(title + (one ? pieces[0].n : 'album')) * 900, B, F);
+  nightPaint(G, S, S, 40 + hash(title + (one ? pieces[0].n : 'album')) * 900, B, F, nightLook(cid));
   const c2 = document.createElement('canvas'); c2.width = c2.height = S; const g = c2.getContext('2d'); g.drawImage(G.canvas, 0, 0);
   const shade = g.createLinearGradient(0, S - 260, 0, S); shade.addColorStop(0, 'rgba(4,4,10,0)'); shade.addColorStop(1, 'rgba(4,4,10,.82)'); g.fillStyle = shade; g.fillRect(0, S - 260, S, 260);
   const mono = 'ui-monospace, "SF Mono", Menlo, "Hiragino Sans", "Geeza Pro", monospace';
@@ -451,7 +465,7 @@ async function evoCovers() {
     const had = JSON.stringify(EVO.albums || null); EVO.albums = A; if (EVO.open && had !== JSON.stringify(A)) EVO.stale = true;
     for (const a of A) { const todo = [...(a.cover ? [] : [0]), ...a.pieces.filter(p => !p.cover).map(p => p.n)]; if (!todo.length) continue; if (!nightGL()) break;
       for (const n of todo) { const p = a.pieces.find(x => x.n === n);
-        const blob = await evoCoverBlob(n ? [p] : a.pieces, n ? p.name : a.title, n ? `${String(n).padStart(2, '0')} · ${(p.creatures || []).join(' × ').replace(/-/g, ' ')} · ${a.title}` : `album ${a.n} · ${a.pieces.length} pieces · ${(a.kept || '').slice(0, 10)}`); if (!blob) break;
+        const blob = await evoCoverBlob(n ? [p] : a.pieces, n ? p.name : a.title, n ? `${String(n).padStart(2, '0')} · ${(p.creatures || []).join(' × ').replace(/-/g, ' ')} · ${a.title}` : `album ${a.n} · ${a.pieces.length} pieces · ${(a.kept || '').slice(0, 10)}`, a.collection); if (!blob) break;
         await fetch(`/api/night/cover?album=${encodeURIComponent(a.folder)}&n=${n}`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob }); await new Promise(r => setTimeout(r, 40)); }
       EVO.albums = await api('/api/night/albums'); EVO.stale = true; }
     if (EVO.open && EVO.stale && !(document.activeElement && document.activeElement.tagName === 'TEXTAREA')) evoDraw();
