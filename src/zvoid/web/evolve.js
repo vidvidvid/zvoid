@@ -428,7 +428,7 @@ function evoNightView() {                               // tonight, piece by pie
         h('div', { class: 'night-what' }, h('b', {}, x.name || x.title, h('em', {}, `${x.bpm} bpm`)), h('small', { class: 'night-who' }, who(x)), h('small', { title: x.idea }, x.idea)),
         path ? libWave({ path, kind: 'audio', size: 5e7 }) : h('span', { class: 'night-wait' }, making ? 'being made now…' : 'waiting'),
         h('small', { class: 'night-carve', title: tried ? (e.carving || []).map(c => `${c.kept ? 'kept' : 'not kept'}: ${c.from}–${c.to}s${c.by ? ' by ' + c.by : ''} · ${c.why || ''}`).join('\n') : '' }, tried ? `${kept} of ${tried} carvings kept` : ''),
-        path && EVO.marks ? h('span', { class: 'night-marks', title: 'How much do you like it? 1: not this at all · 3: fine, but not it · 5: this is it. Tap the same number again to clear it.' },
+        path && EVO.marks ? h('span', { class: 'night-marks', title: 'How much do you like it? 1: not this at all · 3: fine, but not it · 5: this is the direction (not the end goal). Tap the same number again to clear it.' },
           [1, 2, 3, 4, 5].map(v => h('button', { class: 'night-mark r' + v + ((EVO.marks[n] || 0) >= v ? ' on' : '') + (EVO.marks[n] === v ? ' at' : ''), onclick: () => evoMarkPiece(n, v) }, String(v)))) : h('span', {})); })));
 }
 function evoMark() { document.querySelectorAll('#evo .evo-pp').forEach(b => { const on = b.dataset.path === LIB.playing; b.textContent = on ? '■' : '▶'; const box = b.closest('.evo-card, .evo-step, .night-row, .talk-piece'); if (box) box.classList.toggle('playing', on); }); }

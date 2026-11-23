@@ -178,7 +178,7 @@ def marks_of(sid: str) -> dict:
     return {k.split(":")[1]: _rate(v) for k, v in marks().items() if k.startswith(sid + ":")}
 
 
-RATES = {0: "not rated yet", 1: "1 of 5: not this at all", 2: "2 of 5: not working", 3: "3 of 5: fine, but not it", 4: "4 of 5: good", 5: "5 of 5: this is it"}
+RATES = {0: "not rated yet", 1: "1 of 5: not this at all", 2: "2 of 5: not working", 3: "3 of 5: fine, but not it", 4: "4 of 5: good", 5: "5 of 5: the direction to go further in (not the end goal)"}
 
 
 def _rate(v: dict) -> int:
@@ -360,7 +360,7 @@ def taste() -> str:
                       + (f' [made from: {v["caption"][:220]}]' if v.get("caption") else ""))
     return (understood() + "HOW MUCH THE ARTIST LIKED EACH PIECE AFTER LISTENING, 1 TO 5 (their ears are the only judge of taste; this outweighs anything that can be measured):\n"
             + "\n".join(line(v) for v in rated[:24]) + "\n"
-            + "Work out what separates the 5s and 4s from the rest (which creatures and merges, what carries them, how they move, what their sounds are made of) and go further in that direction without repeating any of them. "
+            + "A 5 means: this is the direction, go further that way. It never means the piece is the goal or should be repeated. Work out what separates the 5s and 4s from the rest (which creatures and merges, what carries them, how they move, what their sounds are made of) and go further in that direction without repeating any of them. "
               "A 3 is a warning as much as a 1: fine is not what they are after. Stay away from what the 1s and 2s share.\n\n")
 
 
@@ -906,7 +906,7 @@ def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: st
                   f'- how defined its structure measures: {m.get("definition")} of 1. Drums overall: {m["attack"]} (the artist wants 0.2 or more). In the 5-second timeline, a stretch with real drums reads about 0.2 to 0.4, and under 0.1 means none.\n'
                   f'- how released it is: {m.get("air")} percent of its energy is above 6 kHz (0.5 is choked and muffled, 2 or more is open) and its stereo width is {m.get("width")} (0.25 is nearly mono, 0.4 is open)\n'
                   + hist + understood()
-                  + ({5: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 5 OF 5. It is what they want: touch it only where it is plainly choked or its drums are buried, and keep everything that makes it what it is.\n",
+                  + ({5: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 5 OF 5. That means it points the right way, not that it is finished: keep what makes it what it is and push it further the same way, clearer, every sound more pronounced.\n",
                       4: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 4 OF 5. It is good: sharpen it, do not turn it into something else.\n",
                       3: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 3 OF 5: fine, but not it. It needs a real change, not polish: pick the stretch that is most ordinary and make it the most alive.\n",
                       2: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 2 OF 5. It is not working. Be bold: remake its weakest stretch into what their taste above asks for, even if that departs from the plan.\n",
@@ -1183,7 +1183,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
             while hours and done and not _state["stop"] and not _state["error"] and time.time() < _state["until"]:
                 rates = marks_of(sid)                              # read again every round: the artist may be rating while it works
                 rate = lambda q: int(rates.get(str(q["n"]), 0))
-                room = {5: (1, 2), 4: (2, 4), 2: (5, 9), 1: (5, 9)}     # how many misses and how many kept cuts a piece gets per turn: the loved ones are left nearly alone, the unloved get the work
+                room = {2: (5, 9), 1: (5, 9)}     # how many misses and how many kept cuts a piece gets per turn: the unloved get more of the work. A 5 is a direction, not a finished piece, so it is carved like any other
                 live = [s_ for s_ in done if s_["misses"] < room.get(rate(s_), (3, 6))[0] and s_["carved"] < room.get(rate(s_), (3, 6))[1]]
                 if not live:                                       # every piece has settled under this way of looking: look again another way, for as long as the night lasts
                     if _state["carved"] == _state.get("carved_at_cycle", -1):
