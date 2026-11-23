@@ -305,6 +305,16 @@ def create_app():
     def night_answer(body: dict):
         return evo(night.answer, str(body.get("id") or ""), [str(x) for x in (body.get("picks") or [])], str(body.get("text") or ""), bool(body.get("correction")))
 
+    @app.post("/api/night/albums")
+    def night_albums():
+        """Show the albums in Finder: one folder per finished loop, the newest selected."""
+        from .paths import ROOT
+        root = ROOT / "albums"
+        root.mkdir(exist_ok=True)
+        last = sorted((f for f in root.iterdir() if f.is_dir()), key=lambda f: f.name)
+        subprocess.run(["open", "-R", str(last[-1])] if last else ["open", str(root)])
+        return {"albums": [f.name for f in last]}
+
     @app.post("/api/night/stop")
     def night_stop():
         night.stop()

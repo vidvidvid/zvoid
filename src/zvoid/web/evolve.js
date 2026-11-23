@@ -66,7 +66,8 @@ function evoNightBox(trained, s) {
         if (!EVO.nightWho.size) return toast('tick at least one creature', true);
         try { EVO.night = await api('/api/night', { json: { creatures: [...EVO.nightWho], count: +cnt.value || 20, tries: +tr.value || 2, hours: +hrs.value || 0, direction: dir.value } }); evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'make the collection ▸')),
       N.msg && N.finished ? h('small', { title: N.msg }, N.msg) : '',
-      N.id ? h('div', { class: 'acts' }, h('button', { onclick: () => { EVO.showNight = true; evoDraw(); } }, 'show last night’s pieces')) : '');
+      N.id ? h('div', { class: 'acts' }, h('button', { onclick: () => { EVO.showNight = true; evoDraw(); } }, 'show last night’s pieces'),
+        h('button', { title: 'Every finished loop is kept as an album: a folder with its pieces as they sounded then. This shows them in Finder.', onclick: () => api('/api/night/albums', { json: {} }).catch(e => toast(e.message, true)) }, 'albums')) : '');
   }
   return box;
 }
