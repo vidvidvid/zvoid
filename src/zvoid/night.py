@@ -373,6 +373,12 @@ def _sides(slug: str) -> str:
     return f'{slug} — its words: ' + "; ".join(f'"{l["trigger"]}" ({", ".join(l["tags"])}, about {round(l["mean"]["bpm"])} bpm, {l["count"]} tracks)' for l in c.get("limbs", []))
 
 
+def _title_style(direction: str) -> str:
+    """How the artist wants this collection's pieces titled, when the direction says so on a line beginning TITLES:"""
+    m = re.search(r"TITLES:\s*(.+)", direction or "", re.S)
+    return " ".join(m.group(1).split())[:600] if m else ""
+
+
 _PLAIN = set("a an the and of in on at to with that like as is it its by for from every each no one two all very bpm danceable".split())
 
 
@@ -442,6 +448,8 @@ def ideas(creatures: list[str], count: int, direction: str, rng, merges_only=())
                          'Leave the unused creature fields as "" (all three of them for a piece with a single creature).\n\n' if len(creatures) > 1 else 'Set creature2, creature3 and creature4 to "" for every piece.\n\n') +
                       "They are " + str(n) + " different FEELINGS and " + str(n) + " different ways of making a body move, not variations of one: vary the mechanism (see the list of essences), the tempo across the whole dance range, what rides on the beat (a voice, the low end, a noise, more drums), "
                       "how long it stays at the peak, in the depth and in the void, and how it gets from one to another (melting, or thrown). No two may share a tempo band, a carrier and a path.\n"
+                      "GLITCHES, AS A LOTTERY: the artist loves how these pieces morph and wants them spiced with glitches that never feel forced. In about a third of the pieces, where the idea invites it, write one or two moments where the piece trips over its own sound "
+                      "(the beat catching and skipping, a hit stuttering, the voice chopped into pieces, the sound freezing for an instant or running backwards, then snapping back onto the pulse), placed where the piece is changing state anyway, and say it in the caption and at that point in the lyrics plan. The other pieces get none. Never a glitch as decoration over a whole piece.\n"
                       "NO TWO PIECES MAY SHARE A DRUM PATTERN. The artist heard the same scratching, rolling drums in two pieces of an earlier collection and wants that never to happen again. Each piece gets a drum pattern of a different kind "
                       "(not a variation of another piece's), described in words no other caption uses; the same goes for its low end and its voice. Each creature word (like \"machine-girl-c\") may begin at most one caption in the collection "
                       "while the creature has unused words left, because the same word calls up the same patterns. Never reuse a phrase from one caption in another.\n"
@@ -449,7 +457,7 @@ def ideas(creatures: list[str], count: int, direction: str, rng, merges_only=())
                       + (f'The first of these must start in "{out[-1].get("ends", "depth")}", where the last one stopped.\n' if out else "The first may start anywhere.\n")
                       + ("Already planned, so do not repeat their feelings:\n" + "\n".join(f'- {x["title"]}: {x["idea"]} ({x["bpm"]} bpm, {x["creature"]}, {x.get("starts")} → {x.get("ends")})' for x in out) + "\n" if out else "")
                       + taste()
-                      + 'For each: a short title (titles of the rave music of the future: invented words at the core, and around them, freely, numbers, symbols, a kanji or a few Arabic letters whose meaning fits, a file name, a time of day, a rare English or Slovenian word; give every title a different shape and sound, never twenty two-word names with the same hard consonants), creature, creature2, creature3, creature4, "idea" (one plain sentence: the feeling, and what makes this one different), "starts" and "ends" (peak, depth or void), caption, lyrics, bpm, duration.')
+                      + 'For each: a short title (' + (("for this collection the artist asked for titles like this, and it overrides anything said about titles elsewhere: " + _title_style(direction)) if _title_style(direction) else "titles of the rave music of the future: invented words at the core, and around them, freely, numbers, symbols, a kanji or a few Arabic letters whose meaning fits, a file name, a time of day, a rare English or Slovenian word; give every title a different shape and sound, never twenty two-word names with the same hard consonants") + '), creature, creature2, creature3, creature4, "idea" (one plain sentence: the feeling, and what makes this one different), "starts" and "ends" (peak, depth or void), caption, lyrics, bpm, duration.')
             got = chat.think(HOUSE, prompt, IDEAS_SCHEMA, 420).get("songs") or []
             if not got:
                 break
@@ -1026,22 +1034,36 @@ def album(sid: str, files: dict | None = None, note: str = "") -> str:
         return ""
     root = ROOT / "albums"
     root.mkdir(exist_ok=True)
+    had = None                                             # one album per run: a run that is carved further updates its album, it does not leave another
+    for f in root.iterdir():
+        try:
+            if f.is_dir() and json.loads((f / "album.json").read_text()).get("collection") == sid:
+                had = f
+        except Exception:
+            pass
     num = 1 + max([int(m.group(1)) for f in root.iterdir() if f.is_dir() for m in [re.match(r"(\d+) ", f.name)] if m] or [0])
     safe = lambda t: "".join({"/": "∕", "\\": "⧵", ":": "꞉"}.get(ch, ch) for ch in " ".join(str(t).split()) if ch >= " ")[:80].strip(" .") or "untitled"
     name = lambda e: names.get(str(e.get("n"))) or e.get("title") or "untitled"
     rates, cuts = marks_of(sid), [c for e in songs for c in (e.get("carving") or [])]
-    title = ""
+    title, style = "", _title_style(sheet.get("direction") or "")
+    if had:
+        old = json.loads((had / "album.json").read_text())
+        num, title = int(old.get("n") or num), str(old.get("title") or "")
     try:
-        title = " ".join(str(chat.think(
+        title = title or " ".join(str(chat.think(
+            ("You name albums. For this one the artist asked for titles like this: " + style + " Give the album a title in that same spirit.") if style else
             "You name albums of rave music of the future. Titles are strange and exact: invented words, numbers, symbols, a kanji or a few Arabic letters, a file name, a time of day. Never a genre, never an existing artist or album, never a plain English phrase.",
             "Name this album in at most 40 characters. Its pieces:\n" + "\n".join(f'- "{name(e)}": {e.get("idea", "")}' for e in songs)
             + ("\n\nAlbums that already exist (be unlike them): " + "; ".join(f.name for f in sorted(root.iterdir()) if f.is_dir()) if any(root.iterdir()) else ""), ALBUM_SCHEMA, 120).get("title") or "").split())[:40]
     except Exception:
         pass
     title = title or (sheet.get("name") or "a night") + time.strftime(" · %H.%M")
-    out = root / f"{num:02d} {safe(title)}"
-    out.mkdir()
-    lines = [f"# {title}", "", f"Album {num}. Kept {time.strftime('%-d %B %Y, %H:%M')}.", "",
+    out = had or root / f"{num:02d} {safe(title)}"
+    out.mkdir(exist_ok=True)
+    for f in out.iterdir():                                # the pieces as they were at the last loop's end make way for how they are now; the pictures stay
+        if f.suffix.lower() in (".flac", ".wav"):
+            f.unlink()
+    lines = [f"# {title}", "", f"Album {num}. As the run stood on {time.strftime('%-d %B %Y, %H:%M')}.", "",
              f"The outcome of a loop on the collection “{sheet.get('name') or sid}” ({sid}), played by {', '.join(sheet.get('creatures') or [])}.",
              f"{sum(1 for c in cuts if c.get('kept'))} carvings kept of {len(cuts)} tried on these pieces so far." if cuts else "No carving yet.", *([note] if note else []), "", "## Pieces", ""]
     for e in songs:
@@ -1125,7 +1147,9 @@ CHISEL_SCHEMA = {"type": "object", "required": ["start", "end", "caption", "note
 LENSES = ("the records: the stretch that is furthest from the clarity of the records its creatures learned from (see the line about that below), to be remade so that what is wrong with it there is put right",
           "release: the stretch that sounds most choked (muffled, squeezed, boxed in, everything pressed into one lump), to be opened so that each sound is clear and rings out",
           "the beat: where it falls apart, where the kick goes missing, where a body would stop moving",
-          "the extremes: a peak that is not overwhelming enough, a depth that is not heavy enough")
+          "the extremes: a peak that is not overwhelming enough, a depth that is not heavy enough",
+          "the stumble: ONE stretch where the piece should trip over its own sound, as a glitch that belongs to it: the beat catching and skipping, a hit stuttering, the sound chopped, frozen for an instant or running backwards, then snapping back onto the pulse as if nothing had happened. "
+          "Pick a stretch where the piece is changing state anyway (the way into or out of a peak), never the middle of a held peak, keep it as short as allowed, and say the glitching in the caption in plain sound words while the kick stays readable under it. This one is a lottery: it is tried, and the artist's ears decide")
 # two more ways of looking were tried for a night and dropped: "the edges" (a blur with no countable events) and "the passage" (a change of state
 # too orderly or too abrupt). Of 271 carvings made under them, 17 were kept; the others kept about one in six.
 
@@ -1240,16 +1264,19 @@ def rebuild(d: Path, sheet: dict) -> list:
     return done
 
 
-def status() -> dict:
+def status(sid: str = "") -> dict:
     s = {k: v for k, v in _state.items() if k not in ("job", "stop")}
+    if sid and re.fullmatch(r"[a-z0-9]{6,16}", sid) and s.get("id") != sid:
+        return _last(sid) or {"running": False}
     return s or _last() or {"running": False}
 
 
-def _last() -> dict:
-    """After a restart nothing is running, but the last night is still there to look at, mark and talk about."""
+def _last(sid: str = "") -> dict:
+    """After a restart nothing is running, but the last night is still there to look at, mark and talk about. So is any
+    earlier run, by its id: every run can be opened again and carved further."""
     try:
         sheets = sorted(DIR.glob("*/collection.json"), key=lambda f: f.stat().st_mtime)
-        sheets = [f for f in sheets if not f.parent.name.startswith("_")]
+        sheets = [f for f in sheets if not f.parent.name.startswith("_") and (not sid or f.parent.name == sid)]
         if not sheets:
             return {}
         f = sheets[-1]
@@ -1463,6 +1490,13 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     try:
                         others_ = [c_ for c_ in creatures if c_ not in (s_["song"]["creature"], *(s_["song"].get("mix") or []), s_["song"].get("creature2"))]
                         guest = rng.choice(others_) if others_ and rng.random() < .4 else ""      # now and then another creature carves the stretch: the creatures meet inside a piece
+                        stumble = LENSES[cycle % len(LENSES)].startswith("the stumble")
+                        if stumble:                               # a glitch is best played by a creature that knows them
+                            knows = [c_ for c_ in others_ if c_ in ("machine-girl", "dds", "sophie")]
+                            guest = rng.choice(knows) if knows and rng.random() < .7 else guest
+                            if sum(1 for c_ in s_["entry"].get("carving", []) if c_.get("lens") == "the stumble" and c_.get("kept")) >= 2:
+                                s_["misses"] += 1                 # two stumbles in one piece are enough
+                                continue
                         seen = [(o["title"], c) for o in done if o is not s_ for c in o["entry"].get("carving", [])]
                         cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, LENSES[cycle % len(LENSES)], guest, s_["entry"].get("carving", []),
                                          [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:], rate(s_))
@@ -1486,6 +1520,8 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         m2 = None if why else measure(outs[0]["path"], _who(s_["entry"]))
                         sc2 = None if why else score(m2, [o for o in done if o is not s_])
                         better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .002 and m2["attack"] >= s_["m"]["attack"] - .015   # a carving that costs the piece its drums is never kept, whatever else it gains
+                        if stumble and sc2 and not better:        # a glitch cannot be measured: it is kept unless it broke something (the drums, or the piece as a whole), and the artist's rating sorts it out
+                            better = sc2["total"] >= s_["sc"]["total"] - .03 and m2["attack"] >= s_["m"]["attack"] - .03
                         s_["entry"]["carving"].append({"round": rnd, "lens": LENSES[cycle % len(LENSES)].split(":")[0], "from": cp["start"], "to": cp["end"], "why": cp["note"], "by": guest or "", "kept": better, "broken": why or None,
                                                        "before": s_["sc"]["total"], "after": sc2["total"] if sc2 else None, "definition": [s_["sc"]["definition"], sc2["definition"] if sc2 else None]})
                         if better:

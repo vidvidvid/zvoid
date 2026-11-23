@@ -66,7 +66,7 @@ function evoNightBox(trained, s) {
         if (!EVO.nightWho.size) return toast('tick at least one creature', true);
         try { EVO.night = await api('/api/night', { json: { creatures: [...EVO.nightWho], count: +cnt.value || 20, tries: +tr.value || 2, hours: +hrs.value || 0, direction: dir.value } }); evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'make the collection ▸')),
       N.msg && N.finished ? h('small', { title: N.msg }, N.msg) : '',
-      N.id ? h('div', { class: 'acts' }, h('button', { onclick: () => { EVO.showNight = true; EVO.album = null; evoDraw(); } }, 'show last night’s pieces')) : '',
+      N.id ? h('div', { class: 'acts' }, h('button', { onclick: async () => { EVO.viewId = null; EVO.showNight = true; EVO.album = null; EVO.sheet = null; await evoNightPoll(); evoDraw(); } }, N.running ? 'show the run that is going' : 'show the latest run')) : '',
       (EVO.albums || []).length ? h('h3', {}, 'albums') : '',
       (EVO.albums || []).length ? h('div', { class: 'alb-shelf', title: 'Every finished loop is kept as an album: its pieces as they sounded when the loop ended.' }, EVO.albums.map(a => h('button', { class: 'alb-item' + (EVO.album === a.folder ? ' on' : ''), onclick: () => { EVO.album = a.folder; evoDraw(); } },
         a.cover ? h('img', { src: albUrl(a.folder, 'cover.jpg'), alt: '' }) : h('span', { class: 'alb-blank' }), h('span', {}, h('b', {}, a.title), h('small', {}, `album ${a.n} · ${a.pieces.length} pieces`))))) : '');
@@ -75,7 +75,7 @@ function evoNightBox(trained, s) {
 }
 async function evoNightPoll() {
   clearTimeout(EVO.nightT);
-  try { const sig = n => JSON.stringify([n.running, n.made, n.thrown, n.phase, n.carves, (n.msg || '').split(' · now:')[0]]), was = sig(EVO.night || {}); EVO.night = await api('/api/night');
+  try { const sig = n => JSON.stringify([n.running, n.made, n.thrown, n.phase, n.carves, (n.msg || '').split(' · now:')[0]]), was = sig(EVO.night || {}); EVO.night = await api('/api/night' + (EVO.viewId ? '?id=' + EVO.viewId : '')); if (EVO.viewId && EVO.night.id !== EVO.viewId) EVO.viewId = null; EVO.live = EVO.viewId ? await api('/api/night').catch(() => null) : EVO.night;
     if (EVO.night.id && (EVO.open || !EVO.sheet)) await evoSheet();
     if (!EVO.coversAt || Date.now() - EVO.coversAt > 90000) { EVO.coversAt = Date.now(); evoCovers(); }
     const b = $('#btn-evo'); if (b) b.textContent = EVO.night.running ? (EVO.night.phase === 'chiselling' ? `⟲ evolve · chiselling` : `⟲ evolve · night ${EVO.night.made}/${EVO.night.count}`) : '⟲ evolve';
@@ -455,13 +455,23 @@ async function evoCovers() {
     if (EVO.open && EVO.stale && !(document.activeElement && document.activeElement.tagName === 'TEXTAREA')) evoDraw();
   } catch (e) { console.warn('covers: ' + e.message); } finally { EVO.coversBusy = false; }
 }
+/* Carve a run further. Any run can be taken up again, from its album or from its own page; its album follows it. */
+function evoCarveOn(id) {
+  const hrs = h('input', { type: 'number', min: .5, max: 12, step: .5, value: EVO.carveH || 3, title: 'Hours of carving', oninput: e => { EVO.carveH = +e.target.value || 3; } });
+  const busy = EVO.live && EVO.live.running;
+  return h('div', { class: 'acts carve-on' }, h('button', { class: 'hot', disabled: !!busy, title: busy ? 'Another run is going. Stop it first, or wait until it ends.' : 'Takes this run up again: its pieces are carved further, and its album is brought up to date when the carving ends.',
+    onclick: async () => { try { EVO.viewId = null; EVO.album = null; EVO.showNight = true; EVO.night = await api('/api/night/resume', { json: { id, hours: +hrs.value || 3 } }); EVO.sheet = null; evoDraw(); evoNightPoll(); toast('carving on: leave Zvoid open'); } catch (e) { toast(e.message, true); } } }, 'carve this run further'),
+    h('span', { class: 'gym-note' }, 'for'), hrs, h('span', { class: 'gym-note' }, busy ? 'hours · another run is going now' : 'hours'));
+}
 function evoAlbumView(a) {
   const v = Date.now() - Date.now() % 60000, pic = (name, cls) => h('img', { class: cls, src: albUrl(a.folder, name) + '&v=' + v, alt: '', loading: 'lazy' });
   return h('div', { id: 'evo-main' },
     h('div', { class: 'alb-head' }, a.cover ? pic('cover.jpg', 'alb-cover') : h('div', { class: 'alb-cover' }),
-      h('div', {}, h('small', {}, `album ${a.n} · kept ${a.kept || ''} · a frozen copy: these are the pieces as they sounded then, and they never change`), h('h2', {}, a.title), h('p', { class: 'gym-note' }, `${a.pieces.length} pieces · played by ${(a.creatures || []).join(', ').replace(/-/g, ' ')}`), a.note ? h('p', { class: 'gym-note' }, a.note) : '',
-        h('div', { class: 'acts' }, h('button', { onclick: () => api('/api/night/albums', { json: { album: a.folder } }).catch(e => toast(e.message, true)) }, 'show in Finder'),
-          h('button', { onclick: () => { EVO.album = null; evoDraw(); } }, '← back')))),
+      h('div', {}, h('small', {}, `album ${a.n} · as the run stood on ${a.kept || ''}`), h('h2', {}, a.title), h('p', { class: 'gym-note' }, `${a.pieces.length} pieces · played by ${(a.creatures || []).join(', ').replace(/-/g, ' ')}`), a.note ? h('p', { class: 'gym-note' }, a.note) : '',
+        h('p', { class: 'gym-note' }, 'An album is what its run had come to the last time its carving ended. The run itself lives on: open it to see every piece as it is now, rate it and answer questions about it, or carve it further, and the album follows.'),
+        h('div', { class: 'acts' }, a.collection ? h('button', { onclick: async () => { EVO.viewId = a.collection; EVO.album = null; EVO.showNight = true; EVO.sheet = null; await evoNightPoll(); evoDraw(); } }, 'open its run') : '',
+          h('button', { onclick: () => api('/api/night/albums', { json: { album: a.folder } }).catch(e => toast(e.message, true)) }, 'show in Finder')),
+        a.collection ? evoCarveOn(a.collection) : '')),
     h('div', { class: 'alb-list' }, a.pieces.map(p => { const path = 'album:' + a.folder + '/' + p.file;
       return h('div', { class: 'night-row alb-row' + (LIB.playing === path ? ' playing' : '') }, h('span', { class: 'night-n' }, String(p.n).padStart(2, '0')),
         h('button', { class: 'evo-pp', data: { path }, title: 'Play / stop', onclick: () => libPlay({ path, url: albUrl(a.folder, p.file), kind: 'audio', size: 5e7 }) }, LIB.playing === path ? '■' : '▶'),
@@ -477,7 +487,9 @@ function evoNightView() {                               // tonight, piece by pie
   return h('div', { id: 'evo-main' },
     h('div', { class: 'evo-head' }, h('h2', {}, N.tag || 'the night'), h('small', {}, N.running ? (N.phase === 'chiselling' ? `chiselling until ${until} · ${N.carved} carvings kept of ${N.carves} tried` : `making the pieces · ${N.made} of ${N.count} · then chiselling until ${until}`) : (N.msg || 'finished'))),
     N.running ? h('p', { class: 'gym-note', id: 'night-msg' }, N.msg || '') : null,
-    h('p', { class: 'gym-note' }, 'This is the living collection: the same pieces, as they sound right now. Carving and finishing keep changing them. The albums on the left are frozen copies of how they sounded when a loop ended.'),
+    (() => { const al = (EVO.albums || []).find(q => q.collection === N.id);
+      return h('p', { class: 'gym-note' }, 'This is the run itself: its pieces as they sound right now. ', al ? h('button', { class: 'talk-link', onclick: () => { EVO.album = al.folder; evoDraw(); } }, `Its album: ${al.title}`) : (N.running ? 'It becomes an album when its carving ends.' : '')); })(),
+    !N.running && N.id ? evoCarveOn(N.id) : null,
     ideas.length ? evoNightMap(N, sh) : null,
     ideas.length && EVO.taste ? evoTalk(sh) : null,
     !ideas.length ? h('div', { class: 'evo-empty' }, N.running ? 'Writing the ideas…' : 'No night has been run yet. Start one on the left.') :

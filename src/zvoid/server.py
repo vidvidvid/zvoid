@@ -270,8 +270,9 @@ def create_app():
 
     # ---- night shift: a set of songs made while you sleep
     @app.get("/api/night")
-    def night_status():
-        return night.status()
+    def night_status(id: str = ""):
+        """The run that is going (or the last one). With an id: that earlier run, to look at and carve further."""
+        return night.status(id)
 
     @app.post("/api/night")
     def night_start(body: dict):
@@ -334,7 +335,7 @@ def create_app():
                 name = audio.get(f"{int(x.get('n') or 0):02d}")
                 if name:
                     pieces.append({**x, "file": name, "cover": Path(name).stem in pics})
-            out.append({"folder": d.name, "n": a.get("n"), "title": a.get("title"), "kept": a.get("kept"), "note": a.get("note", ""), "creatures": a.get("creatures") or [], "cover": "cover" in pics, "pieces": pieces})
+            out.append({"folder": d.name, "n": a.get("n"), "title": a.get("title"), "kept": a.get("kept"), "collection": a.get("collection"), "note": a.get("note", ""), "creatures": a.get("creatures") or [], "cover": "cover" in pics, "pieces": pieces})
         return out
 
     @app.get("/api/night/albumfile")
