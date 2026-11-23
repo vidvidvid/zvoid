@@ -732,14 +732,15 @@ def release(path: str, air: float = 2.2, width: float = .42) -> dict:
     return {"changed": True, "lift_db": round(lift, 1), "widened": round(wide, 2), "air": [before["air"], after["air"]], "width": [before["width"], after["width"]]}
 
 
-def finish(raw: str, dst: str, bpm: float) -> dict:
+def finish(raw: str, dst: str, bpm: float, creatures=()) -> dict:
     """From a take as the model made it to the piece as it is heard: the machine's buzz out, and its own slow rise and fall
-    made a little deeper, so a low passage really is lower than a peak. Nothing is cut and no silence is added.
-    The raw take is not changed."""
+    made a little deeper, so a low passage really is lower than a peak; then it is opened, its drums are brought forward,
+    and it is given the clarity and loudness of the records its creatures learned from. Nothing is cut and no silence is
+    added. The raw take is not changed."""
     shutil.copy(raw, dst)
     info = {}
     for name, fn in (("buzz", lambda: polish(dst)), ("extremes", lambda: extremes(dst, 12.0, 1.4)), ("release", lambda: release(dst)),
-                     ("drums", lambda: drums_forward(dst, _measure(raw).get("attack", .2)))):   # no silences are cut in: the artist does not want them forced
+                     ("drums", lambda: drums_forward(dst, _measure(raw).get("attack", .2))), ("sources", lambda: like_sources(dst, creatures))):   # no silences are cut in: the artist does not want them forced
         try:
             info[name] = fn()
         except Exception as ex:
@@ -824,6 +825,70 @@ def drums_forward(path: str, attack: float, want: float = .26) -> dict:
     if r.returncode:
         raise RuntimeError((r.stderr or "could not process").strip()[-300:])
     return {"changed": True, "up_db": round(up, 1), "drums": attack}
+
+
+def like_sources(path: str, creatures) -> dict:
+    """Give a piece the clarity of the records its creatures were trained on, without copying a note of them. Those
+    records are the artist's own examples of a clear, pronounced sound; measured against them the model's pieces carry
+    more low-mid mud, less sub, and are far less dense. So the piece's long-term balance is moved toward the balance of
+    its creatures' source tracks (by 6 dB at most in any band), and it is brought up to their loudness with its peaks
+    rounded off, as on those records. What each creature's sources sound like is measured once and kept beside it.
+    Runs in the ACE-Step environment, which has the tools."""
+    from .paths import CREATURES_DIR, ENVS_DIR
+    dirs = [str(CREATURES_DIR / c) for c in dict.fromkeys(c for c in creatures if c) if (CREATURES_DIR / c / "food").is_dir()]
+    if not dirs:
+        return {"changed": False, "why": "no source tracks to learn from"}
+    code = (
+        "import sys, json, glob, os, numpy as np, soundfile as sf\n"
+        "from scipy.signal import resample_poly\n"
+        "EDGES = np.geomspace(25, 16000, 29)\n"
+        "def curve(p, secs=90):\n"
+        "    i = sf.info(p); sr = i.samplerate; a = max(0, int(i.frames / 2 - secs * sr / 2))\n"
+        "    x, sr = sf.read(p, start=a, frames=min(i.frames - a, secs * sr), always_2d=True, dtype='float32'); m = x.mean(1)\n"
+        "    if sr != 48000: m = resample_poly(m, 48000, sr)\n"
+        "    F = np.abs(np.fft.rfft(m * np.hanning(len(m)))) ** 2; f = np.fft.rfftfreq(len(m), 1 / 48000); tot = F[(f >= 25) & (f < 16000)].sum()\n"
+        "    return [float(10 * np.log10(F[(f >= a) & (f < b)].sum() / tot + 1e-12)) for a, b in zip(EDGES[:-1], EDGES[1:])], float(20 * np.log10(np.sqrt((m ** 2).mean()) + 1e-9))\n"
+        "def sound(d):\n"
+        "    keep = os.path.join(d, 'sound.json')\n"
+        "    if os.path.exists(keep):\n"
+        "        return json.load(open(keep))\n"
+        "    cs, ls = [], []\n"
+        "    for p in sorted(glob.glob(os.path.join(d, 'food', '*'))) + sorted(glob.glob(os.path.join(d, 'grains', '*.wav'))):\n"
+        "        if len(cs) >= 24: break\n"
+        "        try:\n"
+        "            c, l = curve(p); cs.append(c); ls.append(l)\n"
+        "        except Exception:\n"
+        "            pass\n"
+        "    if len(cs) < 3: return None\n"
+        "    r = {'bands': [float(v) for v in np.median(cs, 0)], 'level': float(np.median(ls)), 'tracks': len(cs)}\n"
+        "    json.dump(r, open(keep, 'w'))\n"
+        "    return r\n"
+        "p = sys.argv[1]; refs = [r for r in (sound(d) for d in sys.argv[2:]) if r]\n"
+        "if not refs: print(json.dumps({'changed': False, 'why': 'could not read the source tracks'})); sys.exit(0)\n"
+        "ref = np.mean([r['bands'] for r in refs], 0); loud = max(float(np.mean([r['level'] for r in refs])), -13.5)\n"
+        "x, sr = sf.read(p, always_2d=True, dtype='float64'); have, lvl = curve(p)\n"
+        "g = np.clip(ref - np.array(have), -6.0, 6.0); g = np.convolve(np.pad(g, 1, mode='edge'), [.25, .5, .25], 'valid')\n"
+        "f = np.fft.rfftfreq(len(x), 1 / sr); mid = np.sqrt(EDGES[:-1] * EDGES[1:])\n"
+        "gain = 10 ** (np.interp(np.log(np.maximum(f, 1)), np.log(mid), g) / 20)\n"
+        "y = np.stack([np.fft.irfft(np.fft.rfft(x[:, c]) * gain, len(x)) for c in range(x.shape[1])], 1)\n"
+        "rms = lambda z: float(np.sqrt((z.mean(1) ** 2).mean())) or 1e-9\n"
+        "want = 10 ** (loud / 20)\n"
+        "for _ in range(6):\n"
+        "    z = np.tanh(y * (want / rms(y)))\n"
+        "    if abs(20 * np.log10(rms(z) / want)) < .3: break\n"
+        "    y = y * (want / rms(z))\n"
+        "y = np.tanh(y * (want / rms(y))) * .97\n"
+        "sf.write(p, y.astype('float32'), sr, subtype=sf.info(p).subtype)\n"
+        "print(json.dumps({'changed': True, 'tracks': int(sum(r['tracks'] for r in refs)), 'low_mid_db': round(float(g[9:15].mean()), 1), 'sub_db': round(float(g[:4].mean()), 1),\n"
+        "                  'level_before': round(lvl, 1), 'level_after': round(20 * np.log10(rms(y)), 1)}))\n")
+    r = subprocess.run([str(ENVS_DIR / "ace_step" / "bin" / "python"), "-c", code, path, *dirs], capture_output=True, text=True, timeout=900)
+    if r.returncode:
+        raise RuntimeError((r.stderr or "could not process").strip()[-300:])
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+def _who(song: dict) -> list:
+    return [c for c in [song.get("creature"), song.get("creature2"), *(song.get("mix") or [])] if c]
 
 
 def score(m: dict, others: list[dict]) -> dict:
@@ -1164,7 +1229,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     raw = work / dst.name
                     shutil.move(str(src), str(raw))
                     shutil.rmtree(src.parent, ignore_errors=True)
-                    entry["finish"] = finish(str(raw), str(dst), best["m"].get("bpm") or best["song"]["bpm"])
+                    entry["finish"] = finish(str(raw), str(dst), best["m"].get("bpm") or best["song"]["bpm"], _who(best["song"]))
                     library.write_meta(run, {"engine": "ace_step", "engine_name": "night shift", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "label": label,
                                              "params": best["params"], "outputs": [{"path": str(dst), "kind": "audio", "label": best["song"]["title"]}],
                                              "info": {"idea": best["song"]["idea"], "score": best["sc"]}, "seconds": 0})
@@ -1239,7 +1304,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                                                        "before": s_["sc"]["total"], "after": sc2["total"] if sc2 else None, "definition": [s_["sc"]["definition"], sc2["definition"] if sc2 else None]})
                         if better:
                             shutil.copy(outs[0]["path"], s_["raw"])             # the working copy is now the carved one,
-                            s_["entry"]["finish"] = finish(s_["raw"], s_["path"], m2.get("bpm") or s_["song"]["bpm"])   # and the piece in the library is made from it again
+                            s_["entry"]["finish"] = finish(s_["raw"], s_["path"], m2.get("bpm") or s_["song"]["bpm"], _who(s_["entry"]))   # and the piece in the library is made from it again
                             s_.update(m=m2, sc=sc2, misses=0, carved=s_["carved"] + 1)
                             s_["entry"]["score"] = sc2
                             _state["carved"] += 1
