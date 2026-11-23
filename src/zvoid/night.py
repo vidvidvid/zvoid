@@ -22,7 +22,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import chat, gym, library
+from . import chat, gym, library, moves
 from .paths import ENGINES_DIR, ENVS_DIR, OUTPUTS_DIR
 
 _state: dict = {}      # the one night shift that can run at a time
@@ -1147,6 +1147,7 @@ CHISEL_SCHEMA = {"type": "object", "required": ["start", "end", "caption", "note
 LENSES = ("the old country: ONE stretch that takes in a sound from old Slovenian village music, as a texture and never as its dance: accordion bellows wheezing and stabbing, zither or hammered dulcimer plucks, a jaw harp twanging, tamburica strumming, "
           "village voices singing wordlessly in close parts. Choose one or two of these, cut short and chopped so they ride the piece's own drums as another strange sound, and name them plainly in the caption. If a guest creature is given for this stretch, it was raised on that music: let its instruments in, while the piece's own drums stay in charge. The piece's own pulse and drum pattern stay; "
           "no polka, no waltz, no oom-pah, nothing merry or folkloric. Pick a stretch where a new colour would lift the piece. This one is a lottery too",
+          "the parts: not a remaking at all. ONE part of the piece (its drums, its bass, its voice, or everything else) is pulled out for a moment or pushed forward, on whole bars, so that the piece itself makes a void or a surge",
           "the records: the stretch that is furthest from the clarity of the records its creatures learned from (see the line about that below), to be remade so that what is wrong with it there is put right",
           "release: the stretch that sounds most choked (muffled, squeezed, boxed in, everything pressed into one lump), to be opened so that each sound is clear and rings out",
           "the beat: where it falls apart, where the kick goes missing, where a body would stop moving",
@@ -1155,6 +1156,48 @@ LENSES = ("the old country: ONE stretch that takes in a sound from old Slovenian
           "Pick a stretch where the piece is changing state anyway (the way into or out of a peak), never the middle of a held peak, keep it as short as allowed, and say the glitching in the caption in plain sound words while the kick stays readable under it. This one is a lottery: it is tried, and the artist's ears decide")
 # two more ways of looking were tried for a night and dropped: "the edges" (a blur with no countable events) and "the passage" (a change of state
 # too orderly or too abrupt). Of 271 carvings made under them, 17 were kept; the others kept about one in six.
+
+
+PARTS_SCHEMA = {"type": "object", "required": ["part", "start_bar", "bars", "gain_db", "note"],
+                "properties": {"part": {"type": "string", "enum": ["drums", "bass", "vocals", "other"]}, "start_bar": {"type": "integer"}, "bars": {"type": "integer"}, "gain_db": {"type": "number"}, "note": {"type": "string"}}}
+
+
+def parts_plan(song: dict, m: dict, raw: str, history: list, rating: int = 0) -> dict:
+    """A move that remakes nothing: which part of the piece to pull out for a moment, or to push forward, and where.
+    Claude reads the piece as a timeline laid over its own bars; without it, the drums fall away for the two bars
+    before the piece's biggest surge."""
+    grid = moves.beat_grid(raw, float(song.get("bpm") or m.get("bpm") or 140))
+    lev, hits, n = m.get("sections") or [], m.get("hits") or [], int(grid["bars"])
+    bar_at = lambda sec: max(0, int(round((sec - grid["t0"]) / grid["bar"])))
+    pick = None
+    try:
+        line = lambda arr: " ".join(f"bar {bar_at(i * 5)}:{v}" for i, v in enumerate(arr))
+        done = [c for c in history if c.get("move")]
+        r = chat.think(HOUSE, (
+            f'Song: "{song["title"]}" for the creature {song["creature"]}. Its idea: {song["idea"]}\n\nCAPTION\n{song["caption"]}\n\n'
+            f'It exists as audio. It has {n} bars of {grid["bar"]:.2f} seconds ({grid["bpm"]:.0f} bpm). Measured, at the bars where each 5 seconds begins:\n'
+            f'- level (dB below its loudest): {line(lev)}\n- drum hits (0 none .. 1 hard): {line(hits)}\n'
+            + ("- moves of this kind already made on it: " + "; ".join(f"{c.get('part')} {'out' if (c.get('db') or 0) < 0 else 'forward'} at {c['from']:.0f}-{c['to']:.0f}s ({'kept' if c.get('kept') else 'thrown away'})" for c in done[-6:]) + "\n" if done else "")
+            + understood()
+            + (f"- The artist rated this piece {rating} of 5.\n" if rating else "")
+            + "\nThe piece can be split into four parts: drums, bass, vocals, and other (everything else). Choose ONE move that would make this piece hit harder or breathe, the way a DJ or a producer would with a mute button and a fader, and that fits its idea:\n"
+              "- pull a part OUT entirely (gain_db -60) for 1 to 4 bars: the drums falling away right before a surge so that the surge lands, the bass dropping out so its return is felt, the voice left alone or taken away. The part comes back on the bar line.\n"
+              "- push a part FORWARD (gain_db +3 to +6) for 4 to 16 bars: the drums in front through a peak, the bass carrying a stretch, a voice lifted out of the mix.\n"
+              "Place it where the level or the drums change in the timeline (the bar before the level jumps is the classic place for a drop-out), never in the first 4 or the last 4 bars, and not where a move of this kind was already made. "
+              "Give the part, the bar it starts on, how many bars, gain_db, and one sentence on what it does for the piece."), PARTS_SCHEMA, 180)
+        part, a, k, db = str(r.get("part")), int(r.get("start_bar")), int(r.get("bars")), float(r.get("gain_db"))
+        if part in moves.STEMS:
+            db = -60.0 if db < 0 else min(6.0, max(3.0, db))
+            k = max(1, min(4 if db < 0 else 16, k))
+            a = max(4, min(n - 4 - k, a))
+            pick = {"part": part, "bar": a, "bars": k, "db": db, "note": " ".join(str(r.get("note") or "").split())[:300]}
+    except Exception as ex:
+        print("[night] Claude could not choose a part to move, using the rule: " + str(ex)[:160], flush=True)
+    if not pick:
+        jumps = [(lev[i] - lev[i - 1], i) for i in range(2, max(2, len(lev) - 2))] or [(0, 2)]
+        a = max(4, min(n - 6, bar_at(max(jumps)[1] * 5) - 2))
+        pick = {"part": "drums", "bar": a, "bars": 2, "db": -60.0, "note": "the drums fall away for two bars before the biggest surge"}
+    return {**pick, "start": round(moves.bar_time(grid, pick["bar"]), 3), "end": round(moves.bar_time(grid, pick["bar"] + pick["bars"]), 3), "caption": ""}
 
 
 def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "", history=None, learned=None, rating: int = 0) -> dict:
@@ -1494,7 +1537,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         others_ = [c_ for c_ in creatures if c_ not in (s_["song"]["creature"], *(s_["song"].get("mix") or []), s_["song"].get("creature2"))]
                         guest = rng.choice(others_) if others_ and rng.random() < .4 else ""      # now and then another creature carves the stretch: the creatures meet inside a piece
                         lens_ = LENSES[cycle % len(LENSES)].split(":")[0]
-                        stumble = lens_ in ("the stumble", "the old country")     # the lotteries: what they add cannot be measured
+                        stumble = lens_ in ("the stumble", "the old country", "the parts")     # the lotteries: what they add cannot be measured
                         if stumble:
                             knows = [c_ for c_ in others_ if c_ in ("machine-girl", "dds", "sophie")]
                             if lens_ == "the stumble":            # a glitch is best played by a creature that knows them
@@ -1505,31 +1548,39 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                                 s_["misses"] += 1                 # two of a kind in one piece are enough
                                 continue
                         seen = [(o["title"], c) for o in done if o is not s_ for c in o["entry"].get("carving", [])]
-                        cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, LENSES[cycle % len(LENSES)], guest, s_["entry"].get("carving", []),
-                                         [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:], rate(s_))
-                        s_["tried"].append((cp["start"], cp["end"]))
-                        _state["msg"] = base + f" · remaking {cp['start']:.0f}–{cp['end']:.0f}s"
-                        where.mkdir()
-                        params = gym.bred_boost(coerce(e.spec, {"task": "repaint", "src_audio": s_["raw"], "repaint_start": cp["start"], "repaint_end": cp["end"], "caption": cp["caption"],
-                                                                "lyrics": s_["song"]["lyrics"], "duration": round(float(s_["m"].get("secs") or s_["song"]["duration"]), 1), "thinking": False, "batch": 1,
-                                                                "seed": rng.randint(1, 2 ** 31 - 1), "creature": guest or s_["song"]["creature"],
-                                                                "creature_strength": 1.6 if guest else s_["strength"]}))
-                        if s_.get("at") and not guest:
-                            params["creature_at"] = s_["at"]
-                        outs = []
-                        for ev in e.run(params, where):
-                            if ev[0] != "progress":
-                                outs = ev[1]
-                        if not outs:
-                            raise RuntimeError("nothing came back")
+                        if lens_ == "the parts":                    # nothing is remade: a part of the piece is pulled out or pushed forward, on its own bars
+                            guest = ""
+                            cp = parts_plan(s_["song"], s_["m"], s_["raw"], s_["entry"].get("carving", []), rate(s_))
+                            _state["msg"] = base + f" · {cp['part']} {'out' if cp['db'] < 0 else 'forward'} at {cp['start']:.0f}–{cp['end']:.0f}s"
+                            where.mkdir()
+                            moves.strip_lift(s_["raw"], str(where / "moved.wav"), cp["part"], cp["start"], cp["end"], cp["db"])
+                            outs = [{"path": str(where / "moved.wav")}]
+                        else:
+                            cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, LENSES[cycle % len(LENSES)], guest, s_["entry"].get("carving", []),
+                                             [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:], rate(s_))
+                            s_["tried"].append((cp["start"], cp["end"]))
+                            _state["msg"] = base + f" · remaking {cp['start']:.0f}–{cp['end']:.0f}s"
+                            where.mkdir()
+                            params = gym.bred_boost(coerce(e.spec, {"task": "repaint", "src_audio": s_["raw"], "repaint_start": cp["start"], "repaint_end": cp["end"], "caption": cp["caption"],
+                                                                    "lyrics": s_["song"]["lyrics"], "duration": round(float(s_["m"].get("secs") or s_["song"]["duration"]), 1), "thinking": False, "batch": 1,
+                                                                    "seed": rng.randint(1, 2 ** 31 - 1), "creature": guest or s_["song"]["creature"],
+                                                                    "creature_strength": 1.6 if guest else s_["strength"]}))
+                            if s_.get("at") and not guest:
+                                params["creature_at"] = s_["at"]
+                            outs = []
+                            for ev in e.run(params, where):
+                                if ev[0] != "progress":
+                                    outs = ev[1]
+                            if not outs:
+                                raise RuntimeError("nothing came back")
                         _state["carves"] += 1
                         why = broken(outs[0]["path"], float(s_["song"]["duration"]))
                         m2 = None if why else measure(outs[0]["path"], _who(s_["entry"]))
                         sc2 = None if why else score(m2, [o for o in done if o is not s_])
                         better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .002 and m2["attack"] >= s_["m"]["attack"] - .015   # a carving that costs the piece its drums is never kept, whatever else it gains
                         if stumble and sc2 and not better:        # a glitch cannot be measured: it is kept unless it broke something (the drums, or the piece as a whole), and the artist's rating sorts it out
-                            better = sc2["total"] >= s_["sc"]["total"] - .03 and m2["attack"] >= s_["m"]["attack"] - .03
-                        s_["entry"]["carving"].append({"round": rnd, "lens": LENSES[cycle % len(LENSES)].split(":")[0], "from": cp["start"], "to": cp["end"], "why": cp["note"], "by": guest or "", "kept": better, "broken": why or None,
+                            better = sc2["total"] >= s_["sc"]["total"] - .03 and (lens_ == "the parts" or m2["attack"] >= s_["m"]["attack"] - .03)   # pulling the drums out for two bars is meant to cost drums
+                        s_["entry"]["carving"].append({"round": rnd, "lens": LENSES[cycle % len(LENSES)].split(":")[0], "from": cp["start"], "to": cp["end"], "why": cp["note"], "by": guest or "", **({"move": "parts", "part": cp["part"], "db": cp["db"]} if lens_ == "the parts" else {}), "kept": better, "broken": why or None,
                                                        "before": s_["sc"]["total"], "after": sc2["total"] if sc2 else None, "definition": [s_["sc"]["definition"], sc2["definition"] if sc2 else None]})
                         if better:
                             shutil.copy(outs[0]["path"], s_["raw"])             # the working copy is now the carved one,

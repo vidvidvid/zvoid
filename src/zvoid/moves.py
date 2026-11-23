@@ -1,9 +1,9 @@
 """Moves: the things that can be done to a piece besides remaking a stretch of it.
 
-Carving was the only move the night shift had. A piece can also be rearranged (bars repeated, dropped, stuttered, turned
-round, brought to a halt) and have one of its parts (drums, bass, voice, the rest) pulled out for a moment or pushed
-forward. Every move works on whole bars of the piece's own beat, so nothing lands off the pulse, and every move is made
-from the piece's own sound.
+Carving was the only move the night shift had. A piece can also have one of its parts (drums, bass, voice, the rest)
+pulled out for a moment or pushed forward, on whole bars of its own beat, so the part leaves and returns on the pulse.
+(Cutting the audio itself about, with stutters, reversed beats, tape halts and repeated bars, was tried and the artist
+did not want it: glitches are left to the model.)
 """
 
 from __future__ import annotations
@@ -129,56 +129,6 @@ def strip_lift(path: str, out: str, part: str, start: float, end: float, gain_db
         y /= pk
     sf.write(out, y, sr, subtype=sf.info(path).subtype)
     return {"move": "lift" if gain_db > 0 else "strip", "part": part, "from": round(start, 2), "to": round(end, 2), "db": gain_db}
-
-
-def rearrange(path: str, out: str, ops: list, grid: dict) -> dict:
-    """Edit the piece in whole bars and beats of its own grid. Each op names a bar (counted from 0):
-      {"op": "repeat", "bar": 32, "bars": 2}    those bars play twice (the piece grows)
-      {"op": "drop", "bar": 40, "bars": 1}      those bars are taken out (the piece shrinks)
-      {"op": "stutter", "bar": 47, "slice": 16} the last beat of the bar becomes its first sixteenth, repeated (8 or 32 too)
-      {"op": "reverse", "bar": 47, "beats": 2}  the last beats of the bar play backwards
-      {"op": "halt", "bar": 47}                 the last beat of the bar slows to a stop like a tape, then the next bar hits
-      {"op": "void", "bar": 47, "beats": 1}     the last beats of the bar are silence
-    Ops are applied from the end of the piece backwards, so one does not move the bars another names."""
-    x, sr = sf.read(path, always_2d=True, dtype="float32")
-    at = lambda bar: int(round(bar_time(grid, bar) * sr))
-    beat, xf, done = int(round(grid["beat"] * sr)), int(.003 * sr), []
-    for o in sorted(ops, key=lambda q: -float(q.get("bar", 0))):
-        kind, bar = o.get("op"), int(o.get("bar", 0))
-        a, b = at(bar), at(bar + int(o.get("bars", 1)))
-        if a < 0 or b > len(x) or kind not in ("repeat", "drop", "stutter", "reverse", "halt", "void"):
-            continue
-        if kind == "repeat":
-            seg = x[a:b].copy()
-            seg[:xf] *= np.linspace(0, 1, xf, dtype="float32")[:, None]
-            x = np.concatenate([x[:b], seg, x[b:]])
-        elif kind == "drop":
-            x = np.concatenate([x[:a], x[b:]])
-        else:
-            end = at(bar + 1)
-            n = beat * int(max(1, min(4, o.get("beats", 1)))) if kind in ("reverse", "void") else beat
-            s0 = end - n
-            if s0 < 0:
-                continue
-            seg = x[s0:end].copy()
-            if kind == "stutter":
-                sl = max(64, int(round(grid["bar"] * sr / int(o.get("slice", 16)))))
-                piece = seg[:sl] * _fade(sl, xf)[:, None]
-                seg = np.tile(piece, (int(np.ceil(n / sl)), 1))[:n]
-            elif kind == "reverse":
-                seg = seg[::-1] * _fade(n, xf)[:, None]
-            elif kind == "halt":
-                t = np.linspace(0, 1, n)
-                pos = np.clip((t - t * t / 2) * 2 * (n - 1) * .62, 0, n - 1)        # the read head slows to nothing
-                i0 = pos.astype(int)
-                fr = (pos - i0)[:, None].astype("float32")
-                seg = (seg[i0] * (1 - fr) + seg[np.minimum(i0 + 1, n - 1)] * fr) * np.linspace(1, 0, n, dtype="float32")[:, None] ** .6
-            elif kind == "void":
-                seg = seg * np.concatenate([np.linspace(1, 0, xf * 4, dtype="float32"), np.zeros(n - xf * 4, dtype="float32")])[:, None]
-            x[s0:end] = seg
-        done.append({k: o[k] for k in o})
-    sf.write(out, x, sr, subtype=sf.info(path).subtype)
-    return {"move": "rearrange", "ops": done[::-1]}
 
 
 def describe(grid: dict) -> str:
