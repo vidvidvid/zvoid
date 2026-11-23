@@ -865,7 +865,7 @@ def finish(raw: str, dst: str, bpm: float, creatures=()) -> dict:
     shutil.copy(raw, dst)
     info = {}
     for name, fn in (("buzz", lambda: polish(dst)), ("extremes", lambda: extremes(dst, 12.0, 1.4)), ("release", lambda: release(dst)),
-                     ("drums", lambda: drums_forward(dst, _measure(raw).get("attack", .2))), ("sources", lambda: like_sources(dst, creatures))):   # no silences are cut in: the artist does not want them forced
+                     ("drums", lambda: drums_forward(dst, _measure(raw).get("attack", .2))), ("space", lambda: moves.place(dst)), ("sources", lambda: like_sources(dst, creatures))):   # no silences are cut in: the artist does not want them forced
         try:
             info[name] = fn()
         except Exception as ex:
@@ -1510,7 +1510,11 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                 rates = marks_of(sid)                              # read again every round: the artist may be rating while it works
                 rate = lambda q: int(rates.get(str(q["n"]), 0))
                 room = {2: (5, 9), 1: (5, 9)}     # how many misses and how many kept cuts a piece gets per turn: the unloved get more of the work. A 5 is a direction, not a finished piece, so it is carved like any other
-                live = [s_ for s_ in done if s_["misses"] < room.get(rate(s_), (3, 6))[0] and s_["carved"] < room.get(rate(s_), (3, 6))[1]]
+                parts_turn = LENSES[cycle % len(LENSES)].startswith("the parts")
+                # a piece that has been remade end to end stops being one piece (the artist called one such "a blob of mess"): once half its length has been
+                # remade it is left alone, unless the artist rated it 3 or lower. Moving its parts remakes nothing, so that stays open to every piece
+                worn = lambda q: sum(c["to"] - c["from"] for c in q["entry"].get("carving", []) if c.get("kept") and not c.get("move")) >= .5 * float(q["m"].get("secs") or q["song"]["duration"])
+                live = [s_ for s_ in done if s_["misses"] < room.get(rate(s_), (3, 6))[0] and s_["carved"] < room.get(rate(s_), (3, 6))[1] and (parts_turn or rate(s_) in (1, 2, 3) or not worn(s_))]
                 if not live:                                       # every piece has settled under this way of looking: look again another way, for as long as the night lasts
                     if _state["carved"] == _state.get("carved_at_cycle", -1):
                         idle_cycles += 1
@@ -1534,7 +1538,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     job.update(msg=base, frac=min(.99, (time.time() - _state["started"]) / max(1, _state["until"] - _state["started"])))
                     where = d / f"s{s_['n']:02d}_t{uuid.uuid4().hex[:6]}"
                     try:
-                        others_ = [c_ for c_ in creatures if c_ not in (s_["song"]["creature"], *(s_["song"].get("mix") or []), s_["song"].get("creature2"))]
+                        others_ = [c_ for c_ in creatures if c_ not in (s_["song"]["creature"], *(s_["song"].get("mix") or []), s_["song"].get("creature2")) and c_ not in merges_only and c_ not in ("avsenik", "folk")]   # a seasoning comes in through its own lottery only
                         guest = rng.choice(others_) if others_ and rng.random() < .4 else ""      # now and then another creature carves the stretch: the creatures meet inside a piece
                         lens_ = LENSES[cycle % len(LENSES)].split(":")[0]
                         stumble = lens_ in ("the stumble", "the old country", "the parts")     # the lotteries: what they add cannot be measured
@@ -1558,6 +1562,13 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         else:
                             cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, LENSES[cycle % len(LENSES)], guest, s_["entry"].get("carving", []),
                                              [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:], rate(s_))
+                            try:                                  # the cut begins on a downbeat and lasts whole bars, so the new sound comes in on the pulse
+                                grid = moves.beat_grid(s_["raw"], float(s_["song"].get("bpm") or s_["m"].get("bpm") or 140))
+                                a_, b_ = moves.snap(grid, cp["start"], cp["end"], least=max(2, int(round(12 / grid["bar"]))))
+                                if grid["sure"] >= .3 and a_ >= 0 and b_ <= float(s_["m"].get("secs") or s_["song"]["duration"]) and b_ - a_ <= 32:
+                                    cp["start"], cp["end"] = round(a_, 3), round(b_, 3)
+                            except Exception:
+                                pass
                             s_["tried"].append((cp["start"], cp["end"]))
                             _state["msg"] = base + f" · remaking {cp['start']:.0f}–{cp['end']:.0f}s"
                             where.mkdir()
@@ -1567,16 +1578,32 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                                                                     "creature_strength": 1.6 if guest else s_["strength"]}))
                             if s_.get("at") and not guest:
                                 params["creature_at"] = s_["at"]
-                            outs = []
-                            for ev in e.run(params, where):
-                                if ev[0] != "progress":
-                                    outs = ev[1]
-                            if not outs:
+                            took = []                             # three takes of the same cut: the model plays it differently every time, and only the best is weighed against the piece
+                            for k_ in range(3):
+                                if took and (_state["stop"] or time.time() >= _state["until"]):
+                                    break
+                                params["seed"] = rng.randint(1, 2 ** 31 - 1)
+                                sub = where / f"take{k_}"
+                                sub.mkdir()
+                                got = []
+                                for ev in e.run(params, sub):
+                                    if ev[0] != "progress":
+                                        got = ev[1]
+                                if not got:
+                                    continue
+                                w_ = broken(got[0]["path"], float(s_["song"]["duration"]))
+                                mm = None if w_ else measure(got[0]["path"], _who(s_["entry"]))
+                                ss = None if w_ else score(mm, [o for o in done if o is not s_])
+                                took.append((ss["total"] if ss else -1.0, got, w_, mm, ss))
+                                _state["msg"] = base + f" · remaking {cp['start']:.0f}–{cp['end']:.0f}s · take {min(3, k_ + 2)} of 3"
+                            if not took:
                                 raise RuntimeError("nothing came back")
+                            _, outs, why, m2, sc2 = max(took, key=lambda q: q[0])
                         _state["carves"] += 1
-                        why = broken(outs[0]["path"], float(s_["song"]["duration"]))
-                        m2 = None if why else measure(outs[0]["path"], _who(s_["entry"]))
-                        sc2 = None if why else score(m2, [o for o in done if o is not s_])
+                        if lens_ == "the parts":
+                            why = broken(outs[0]["path"], float(s_["song"]["duration"]))
+                            m2 = None if why else measure(outs[0]["path"], _who(s_["entry"]))
+                            sc2 = None if why else score(m2, [o for o in done if o is not s_])
                         better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .002 and m2["attack"] >= s_["m"]["attack"] - .015   # a carving that costs the piece its drums is never kept, whatever else it gains
                         if stumble and sc2 and not better:        # a glitch cannot be measured: it is kept unless it broke something (the drums, or the piece as a whole), and the artist's rating sorts it out
                             better = sc2["total"] >= s_["sc"]["total"] - .03 and (lens_ == "the parts" or m2["attack"] >= s_["m"]["attack"] - .03)   # pulling the drums out for two bars is meant to cost drums

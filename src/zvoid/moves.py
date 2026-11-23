@@ -64,11 +64,11 @@ def snap(grid: dict, start: float, end: float, least: int = 4) -> tuple[float, f
     return bar_time(grid, a), bar_time(grid, b)
 
 
-def stems(path: str) -> dict:
+def stems(path: str, keep_dir: str = "") -> dict:
     """The piece split into its parts (drums, bass, voice, the rest), kept beside it so it is split only once. Runs in the
     Demucs environment. Returns the path of each part; each is as long as the piece and at its sample rate."""
     src = Path(path)
-    keep = src.parent / (".parts_" + src.stem)
+    keep = Path(keep_dir) if keep_dir else src.parent / (".parts_" + src.stem)
     stamp = f"{src.stat().st_size}:{int(src.stat().st_mtime)}"
     if (keep / "stamp").exists() and (keep / "stamp").read_text() == stamp and all((keep / f"{s}.wav").exists() for s in STEMS):
         return {s: str(keep / f"{s}.wav") for s in STEMS}
@@ -129,6 +129,72 @@ def strip_lift(path: str, out: str, part: str, start: float, end: float, gain_db
         y /= pk
     sf.write(out, y, sr, subtype=sf.info(path).subtype)
     return {"move": "lift" if gain_db > 0 else "strip", "part": part, "from": round(start, 2), "to": round(end, 2), "db": gain_db}
+
+
+def place(path: str) -> dict:
+    """Give every part of the piece its own place, so the sounds can be told apart and almost seen. The piece is split
+    into drums, bass, voice and the rest, and each is set where it stays: kick and bass dead centre, the upper drums
+    close and narrow, everything else spread wide and a little further back in a short room, the voices wide at the
+    ear. Where the drums hit, the rest steps back a touch, so a hit is never buried. The artist's own example of a good
+    sound image measured exactly this way: a centred low end, a wide top, and sounds that keep their place. The music
+    is not changed, and the loudness is left as it was."""
+    import shutil
+    import tempfile
+    x, sr = sf.read(path, always_2d=True, dtype="float64")
+    if x.shape[1] < 2 or len(x) < sr * 10:
+        return {"changed": False}
+    tmp = tempfile.mkdtemp(prefix="zvoid_parts_")
+    try:
+        st = {k: sf.read(v, always_2d=True, dtype="float64")[0] for k, v in stems(path, tmp).items()}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    n = len(x)
+    f = np.fft.rfftfreq(n, 1 / sr)
+
+    def split(sig, hz):
+        F = np.fft.rfft(sig, axis=0)
+        lo = np.fft.irfft(F * (1 / (1 + (f / hz) ** 8))[:, None], n, axis=0)
+        return lo, sig - lo
+
+    def sides(sig, k):
+        m, s = sig.mean(1), (sig[:, 0] - sig[:, 1]) / 2 * k
+        return np.stack([m + s, m - s], 1)
+
+    def centre(sig):
+        m = sig.mean(1)
+        return np.stack([m, m], 1)
+
+    def room(sig, secs, wet, pre, cut, seed):
+        rng = np.random.default_rng(seed)
+        k = int(secs * sr)
+        ir = np.concatenate([np.zeros((int(pre * sr), 2)), rng.standard_normal((k, 2)) * np.exp(-np.arange(k) / (secs * sr / 6.9))[:, None]])
+        size = n + len(ir)
+        Fi = np.fft.rfft(ir, size, axis=0) * (1 / (1 + (np.fft.rfftfreq(size, 1 / sr) / cut) ** 4))[:, None]
+        y = np.fft.irfft(np.fft.rfft(sig, size, axis=0) * Fi, size, axis=0)[:n]
+        y *= np.sqrt((sig ** 2).mean()) / (np.sqrt((y ** 2).mean()) + 1e-12)
+        return sig * (1 - wet * .4) + y * wet
+
+    rms = lambda z: float(np.sqrt((z.mean(1) ** 2).mean())) + 1e-12
+    dl, dh = split(st["drums"], 200)
+    ol, oh = split(st["other"], 300)
+    drums = centre(dl) + sides(dh, .85)
+    rest = room(centre(ol) + sides(oh, 1.45), .6, .18, .015, 7000, 2)
+    voice = room(sides(st["vocals"], 1.5), .35, .10, .008, 9000, 3)
+    w = int(.01 * sr)                                          # where the drums hit, everything else steps back by up to 2.5 dB and returns within a tenth of a second
+    env = np.sqrt((st["drums"].mean(1)[:n // w * w].reshape(-1, w) ** 2).mean(1))
+    env = env / (np.percentile(env, 99) + 1e-12)
+    duck = 1 - np.clip(env, 0, 1) ** 1.5 * (1 - 10 ** (-2.5 / 20))
+    for i in range(1, len(duck)):
+        duck[i] = min(duck[i], duck[i - 1] + .03)              # it lets go slowly
+    duck = np.interp(np.arange(n), np.arange(len(duck)) * w + w / 2, duck)[:, None]
+    y = drums + centre(st["bass"]) + (rest + voice) * duck
+    y *= rms(x) / rms(y)
+    pk = float(np.abs(y).max())
+    if pk > .99:
+        y *= .99 / pk
+    sf.write(path, y.astype("float32"), sr, subtype=sf.info(path).subtype)
+    side = lambda z: float(np.sqrt((((z[:, 0] - z[:, 1]) / 2) ** 2).mean()) / rms(z))
+    return {"changed": True, "width_before": round(side(x), 2), "width_after": round(side(y), 2)}
 
 
 def describe(grid: dict) -> str:
