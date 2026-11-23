@@ -1135,7 +1135,7 @@ addEventListener('resize', drawCables);
 (() => {
   const mine = [...document.scripts].map(x => x.src).filter(u => u && u.startsWith(location.origin)).concat([...document.querySelectorAll('link[rel=stylesheet]')].map(x => x.href).filter(u => u && u.startsWith(location.origin)));
   let first = null, due = false;
-  const stamp = async () => (await Promise.all(mine.map(u => fetch(u, { cache: 'no-store' }).then(r => r.ok ? r.text() : '?').then(t => t === '?' ? t : t.length + ':' + t.slice(-400)).catch(() => '?')))).join('|');
+  const stamp = async () => (await Promise.all(mine.map(u => fetch(u, { cache: 'no-store' }).then(r => r.ok ? r.text() : '?').then(t => t === '?' ? t : t.length + ':' + hash(t)).catch(() => '?')))).join('|');
   setInterval(async () => {
     try { const now = await stamp(); if (now.includes('?')) return; if (first == null) { first = now; return; } if (now !== first) due = true;
       const typing = document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName);
