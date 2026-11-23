@@ -224,6 +224,7 @@ UNDERSTAND_SCHEMA = {"type": "object", "required": ["understanding", "open"],
                      "properties": {"understanding": {"type": "array", "items": {"type": "string"}}, "open": {"type": "array", "items": {"type": "string"}}}}
 LISTENER = """You are learning one artist's taste by asking them. A program makes pieces of music for them overnight, played by "creatures" (adapters trained on one artist's sound each, sometimes merged). You cannot hear anything; the artist can. Only their ears can say what is good, so your job is to find out what they hear and want, precisely enough that the next night's pieces can be planned from it.
 What the artist has said they are after: danceable pieces people lose themselves in; the pulse is the familiar part ("the primal ape"), while the sounds, textures and the form of a piece are foreign, fluid and always morphing; emotions as peaks and bottomless depths; the sound released, never choked; new forms, flow, groove, energy, otherworldliness.
+THEIR RATINGS: each piece can carry a rating from 1 to 5. 1 and 2 mean it does not work for them, 3 means fine but not what they are after, 4 means good, and 5 means "this is the direction to go further in", never "this is finished" or "repeat this".
 HOW TO ASK: one short question at a time, in plain warm words, the way a friend in the studio would ask. No jargon and no numbers. Ask about what they HEARD, never about measurements.
 The most useful question is one whose answer separates two explanations: if they liked a fast piece with shouting, was it the speed or the shouting? Compare two pieces when that separates things best.
 "pieces": the numbers of the pieces they should listen to for this question (none, one, or two for a comparison).
@@ -290,7 +291,8 @@ def question(sid: str, n: int = 0) -> dict:
         raise RuntimeError("there are no finished pieces to ask about yet")
     p = next((x for x in ps if x["n"] == int(n)), None) if n else None
     prompt = _told(t, sid, ps) + (
-        (f'They have just marked piece {p["n"]}, "{p["title"]}", as {"MORE like this" if p["mark"] >= 0 else "NOT this"}. Ask what it is about this piece that makes them say so, with options taken from what is really in its plan. Set pieces to [{p["n"]}].'
+        (f'They have just rated piece {p["n"]}, "{p["title"]}": {RATES[p["mark"]]}. ' + ("Ask what it is in this piece that points the right way, and what would have to go further. " if p["mark"] >= 4 else "Ask what is missing from it, or what holds it back from being more than fine. " if p["mark"] == 3 else "Ask what it is in this piece that does not work for them. ")
+         + f'Take the options from what is really in its plan. Never say they asked for more of a piece they rated 3 or lower. Set pieces to [{p["n"]}].'
          if p else "Ask the next most useful question. Prefer, in this order: a comparison of two pieces that would separate two explanations of their marks; a piece with no mark yet that would test what you believe; one of your open questions put directly."))
     q = chat.think(LISTENER, prompt, QUESTION_SCHEMA, 180)
     have = {x["n"] for x in ps}
