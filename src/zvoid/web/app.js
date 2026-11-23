@@ -730,6 +730,11 @@ function openDrawer(kind, arg) {
 }
 /* ---------- library: everything that was made, in one place ---------- */
 const LIB = { tab: 'all', q: '', source: '', creature: '', stars: false, items: [], audio: null, playing: null, peaks: new Map(), hover: null };
+/* In the Zvoid window (Apple's web engine) long pieces play straight to the output, not through the app's sound graph. Through the
+   graph, that engine went silent after some minutes, three times in one day, while reporting a running output with a live signal;
+   other sounds on the Mac kept playing. Played straight, a piece is not heard by the pictures (the ring on the night map), but it is heard by you.
+   In a browser tab (Chromium) the graph is kept. */
+LIB.direct = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg\//.test(navigator.userAgent);
 const libDay = w => { const d = new Date((w || '').replace(' ', 'T')), t = new Date(), y = new Date(Date.now() - 864e5), same = (a, b) => a.toDateString() === b.toDateString();
   return isNaN(d) ? 'earlier' : same(d, t) ? 'today' : same(d, y) ? 'yesterday' : d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }); };
 const libSize = n => n > 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n > 1e6 ? (n / 1e6).toFixed(n > 1e7 ? 0 : 1) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
@@ -1123,4 +1128,17 @@ addEventListener('resize', drawCables);
     for (const x of PATCH.list) { try { const p = await api('/api/patches/' + encodeURIComponent(x.name)); if (p && JSON.stringify([p.nodes || {}, p.cables || []]) === sig) { PATCH.name = x.name; PATCH.sig = sig; save(); break; } } catch (e) {} }
     patchMark(); })();
   status('ready_');
+})();
+
+/* The window keeps itself up to date: when the app's own files change on disk, it loads them again by itself, as soon as nothing
+   is playing and nobody is typing. A fix to the screen no longer needs the app restarted, which would end a run that is going. */
+(() => {
+  const mine = [...document.scripts].map(x => x.src).filter(u => u && u.startsWith(location.origin)).concat([...document.querySelectorAll('link[rel=stylesheet]')].map(x => x.href).filter(u => u && u.startsWith(location.origin)));
+  let first = null, due = false;
+  const stamp = async () => (await Promise.all(mine.map(u => fetch(u, { method: 'HEAD', cache: 'no-store' }).then(r => (r.headers.get('etag') || '') + (r.headers.get('last-modified') || '') + (r.headers.get('content-length') || '')).catch(() => '?')))).join('|');
+  setInterval(async () => {
+    try { const now = await stamp(); if (now.includes('?')) return; if (first == null) { first = now; return; } if (now !== first) due = true;
+      const typing = document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName);
+      if (due && !LIB.playing && !typing) location.reload(); } catch (e) {}
+  }, 20000);
 })();
