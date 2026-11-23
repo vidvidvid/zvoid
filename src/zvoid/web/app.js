@@ -790,7 +790,7 @@ async function libPlay(it, at) {                     // at: where to start, 0..1
   if (LIB.playing === it.path && LIB.p && (LIB.p.buf || LIB.p.el)) { const d = libPos()[1]; if (d) libStart(clamp(at, 0, .999) * d); else LIB.p.want = at; return libMark(); }
   libStop(); LIB.playing = it.path; const p = LIB.p = { path: it.path, buf: null, src: null, el: null, t0: 0, off: 0, paused: false, want: at }; libMark();
   if (!libShort(it)) {
-    const el = libStream(); p.el = el; el.src = fileUrl(it.path);
+    const el = libStream(); p.el = el; el.src = it.url || fileUrl(it.path);
     const go = () => { if (LIB.p !== p) return; if (p.want != null && isFinite(el.duration)) { try { el.currentTime = clamp(p.want, 0, .999) * el.duration; } catch (e) {} p.want = null; } };
     el.addEventListener('loadedmetadata', go, { once: true });
     el.play().catch(e => { if (LIB.p === p) { libStop(); libMark(); toast('could not play that: ' + (e.message || e), true); } });

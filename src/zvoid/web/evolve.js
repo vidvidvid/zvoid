@@ -66,8 +66,10 @@ function evoNightBox(trained, s) {
         if (!EVO.nightWho.size) return toast('tick at least one creature', true);
         try { EVO.night = await api('/api/night', { json: { creatures: [...EVO.nightWho], count: +cnt.value || 20, tries: +tr.value || 2, hours: +hrs.value || 0, direction: dir.value } }); evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'make the collection ▸')),
       N.msg && N.finished ? h('small', { title: N.msg }, N.msg) : '',
-      N.id ? h('div', { class: 'acts' }, h('button', { onclick: () => { EVO.showNight = true; evoDraw(); } }, 'show last night’s pieces'),
-        h('button', { title: 'Every finished loop is kept as an album: a folder with its pieces as they sounded then. This shows them in Finder.', onclick: () => api('/api/night/albums', { json: {} }).catch(e => toast(e.message, true)) }, 'albums')) : '');
+      N.id ? h('div', { class: 'acts' }, h('button', { onclick: () => { EVO.showNight = true; EVO.album = null; evoDraw(); } }, 'show last night’s pieces')) : '',
+      (EVO.albums || []).length ? h('h3', {}, 'albums') : '',
+      (EVO.albums || []).length ? h('div', { class: 'alb-shelf', title: 'Every finished loop is kept as an album: its pieces as they sounded when the loop ended.' }, EVO.albums.map(a => h('button', { class: 'alb-item' + (EVO.album === a.folder ? ' on' : ''), onclick: () => { EVO.album = a.folder; evoDraw(); } },
+        a.cover ? h('img', { src: albUrl(a.folder, 'cover.jpg'), alt: '' }) : h('span', { class: 'alb-blank' }), h('span', {}, h('b', {}, a.title), h('small', {}, `album ${a.n} · ${a.pieces.length} pieces`))))) : '');
   }
   return box;
 }
@@ -75,6 +77,7 @@ async function evoNightPoll() {
   clearTimeout(EVO.nightT);
   try { const sig = n => JSON.stringify([n.running, n.made, n.thrown, n.phase, n.carves, (n.msg || '').split(' · now:')[0]]), was = sig(EVO.night || {}); EVO.night = await api('/api/night');
     if (EVO.night.id && (EVO.open || !EVO.sheet)) await evoSheet();
+    if (!EVO.coversAt || Date.now() - EVO.coversAt > 90000) { EVO.coversAt = Date.now(); evoCovers(); }
     const b = $('#btn-evo'); if (b) b.textContent = EVO.night.running ? (EVO.night.phase === 'chiselling' ? `⟲ evolve · chiselling` : `⟲ evolve · night ${EVO.night.made}/${EVO.night.count}`) : '⟲ evolve';
     const typing = !!(document.activeElement && document.activeElement.tagName === 'TEXTAREA' && document.activeElement.closest('.night-talk'));   // while you are writing an answer the screen is not rebuilt under you
     if (EVO.open) { if ((sig(EVO.night) !== was || EVO.stale) && !typing) evoDraw(); else { if (sig(EVO.night) !== was) EVO.stale = true; const m = document.querySelector('#evo-night small'); if (m && EVO.night.running) m.textContent = EVO.night.msg || ''; const m2 = $('#night-msg'); if (m2) m2.textContent = EVO.night.msg || ''; } } } catch (e) {}
@@ -411,6 +414,61 @@ async function evoMarkPiece(n, v) {
     if (cur !== v && EVO.taste) EVO.askT = setTimeout(() => { if (EVO.talkBusy || (document.activeElement && document.activeElement.closest && document.activeElement.closest('.night-talk'))) return; EVO.fixing = false; evoAsk(n); }, 6000);
   } catch (e) { toast(e.message, true); }
 }
+/* ---------- albums: what each finished loop came to, kept as it sounded then ---------- */
+const albUrl = (a, name) => `/api/night/albumfile?album=${encodeURIComponent(a)}&name=${encodeURIComponent(name)}`;
+/* A picture grown from the pieces themselves: every piece is the merged body of the creatures that play it, in their own
+   colours and forms, drawn by the same shader as the night. One piece fills its cover; an album shows all of its pieces. */
+function evoCoverBlob(pieces, title, sub) {
+  const G = nightGL(); if (!G || !pieces.length) return Promise.resolve(null);
+  const S = 1200, one = pieces.length === 1, B = [], F = [], at = [], rgb = (hu, l = .6) => hsl2rgb(hu, .95, l);
+  const look = c => { const x = (EVO.creatures || []).find(q => q.slug === c); return (x && x.look) || { plan: Math.floor(hash(c + 'p') * 6), hue: hash(c) * 360, hue2: hash(c + '2') * 360 }; };
+  pieces.forEach((p, i) => {
+    const key = p.name || String(p.n), sd = hash(key + 'c'), cs = (p.creatures && p.creatures.length) ? p.creatures : ['void'], k = cs.length;
+    const ang = i * 2.39996 + hash(title) * 6.2832, rad = one ? 0 : 70 + 340 * Math.sqrt((i + .5) / pieces.length), px = 500 + Math.cos(ang) * rad, py = (one ? 470 : 480) + Math.sin(ang) * rad * .9, R = one ? 230 : 46 + 24 * hash(key + 'r');
+    at.push([px, py, cs]);
+    cs.forEach((c, q) => { const L = look(c), a0 = q / k * 6.2832 + sd * 6.2832;
+      if (B.length < 96) B.push([px, py, R, (k > 1 ? .62 : .78) + (one ? .12 : 0), L.plan | 0, sd + q * .21, a0, k === 1 ? 7 : Math.min(1.7, 5.4 / k), ...rgb(L.hue), 0, ...rgb(L.hue2, .62), hash(key + q) * .6 / k]); });
+    if (one) for (let j = 0, m = 9 + Math.floor(hash(key + 'm') * 8); j < m; j++) {
+      const a = j * 2.39996 + hash(key + 'a') * 6.2832, r = R * (1.25 + ((j * .381966 + hash(key + 'd')) % 1) * .95), x = px + Math.cos(a) * r, y = py + Math.sin(a) * r * .95, L = look(cs[j % k]);
+      B.push([x, y, 16 + ((j * .618034 + hash(key + 's')) % 1) * 20, .5 + hash(key + 'e' + j) * .4, -1, hash(key + j), 0, 7, ...rgb(L.hue), 0, ...rgb(look(cs[(j + 1) % k]).hue2), 0]);
+      F.push([px, py, x, y, ...rgb(L.hue, .62), .34 + hash(key + 'i' + j) * .4, (hash('b' + key + j) - .5) * .6, hash('f' + key + j), j % 3 ? 0 : .5, j % 3 ? 0 : 1]); } });
+  if (!one) at.forEach(([x, y, cs], i) => { const nx = at.slice(i + 1).find(o => o[2].some(c => cs.includes(c))) || at[(i + 1) % at.length];      // threads run between pieces that share a creature
+    if (F.length < 48 && nx) F.push([x, y, nx[0], nx[1], ...rgb(look(cs[0]).hue, .62), .42, (hash('b' + i) - .5) * .5, hash('f' + i + title), i % 4 ? 0 : .5, i % 4 ? 0 : 1]); });
+  nightPaint(G, S, S, 40 + hash(title + (one ? pieces[0].n : 'album')) * 900, B, F);
+  const c2 = document.createElement('canvas'); c2.width = c2.height = S; const g = c2.getContext('2d'); g.drawImage(G.canvas, 0, 0);
+  const shade = g.createLinearGradient(0, S - 260, 0, S); shade.addColorStop(0, 'rgba(4,4,10,0)'); shade.addColorStop(1, 'rgba(4,4,10,.82)'); g.fillStyle = shade; g.fillRect(0, S - 260, S, 260);
+  const mono = 'ui-monospace, "SF Mono", Menlo, "Hiragino Sans", "Geeza Pro", monospace';
+  g.textBaseline = 'alphabetic'; g.fillStyle = 'rgba(255,255,255,.94)'; g.font = `600 ${one ? 40 : 46}px ${mono}`; g.fillText(title, 60, S - 96, S - 120);
+  g.fillStyle = 'rgba(255,255,255,.56)'; g.font = `22px ${mono}`; g.fillText(sub, 60, S - 56, S - 120);
+  return new Promise(res => c2.toBlob(res, 'image/jpeg', .92));
+}
+/* Albums that have no pictures yet get them, a piece at a time, whenever this screen has the chance. */
+async function evoCovers() {
+  if (EVO.coversBusy) return; EVO.coversBusy = true;
+  try { let A = await fetch('/api/night/albums', { cache: 'no-store' }).then(r => r.ok ? r.json() : null); if (!A) return;
+    const had = JSON.stringify(EVO.albums || null); EVO.albums = A; if (EVO.open && had !== JSON.stringify(A)) EVO.stale = true;
+    for (const a of A) { const todo = [...(a.cover ? [] : [0]), ...a.pieces.filter(p => !p.cover).map(p => p.n)]; if (!todo.length) continue; if (!nightGL()) break;
+      for (const n of todo) { const p = a.pieces.find(x => x.n === n);
+        const blob = await evoCoverBlob(n ? [p] : a.pieces, n ? p.name : a.title, n ? `${String(n).padStart(2, '0')} · ${(p.creatures || []).join(' × ').replace(/-/g, ' ')} · ${a.title}` : `album ${a.n} · ${a.pieces.length} pieces · ${(a.kept || '').slice(0, 10)}`); if (!blob) break;
+        await fetch(`/api/night/cover?album=${encodeURIComponent(a.folder)}&n=${n}`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob }); await new Promise(r => setTimeout(r, 40)); }
+      EVO.albums = await api('/api/night/albums'); EVO.stale = true; }
+    if (EVO.open && EVO.stale && !(document.activeElement && document.activeElement.tagName === 'TEXTAREA')) evoDraw();
+  } catch (e) { console.warn('covers: ' + e.message); } finally { EVO.coversBusy = false; }
+}
+function evoAlbumView(a) {
+  const v = Date.now() - Date.now() % 60000, pic = (name, cls) => h('img', { class: cls, src: albUrl(a.folder, name) + '&v=' + v, alt: '', loading: 'lazy' });
+  return h('div', { id: 'evo-main' },
+    h('div', { class: 'alb-head' }, a.cover ? pic('cover.jpg', 'alb-cover') : h('div', { class: 'alb-cover' }),
+      h('div', {}, h('small', {}, `album ${a.n} · kept ${a.kept || ''}`), h('h2', {}, a.title), h('p', { class: 'gym-note' }, `${a.pieces.length} pieces · played by ${(a.creatures || []).join(', ').replace(/-/g, ' ')}`), a.note ? h('p', { class: 'gym-note' }, a.note) : '',
+        h('div', { class: 'acts' }, h('button', { onclick: () => api('/api/night/albums', { json: { album: a.folder } }).catch(e => toast(e.message, true)) }, 'show in Finder'),
+          h('button', { onclick: () => { EVO.album = null; evoDraw(); } }, '← back')))),
+    h('div', { class: 'alb-list' }, a.pieces.map(p => { const path = 'album:' + a.folder + '/' + p.file;
+      return h('div', { class: 'night-row alb-row' + (LIB.playing === path ? ' playing' : '') }, h('span', { class: 'night-n' }, String(p.n).padStart(2, '0')),
+        h('button', { class: 'evo-pp', data: { path }, title: 'Play / stop', onclick: () => libPlay({ path, url: albUrl(a.folder, p.file), kind: 'audio', size: 5e7 }) }, LIB.playing === path ? '■' : '▶'),
+        p.cover ? pic(p.file.replace(/\.[a-z0-9]+$/i, '.jpg'), 'alb-thumb') : h('span', { class: 'alb-thumb' }),
+        h('div', {}, h('b', {}, p.name), h('small', {}, (p.creatures || []).join(' × ').replace(/-/g, ' ') + (p.rating ? ` · rated ${p.rating} of 5` : '')), h('p', { class: 'gym-note' }, p.idea || ''))); })));
+}
+
 function evoNightView() {                               // tonight, piece by piece: who plays it, what it is, and where it has got to
   const N = EVO.night || {}, sh = EVO.sheet && EVO.sheet.id === N.id ? EVO.sheet : null, ideas = (sh && sh.ideas) || [], done = {}, cur = /song (\d+) of/.exec(N.msg || '');
   ((sh && sh.songs) || []).forEach(e => { done[e.n] = e; });
@@ -465,6 +523,8 @@ function evoDraw() {
       h('span', { class: 'evo-x', title: 'Move this session to the Trash', onclick: async e => { e.stopPropagation(); try { await api('/api/evolve/' + x.id, { method: 'DELETE' }); if (s && s.id === x.id) EVO.s = null; await evoList(); evoDraw(); } catch (er) { toast(String(er.message || er), true); } } }, '×')))
       : h('p', { class: 'gym-note' }, 'None yet.')));
   if (EVO.showNight == null) EVO.showNight = !!(EVO.night && EVO.night.id);
+  const alb = EVO.album && (EVO.albums || []).find(x => x.folder === EVO.album);
+  if (alb) { const keep = $('#evo-main') ? $('#evo-main').scrollTop : 0; el.replaceChildren(left, evoAlbumView(alb)); if (keep) $('#evo-main').scrollTop = keep; return; }
   if (EVO.showNight && EVO.night && EVO.night.id) { const keep = $('#evo-main') ? $('#evo-main').scrollTop : 0; el.replaceChildren(left, evoNightView()); if (keep) $('#evo-main').scrollTop = keep; return; }
   if (!s) { el.replaceChildren(left, h('div', { id: 'evo-main' }, h('div', { class: 'evo-empty' }, 'Start a session on the left, or press “evolve” on a clip in the library.'))); return; }
   const N = s.nodes, head = N[s.head], line = []; for (let n = head; n; n = N[n.parent]) line.unshift(n);

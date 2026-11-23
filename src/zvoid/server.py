@@ -305,15 +305,70 @@ def create_app():
     def night_answer(body: dict):
         return evo(night.answer, str(body.get("id") or ""), [str(x) for x in (body.get("picks") or [])], str(body.get("text") or ""), bool(body.get("correction")))
 
-    @app.post("/api/night/albums")
-    def night_albums():
-        """Show the albums in Finder: one folder per finished loop, the newest selected."""
+    def _albums_root():
         from .paths import ROOT
         root = ROOT / "albums"
         root.mkdir(exist_ok=True)
+        return root
+
+    def _album_dir(name: str):
+        root = _albums_root().resolve()
+        d = (root / str(name)).resolve()
+        if d.parent != root or not d.is_dir():
+            raise HTTPException(404, "no such album")
+        return d
+
+    @app.get("/api/night/albums")
+    def night_albums():
+        """Every album: one folder per finished loop, with its pieces as they sounded then. Newest first."""
+        out = []
+        for d in sorted((f for f in _albums_root().iterdir() if f.is_dir()), key=lambda f: f.name, reverse=True):
+            try:
+                a = json.loads((d / "album.json").read_text())
+            except Exception:
+                continue
+            audio = {f.name[:2]: f.name for f in d.iterdir() if f.suffix.lower() in (".flac", ".wav")}
+            pics = {f.stem for f in d.iterdir() if f.suffix.lower() == ".jpg"}
+            pieces = []
+            for x in a.get("pieces") or []:
+                name = audio.get(f"{int(x.get('n') or 0):02d}")
+                if name:
+                    pieces.append({**x, "file": name, "cover": Path(name).stem in pics})
+            out.append({"folder": d.name, "n": a.get("n"), "title": a.get("title"), "kept": a.get("kept"), "note": a.get("note", ""), "creatures": a.get("creatures") or [], "cover": "cover" in pics, "pieces": pieces})
+        return out
+
+    @app.get("/api/night/albumfile")
+    def night_album_file(album: str, name: str):
+        d = _album_dir(album)
+        f = (d / name).resolve()
+        if f.parent != d or not f.is_file():
+            raise HTTPException(404, "no such file")
+        return FileResponse(f)
+
+    @app.post("/api/night/cover")
+    async def night_cover(request: Request, album: str, n: int = 0):
+        """A picture for an album (n = 0) or for one of its pieces, drawn by the app's own renderer and sent here to be kept beside the sound."""
+        d = _album_dir(album)
+        data = await request.body()
+        if not (1000 < len(data) < 8_000_000) or data[:2] != b"\xff\xd8":
+            raise HTTPException(400, "not a picture")
+        if n:
+            hit = next((f for f in d.iterdir() if f.suffix.lower() in (".flac", ".wav") and f.name.startswith(f"{int(n):02d} ")), None)
+            if not hit:
+                raise HTTPException(404, "no such piece")
+            (d / (hit.stem + ".jpg")).write_bytes(data)
+        else:
+            (d / "cover.jpg").write_bytes(data)
+        return {"ok": True}
+
+    @app.post("/api/night/albums")
+    def night_albums_reveal(body: dict):
+        """Show an album (or the newest one) in Finder."""
+        root = _albums_root()
         last = sorted((f for f in root.iterdir() if f.is_dir()), key=lambda f: f.name)
-        subprocess.run(["open", "-R", str(last[-1])] if last else ["open", str(root)])
-        return {"albums": [f.name for f in last]}
+        target = _album_dir(body["album"]) if body.get("album") else (last[-1] if last else None)
+        subprocess.run(["open", "-R", str(target)] if target else ["open", str(root)])
+        return {"ok": True}
 
     @app.post("/api/night/stop")
     def night_stop():
