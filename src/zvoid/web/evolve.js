@@ -44,12 +44,13 @@ async function evoStart(body) {
 }
 const evoSave = patch => api('/api/evolve/' + EVO.s.id, { method: 'PUT', json: patch }).then(s => { EVO.s = s; }).catch(() => {});
 function evoNightBox(trained, s) {
-  const N = EVO.night || {}, box = h('div', { id: 'evo-night' });
+  const N = (EVO.live && EVO.live.running ? EVO.live : EVO.night) || {}, box = h('div', { id: 'evo-night' });      // the box always shows the run that is going, whichever run or album is open on the right
+  const toLive = async () => { EVO.viewId = null; EVO.album = null; EVO.showNight = true; EVO.sheet = null; await evoNightPoll(); evoDraw(); };
   if (N.running) {
     const left = N.per && N.count > N.made ? ` · about ${Math.max(1, Math.round((N.count - N.made) * N.per / 60))} min left` : '';
     const until = N.until ? new Date(N.until * 1000).toTimeString().slice(0, 5) : '';
     box.append(h('div', { class: 'evo-night-msg' }, N.phase === 'chiselling' ? `chiselling the ${N.made} songs until ${until} · ${N.carved} carvings kept of ${N.carves} tried` : `${N.made} of ${N.count} songs made${left}`), h('div', { class: 'evo-bar' }, h('i', { style: `width:${Math.round(N.made / N.count * 100)}%` })),
-      h('small', { title: N.msg || '' }, N.msg || ''), h('div', { class: 'acts' }, h('button', { class: EVO.showNight ? '' : 'hot', onclick: () => { EVO.showNight = true; evoDraw(); } }, 'show the pieces'), h('button', { title: 'It ends after the try it is on. Songs already finished stay in the library.', onclick: () => api('/api/night/stop', { method: 'POST' }).then(evoNightPoll) }, '■ stop')));
+      h('small', { title: N.msg || '' }, N.msg || ''), h('div', { class: 'acts' }, h('button', { class: EVO.showNight && !EVO.album && !EVO.viewId ? '' : 'hot', onclick: toLive }, 'show the run'), h('button', { title: 'It ends after the try it is on. Songs already finished stay in the library.', onclick: () => api('/api/night/stop', { method: 'POST' }).then(evoNightPoll) }, '■ stop')));
   } else {
     EVO.nightWho = EVO.nightWho || new Set(N.creatures && N.creatures.length ? N.creatures : s && s.creature ? [s.creature] : trained.slice(-1).map(c => c.slug));
     const cnt = h('input', { type: 'number', min: 1, max: 200, value: EVO.nightCount || 20, style: 'width:58px', onchange: e => { EVO.nightCount = +e.target.value; est(); } });
@@ -64,18 +65,19 @@ function evoNightBox(trained, s) {
       h('div', { class: 'acts' }, h('span', { class: 'gym-note' }, 'then chisel for'), hrs, h('span', { class: 'gym-note' }, 'hours')), estEl,
       h('div', { class: 'acts' }, h('button', { class: 'hot', disabled: !trained.length, title: 'Both machines are kept awake while it runs. Leave Zvoid open.', onclick: async () => {
         if (!EVO.nightWho.size) return toast('tick at least one creature', true);
-        try { EVO.night = await api('/api/night', { json: { creatures: [...EVO.nightWho], count: +cnt.value || 20, tries: +tr.value || 2, hours: +hrs.value || 0, direction: dir.value } }); evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'make the collection ▸')),
+        try { EVO.night = await api('/api/night', { json: { creatures: [...EVO.nightWho], count: +cnt.value || 20, tries: +tr.value || 2, hours: +hrs.value || 0, direction: dir.value } }); EVO.viewId = null; EVO.album = null; EVO.showNight = true; EVO.sheet = null; evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'make the collection ▸')),
       N.msg && N.finished ? h('small', { title: N.msg }, N.msg) : '',
-      N.id ? h('div', { class: 'acts' }, h('button', { onclick: async () => { EVO.viewId = null; EVO.showNight = true; EVO.album = null; EVO.sheet = null; await evoNightPoll(); evoDraw(); } }, N.running ? 'show the run that is going' : 'show the latest run')) : '',
+      N.id ? h('div', { class: 'acts' }, h('button', { onclick: async () => { EVO.viewId = null; EVO.showNight = true; EVO.album = null; EVO.sheet = null; await evoNightPoll(); evoDraw(); } }, N.running ? 'show the run that is going' : 'show the latest run')) : '');
+  }
+  box.append(
       (EVO.albums || []).length ? h('h3', {}, 'albums') : '',
       (EVO.albums || []).length ? h('div', { class: 'alb-shelf', title: 'Every finished loop is kept as an album: its pieces as they sounded when the loop ended.' }, EVO.albums.map(a => h('button', { class: 'alb-item' + (EVO.album === a.folder ? ' on' : ''), onclick: () => { EVO.album = a.folder; evoDraw(); } },
         a.cover ? h('img', { src: albUrl(a.folder, 'cover.jpg'), alt: '' }) : h('span', { class: 'alb-blank' }), h('span', {}, h('b', {}, a.title), h('small', {}, `album ${a.n} · ${a.pieces.length} pieces`))))) : '');
-  }
   return box;
 }
 async function evoNightPoll() {
   clearTimeout(EVO.nightT);
-  try { const sig = n => JSON.stringify([n.running, n.made, n.thrown, n.phase, n.carves, (n.msg || '').split(' · now:')[0]]), was = sig(EVO.night || {}); EVO.night = await api('/api/night' + (EVO.viewId ? '?id=' + EVO.viewId : '')); if (EVO.viewId && EVO.night.id !== EVO.viewId) EVO.viewId = null; EVO.live = EVO.viewId ? await api('/api/night').catch(() => null) : EVO.night;
+  try { const sig = n => JSON.stringify([n.running, n.made, n.thrown, n.phase, n.carves, (n.msg || '').split(' · now:')[0]]), was = sig(EVO.night || {}); EVO.night = await api('/api/night' + (EVO.viewId ? '?id=' + EVO.viewId : '')); if (EVO.viewId && EVO.night.id !== EVO.viewId) EVO.viewId = null; EVO.live = EVO.viewId ? await api('/api/night').catch(() => null) : EVO.night; { const ls = sig(EVO.live || {}); if (EVO.viewId && ls !== EVO.liveSig) EVO.stale = true; EVO.liveSig = ls; }
     if (EVO.night.id && (EVO.open || !EVO.sheet)) await evoSheet();
     if (!EVO.coversAt || Date.now() - EVO.coversAt > 90000) { EVO.coversAt = Date.now(); evoCovers(); }
     const b = $('#btn-evo'); if (b) b.textContent = EVO.night.running ? (EVO.night.phase === 'chiselling' ? `⟲ evolve · chiselling` : `⟲ evolve · night ${EVO.night.made}/${EVO.night.count}`) : '⟲ evolve';
@@ -470,7 +472,8 @@ function evoAlbumView(a) {
       h('div', {}, h('small', {}, `album ${a.n} · as the run stood on ${a.kept || ''}`), h('h2', {}, a.title), h('p', { class: 'gym-note' }, `${a.pieces.length} pieces · played by ${(a.creatures || []).join(', ').replace(/-/g, ' ')}`), a.note ? h('p', { class: 'gym-note' }, a.note) : '',
         h('p', { class: 'gym-note' }, 'An album is what its run had come to the last time its carving ended. The run itself lives on: open it to see every piece as it is now, rate it and answer questions about it, or carve it further, and the album follows.'),
         h('div', { class: 'acts' }, a.collection ? h('button', { onclick: async () => { EVO.viewId = a.collection; EVO.album = null; EVO.showNight = true; EVO.sheet = null; await evoNightPoll(); evoDraw(); } }, 'open its run') : '',
-          h('button', { onclick: () => api('/api/night/albums', { json: { album: a.folder } }).catch(e => toast(e.message, true)) }, 'show in Finder')),
+          h('button', { onclick: () => api('/api/night/albums', { json: { album: a.folder } }).catch(e => toast(e.message, true)) }, 'show in Finder'),
+          h('button', { onclick: async () => { EVO.viewId = null; EVO.album = null; EVO.showNight = true; EVO.sheet = null; await evoNightPoll(); evoDraw(); } }, EVO.live && EVO.live.running ? '← back to the run that is going' : '← back')),
         a.collection ? evoCarveOn(a.collection) : '')),
     h('div', { class: 'alb-list' }, a.pieces.map(p => { const path = 'album:' + a.folder + '/' + p.file;
       return h('div', { class: 'night-row alb-row' + (LIB.playing === path ? ' playing' : '') }, h('span', { class: 'night-n' }, String(p.n).padStart(2, '0')),
