@@ -12,6 +12,7 @@ pure hiss, a clip that stops early): those are thrown away and made again. Every
 from __future__ import annotations
 
 import json
+import os
 import random
 import re
 import shutil
@@ -1038,7 +1039,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
     def work():
         awake = None
         try:
-            awake = subprocess.Popen(["caffeinate", "-i", "-s"])       # this Mac stays awake for as long as the shift runs
+            awake = subprocess.Popen(["caffeinate", "-i", "-s", "-w", str(os.getpid())])   # this Mac stays awake for as long as the shift runs, and never longer than Zvoid itself
         except Exception:
             pass
         rng, fails = random.Random(), 0
@@ -1223,14 +1224,14 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
             _state["msg"] = "stopped: " + _state["error"]
             print("[night] stopped: " + str(ex).strip()[-800:], flush=True)
         finally:
+            if awake:
+                awake.terminate()
             for o in sheet["songs"]:
                 o.pop("entry", None)
             for t_ in d.glob("s*_t*"):
                 shutil.rmtree(t_, ignore_errors=True)                # no leftovers: only the finished songs and the sheet remain
             _state.update(running=False, finished=time.time())
             job.update(state="cancelled" if _state.get("stop") else "error" if _state.get("error") else "done", msg=_state["msg"], frac=1)
-            if awake:
-                awake.terminate()
 
     threading.Thread(target=work, daemon=True).start()
     return status()
