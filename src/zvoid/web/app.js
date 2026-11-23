@@ -1136,10 +1136,12 @@ addEventListener('resize', drawCables);
   /* the list is read each time: when this file runs, the scripts after it are not on the page yet */
   const mine = () => [...document.scripts].map(x => x.src).filter(u => u && u.startsWith(location.origin)).concat([...document.querySelectorAll('link[rel=stylesheet]')].map(x => x.href).filter(u => u && u.startsWith(location.origin)));
   let first = null, due = false;
+  /* after it has loaded itself again, it goes back to the screen you were on */
+  setTimeout(() => { try { const b = JSON.parse(sessionStorage.getItem('zvoid-back') || 'null'); sessionStorage.removeItem('zvoid-back'); if (b && b.evo && typeof openEvo === 'function') { EVO.album = b.album; EVO.viewId = b.viewId; openEvo(); } } catch (e) {} }, 900);
   const stamp = async () => (await Promise.all(mine().map(u => fetch(u, { cache: 'no-store' }).then(r => r.ok ? r.text() : '?').then(t => t === '?' ? t : t.length + ':' + hash(t)).catch(() => '?')))).join('|');
   setInterval(async () => {
     try { const now = await stamp(); if (now.includes('?')) return; if (first == null) { first = now; return; } if (now !== first) due = true;
       const typing = document.activeElement && (document.activeElement.tagName === 'TEXTAREA' || (document.activeElement.tagName === 'INPUT' && /text|search/.test(document.activeElement.type || 'text'))) && document.activeElement.value;      // a field with something in it: do not take it away
-      if (due && !LIB.playing && !typing) location.reload(); } catch (e) {}
+      if (due && !LIB.playing && !typing) { try { sessionStorage.setItem('zvoid-back', JSON.stringify({ evo: typeof EVO !== 'undefined' && !!EVO.open, album: typeof EVO !== 'undefined' ? EVO.album || null : null, viewId: typeof EVO !== 'undefined' ? EVO.viewId || null : null })); } catch (e) {} location.reload(); } } catch (e) {}
   }, 20000);
 })();
