@@ -1144,15 +1144,15 @@ CHISEL_SCHEMA = {"type": "object", "required": ["start", "end", "caption", "note
                  "properties": {"start": {"type": "number"}, "end": {"type": "number"}, "caption": {"type": "string"}, "note": {"type": "string"}}}
 
 
-LENSES = ("the records: the stretch that is furthest from the clarity of the records its creatures learned from (see the line about that below), to be remade so that what is wrong with it there is put right",
+LENSES = ("the old country: ONE stretch that takes in a sound from old Slovenian village music, as a texture and never as its dance: accordion bellows wheezing and stabbing, zither or hammered dulcimer plucks, a jaw harp twanging, tamburica strumming, "
+          "village voices singing wordlessly in close parts. Choose one or two of these, cut short and chopped so they ride the piece's own drums as another strange sound, and name them plainly in the caption. If a guest creature is given for this stretch, it was raised on that music: let its instruments in, while the piece's own drums stay in charge. The piece's own pulse and drum pattern stay; "
+          "no polka, no waltz, no oom-pah, nothing merry or folkloric. Pick a stretch where a new colour would lift the piece. This one is a lottery too",
+          "the records: the stretch that is furthest from the clarity of the records its creatures learned from (see the line about that below), to be remade so that what is wrong with it there is put right",
           "release: the stretch that sounds most choked (muffled, squeezed, boxed in, everything pressed into one lump), to be opened so that each sound is clear and rings out",
           "the beat: where it falls apart, where the kick goes missing, where a body would stop moving",
           "the extremes: a peak that is not overwhelming enough, a depth that is not heavy enough",
           "the stumble: ONE stretch where the piece should trip over its own sound, as a glitch that belongs to it: the beat catching and skipping, a hit stuttering, the sound chopped, frozen for an instant or running backwards, then snapping back onto the pulse as if nothing had happened. "
-          "Pick a stretch where the piece is changing state anyway (the way into or out of a peak), never the middle of a held peak, keep it as short as allowed, and say the glitching in the caption in plain sound words while the kick stays readable under it. This one is a lottery: it is tried, and the artist's ears decide",
-          "the old country: ONE stretch that takes in a sound from old Slovenian village music, as a texture and never as its dance: accordion bellows wheezing and stabbing, zither or hammered dulcimer plucks, a jaw harp twanging, tamburica strumming, "
-          "village voices singing wordlessly in close parts. Choose one or two of these, cut short and chopped so they ride the piece's own drums as another strange sound, and name them plainly in the caption. The piece's own pulse and drum pattern stay; "
-          "no polka, no waltz, no oom-pah, nothing merry or folkloric. Pick a stretch where a new colour would lift the piece. This one is a lottery too")
+          "Pick a stretch where the piece is changing state anyway (the way into or out of a peak), never the middle of a held peak, keep it as short as allowed, and say the glitching in the caption in plain sound words while the kick stays readable under it. This one is a lottery: it is tried, and the artist's ears decide")
 # two more ways of looking were tried for a night and dropped: "the edges" (a blur with no countable events) and "the passage" (a change of state
 # too orderly or too abrupt). Of 271 carvings made under them, 17 were kept; the others kept about one in six.
 
@@ -1499,8 +1499,8 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                             knows = [c_ for c_ in others_ if c_ in ("machine-girl", "dds", "sophie")]
                             if lens_ == "the stumble":            # a glitch is best played by a creature that knows them
                                 guest = rng.choice(knows) if knows and rng.random() < .7 else guest
-                            else:
-                                guest = ""                        # the old sounds are played by the piece's own creatures, so they stay inside its world
+                            else:                                 # the old sounds are played by the creature raised on them, if there is one; without it the piece's own creatures play them
+                                guest = next((c_ for c_ in ("avsenik", "folk") if c_ in gym.trained_slugs() and c_ not in _who(s_["entry"])), "")
                             if sum(1 for c_ in s_["entry"].get("carving", []) if c_.get("lens") == lens_ and c_.get("kept")) >= 2:
                                 s_["misses"] += 1                 # two of a kind in one piece are enough
                                 continue
