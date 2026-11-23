@@ -1463,7 +1463,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     print("[night] could not join them: " + str(ex)[:300], flush=True)
             _state["msg"] = (f"stopped: {_state['made']} songs are in the library" if _state["stop"] else "stopped: " + _state["error"] if _state["error"]
                              else f"done: {_state['made']} songs are in the library as “{tag}”" + (f", {_state['carved']} carvings kept of {_state['carves']} tried" if _state.get("carves") else ""))
-            if _state["made"] and not _state["error"] and (_state.get("carved") or not resume):   # what this loop came to is kept as an album, whether it ran its course or was stopped; a loop taken up again that changed nothing leaves none
+            if _state["made"] and not _state["error"] and not _state["stop"] and (_state.get("carved") or not resume):   # what this loop came to is kept as an album, once it has run its course. A loop that was stopped by hand leaves none (it would be a near copy of the last one), nor does one taken up again that changed nothing
                 try:
                     save()
                     kept_at = album(sid)
