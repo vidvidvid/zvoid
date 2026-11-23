@@ -94,7 +94,8 @@ async function evoSheet() {                              // the night's own note
     (sh.ideas || []).forEach((x, i) => { x.name = nm[i + 1] || x.title; });                       // names given afterwards; the night itself keeps using its own
     EVO.sheet = sh;
     if (!EVO.talkBusy) EVO.taste = await fetch('/api/night/taste?id=' + EVO.night.id, { cache: 'no-store' }).then(q => q.ok ? q.json() : null).catch(() => null);
-    EVO.marks = await fetch('/api/night/marks?id=' + EVO.night.id, { cache: 'no-store' }).then(q => q.ok ? q.json() : null).catch(() => null);   // null until the app has been restarted with the marks in it
+    EVO.marks = await fetch('/api/night/marks?id=' + EVO.night.id, { cache: 'no-store' }).then(q => q.ok ? q.json() : null).catch(() => null);
+    evoStale(sh);   // null until the app has been restarted with the marks in it
   } catch (e) {}
 }
 /* The night as a small vivarium. The creatures float in a ring in the dark, each a glowing body of its own species and
@@ -429,10 +430,23 @@ function evoTalk(sh) {
     h('button', { class: 'hot', onclick: () => evoAsk(0) }, 'ask me something'));
   return h('div', { class: 'night-talk' }, know, h('div', { class: 'talk-ask' }, ask));
 }
+/* A rating belongs to the version you heard. When the piece has been changed since, the rating is shown as overtaken, so you know to listen again. */
+async function evoStale(sh) {
+  if (EVO.staleBusy || (EVO.staleAt && Date.now() - EVO.staleAt < 25000) || !EVO.marks || !sh) return; EVO.staleBusy = true; EVO.staleAt = Date.now();
+  try { const all = await fetch(fileUrl(`${EVO.outRoot}/_night/marks.json`), { cache: 'no-store' }).then(r => r.ok ? r.json() : {}), out = {};
+    for (const e of sh.songs || []) { const m = all[`${sh.id}:${e.n}`]; if (!m || !e.path || !(EVO.marks[e.n] > 0)) continue;
+      const rated = m.at ? m.at * 1000 : new Date(String(m.when).replace(' ', 'T')).getTime() + 59000;
+      const lm = await fetch(fileUrl(e.path), { headers: { Range: 'bytes=0-0' }, cache: 'no-store' }).then(r => r.headers.get('last-modified')).catch(() => null);
+      if (lm && new Date(lm).getTime() > rated + 5000) out[e.n] = true; }
+    const was = JSON.stringify(EVO.staleMarks || {}); EVO.staleMarks = out; if (JSON.stringify(out) !== was) EVO.stale = true;
+  } catch (e) {} finally { EVO.staleBusy = false; }
+}
 /* How much you like a piece, 1 to 5. Nothing can measure taste, so this is what the carving and the next night steer by.
    Rate as many as you like in a row: the question about why comes once you pause, about the last one you rated. */
 async function evoMarkPiece(n, v) {
-  try { const N = EVO.night || {}, cur = (EVO.marks || {})[n] || 0; EVO.marks = await api('/api/night/mark', { json: { id: N.id, n, mark: cur === v ? 0 : v } }); evoDraw();
+  try { const N = EVO.night || {}, cur = (EVO.marks || {})[n] || 0, old = (EVO.staleMarks || {})[n];
+    if (old && cur === v) { await api('/api/night/mark', { json: { id: N.id, n, mark: 0 } }); }      // tapping an overtaken rating again confirms it for the piece as it is now
+    EVO.marks = await api('/api/night/mark', { json: { id: N.id, n, mark: old ? v : (cur === v ? 0 : v) } }); if (EVO.staleMarks) delete EVO.staleMarks[n]; EVO.staleAt = 0; evoDraw();
     clearTimeout(EVO.askT);
     if (cur !== v && EVO.taste) EVO.askT = setTimeout(() => { if (EVO.talkBusy || (document.activeElement && document.activeElement.closest && document.activeElement.closest('.night-talk'))) return; EVO.fixing = false; evoAsk(n); }, 6000);
   } catch (e) { toast(e.message, true); }
@@ -526,7 +540,7 @@ function evoNightView() {                               // tonight, piece by pie
         h('div', { class: 'night-what' }, h('b', {}, x.name || x.title, h('em', {}, `${x.bpm} bpm`)), h('small', { class: 'night-who' }, who(x)), h('small', { title: x.idea }, x.idea)),
         path ? libWave({ path, kind: 'audio', size: 5e7 }) : h('span', { class: 'night-wait' }, making ? 'being made now…' : 'waiting'),
         h('small', { class: 'night-carve', title: tried ? (e.carving || []).map(c => `${c.kept ? 'kept' : 'not kept'}: ${c.from}–${c.to}s${c.by ? ' by ' + c.by : ''} · ${c.why || ''}`).join('\n') : '' }, tried ? `${kept} of ${tried} carvings kept` : ''),
-        path && EVO.marks ? h('span', { class: 'night-marks', title: 'How much do you like it? 1: not this at all · 3: fine, but not it · 5: this is the direction (not the end goal). Tap the same number again to clear it.' },
+        path && EVO.marks ? h('span', { class: 'night-marks' + ((EVO.staleMarks || {})[n] ? ' old' : ''), title: ((EVO.staleMarks || {})[n] ? 'This piece has changed since you rated it. Listen again, then tap a number (the same one, if it still holds). · ' : '') + 'How much do you like it? 1: not this at all · 3: fine, but not it · 5: this is the direction (not the end goal). Tap the same number again to clear it.' },
           [1, 2, 3, 4, 5].map(v => h('button', { class: 'night-mark r' + v + ((EVO.marks[n] || 0) >= v ? ' on' : '') + (EVO.marks[n] === v ? ' at' : ''), onclick: () => evoMarkPiece(n, v) }, String(v)))) : h('span', {})); })));
 }
 function evoMark() { document.querySelectorAll('#evo .evo-pp').forEach(b => { const on = b.dataset.path === LIB.playing; b.textContent = on ? '■' : '▶'; const box = b.closest('.evo-card, .evo-step, .night-row, .talk-piece'); if (box) box.classList.toggle('playing', on); }); }

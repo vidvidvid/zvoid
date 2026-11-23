@@ -176,6 +176,19 @@ def marks() -> dict:
         return {}
 
 
+def rated_at(sid: str) -> dict:
+    """When each piece of a collection was rated (piece number -> seconds since 1970), so a rating can be told from one that
+    has been overtaken: a rating belongs to the version of the piece the artist heard."""
+    out = {}
+    for k, v in marks().items():
+        if k.startswith(sid + ":") and _rate(v):
+            try:
+                out[k.split(":")[1]] = float(v.get("at") or time.mktime(time.strptime(str(v.get("when")), "%Y-%m-%d %H:%M")) + 59)
+            except Exception:
+                out[k.split(":")[1]] = 0.0
+    return out
+
+
 def marks_of(sid: str) -> dict:
     return {k.split(":")[1]: _rate(v) for k, v in marks().items() if k.startswith(sid + ":")}
 
@@ -212,7 +225,7 @@ def mark(sid: str, n: int, v: int) -> dict:
         except Exception:
             pass
         v = max(1, min(5, int(v)))
-        every[key] = {"rate": v, "mark": 1 if v >= 4 else -1 if v <= 2 else 0, "title": names.get(str(n)) or e.get("title", ""), "creatures": [c for c in [e.get("creature"), *(e.get("mix") or [])] if c], "idea": e.get("idea", ""),
+        every[key] = {"rate": v, "at": time.time(), "mark": 1 if v >= 4 else -1 if v <= 2 else 0, "title": names.get(str(n)) or e.get("title", ""), "creatures": [c for c in [e.get("creature"), *(e.get("mix") or [])] if c], "idea": e.get("idea", ""),
                       "bpm": plan.get("bpm"), "caption": cap[:400], "path": e.get("path"), "when": time.strftime("%Y-%m-%d %H:%M")}
     MARKS.parent.mkdir(parents=True, exist_ok=True)
     MARKS.write_text(json.dumps(every, indent=1, ensure_ascii=False))
@@ -1520,7 +1533,11 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
             rnd, cycle, idle_cycles = 0, 0, 0
             while hours and done and not _state["stop"] and not _state["error"] and time.time() < _state["until"]:
                 rates = marks_of(sid)                              # read again every round: the artist may be rating while it works
-                rate = lambda q: int(rates.get(str(q["n"]), 0))
+                when = rated_at(sid)
+                # a rating belongs to the version the artist heard. Once two cuts have been kept since, what bothered them may be gone: the rating
+                # no longer steers the piece (it is treated as unrated, and so protected like any other) until they have listened again
+                since = lambda q: sum(1 for c in q["entry"].get("carving", []) if c.get("kept") and float(c.get("at") or 0) > when.get(str(q["n"]), 0))
+                rate = lambda q: int(rates.get(str(q["n"]), 0)) if since(q) < 2 else 0
                 room = {2: (5, 9), 1: (5, 9)}     # how many misses and how many kept cuts a piece gets per turn: the unloved get more of the work. A 5 is a direction, not a finished piece, so it is carved like any other
                 parts_turn = LENSES[cycle % len(LENSES)].startswith("the parts")
                 # a piece that has been remade end to end stops being one piece (the artist called one such "a blob of mess"): once half its length has been
@@ -1621,7 +1638,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .002 and m2["attack"] >= s_["m"]["attack"] - .015   # a carving that costs the piece its drums is never kept, whatever else it gains
                         if stumble and sc2 and not better:        # a glitch cannot be measured: it is kept unless it broke something (the drums, or the piece as a whole), and the artist's rating sorts it out
                             better = sc2["total"] >= s_["sc"]["total"] - .03 and (lens_ == "the parts" or m2["attack"] >= s_["m"]["attack"] - .03)   # pulling the drums out for two bars is meant to cost drums
-                        s_["entry"]["carving"].append({"round": rnd, "lens": LENSES[cycle % len(LENSES)].split(":")[0], "from": cp["start"], "to": cp["end"], "why": cp["note"], "by": guest or "", **({"move": "parts", "part": cp["part"], "db": cp["db"]} if lens_ == "the parts" else {}), "kept": better, "broken": why or None,
+                        s_["entry"]["carving"].append({"round": rnd, "at": time.time(), "lens": LENSES[cycle % len(LENSES)].split(":")[0], "from": cp["start"], "to": cp["end"], "why": cp["note"], "by": guest or "", **({"move": "parts", "part": cp["part"], "db": cp["db"]} if lens_ == "the parts" else {}), "kept": better, "broken": why or None,
                                                        "before": s_["sc"]["total"], "after": sc2["total"] if sc2 else None, "definition": [s_["sc"]["definition"], sc2["definition"] if sc2 else None]})
                         if better:
                             shutil.copy(outs[0]["path"], s_["raw"])             # the working copy is now the carved one,
