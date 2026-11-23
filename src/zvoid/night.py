@@ -150,6 +150,8 @@ HOW A PLAN IS WRITTEN:
 - lyrics: the passage, as section tags in square brackets naming the state and what happens, e.g. "[peak - everything, full stomp, no change]", "[depth - sunk, slow sub hits, growled breath]", "[morph - the drums melt into the voices]", "[thrown - from the bottom straight to the top]", and only where it is earned "[void - nothing, one dry click]". Under each tag, 0-4 lines of chant syllables or invented words. No real words in any language. 5-9 sections of very uneven length.
 - duration: 120 to 190 seconds. bpm: 118 to 190 (dance tempos; a heavy half-time piece may be written at 85-100 only if its kick still makes people move).
 
+THE ARTIST'S OWN EXAMPLES OF CLARITY are the records the creatures were trained on: "the source songs that the entities were trained on are examples of clarity. We shouldn't make the same songs, but the clarity of them should be mimicked." Measured against those records, the pieces made so far are light in the sub and bass (3 dB on average, up to 12 in places), thick in the low mids (the mud), and far less dense. So in every plan: the low end is a deep, heavy sub that carries the piece under the kick; nothing thick, held or droning sits in the low mids (no pads, no sustained chords, no walls of mid-range noise under the drums); every sound is short enough to leave a gap; and the whole is dense and loud like a finished record, not thin. Say this in the caption in sound words. Never name or imitate the records themselves.
+
 FOUR THINGS THE ARTIST HEARD GO WRONG, AND HOW TO AVOID THEM:
 - A constant hum under the whole piece. A tag is applied to the WHOLE piece, not to one section, so any tag that names something sustained lays a bed under everything, and then there is no void and no depth, only a wash: never write drone, hum, pad, sustained, swell, wash, ambience, echo, reverb, hollow pipe, held note. The low end must be struck, not held: "sub hits that stop dead", "short sub thuds". Always include tags for edges AND for openness: "punchy", "clear", "open", "bright crisp top end", "wide", "every hit rings out". The depth is heaviness, not a hum.
 - The sound choking. Tags that close a sound in are applied to the whole piece too: never write dry, close, tight, muffled, dark, dull, compressed, crushed, squashed, buried, claustrophobic, boxed, lo-fi, underwater, distant. Weight comes from what is struck, not from pressing everything together.
@@ -445,6 +447,10 @@ def _fit(x: dict, rng) -> dict:
         cap += ", clear open sound, bright crisp top end, wide"
     if "drums in front" not in cap:
         cap += ", loud drums in front of everything"
+    if "sub" not in cap.lower():
+        cap += ", deep heavy sub bass under the kick"                 # measured against the records the creatures learned from, the pieces came out light in the sub and thick in the low mids
+    if "low mid" not in cap.lower():
+        cap += ", clean low mids"
     x.update(caption=cap[:900], bpm=int(max(84, min(190, int(x.get("bpm") or 140)))), duration=int(max(100, min(200, int(x.get("duration") or 150)))),
              title=" ".join(str(x.get("title") or "untitled").split())[:40], lyrics=str(x.get("lyrics") or "[Instrumental]")[:3000])
     return x
@@ -469,10 +475,63 @@ def _open(path: str) -> dict:
         return {"air": 1.0, "width": .35}
 
 
-def measure(path: str) -> dict:
+def measure(path: str, creatures=()) -> dict:
     m = _measure(path)
     m.update(_open(path))
+    try:
+        m.update(_apart(path, creatures))
+    except Exception:
+        pass
     return m
+
+
+def _apart(path: str, creatures) -> dict:
+    """How far a take is from the clarity of the records its creatures learned from, stretch by stretch. Those records are
+    the artist's examples of a clear, pronounced sound. For every 10 seconds that is not a quiet passage, the balance of
+    the sound (how its energy is spread from sub to top) is compared with the balance of the source tracks: "apart" is the
+    average difference in dB (about 3 is close, 6 and more is far), and for each stretch the one thing most wrong with it
+    is named. Finishing can correct a piece's overall balance; only remaking a stretch can correct one that is far off."""
+    import numpy as np
+    import soundfile as sf
+    from .paths import CREATURES_DIR
+    refs = []
+    for c in dict.fromkeys(c for c in creatures if c):
+        try:
+            refs.append(json.loads((CREATURES_DIR / c / "sound.json").read_text())["bands"])
+        except Exception:
+            pass
+    if not refs:
+        return {}
+    ref = np.mean(refs, 0)
+    edges = np.geomspace(25, 16000, 29)
+    x, sr = sf.read(path, always_2d=True, dtype="float32")
+    mono, w = x.mean(1), int(10 * sr)
+    f = np.fft.rfftfreq(w, 1 / sr)
+    sel = [(f >= a) & (f < b) for a, b in zip(edges[:-1], edges[1:])]
+    wins, levels = [], []
+    for i in range(0, len(mono) - w + 1, w):
+        seg = mono[i:i + w]
+        F = np.abs(np.fft.rfft(seg * np.hanning(w))) ** 2
+        tot = float(F[(f >= 25) & (f < 16000)].sum()) + 1e-12
+        wins.append(np.array([10 * np.log10(float(F[k].sum()) / tot + 1e-12) for k in sel]))
+        levels.append(10 * np.log10(float((seg ** 2).mean()) + 1e-12))
+    if not wins:
+        return {}
+    top = max(levels)
+    groups = (("too little sub and bass", slice(0, 7), -1), ("too much low-mid mud", slice(9, 15), 1), ("too little low-mid body", slice(9, 15), -1), ("too much boom in the bass", slice(2, 8), 1),
+              ("too dull on top", slice(21, 28), -1), ("too harsh on top", slice(21, 28), 1), ("too much in the middle", slice(15, 21), 1), ("hollow in the middle", slice(15, 21), -1))
+    at, what = [], []
+    for cur, lv in zip(wins, levels):
+        if lv < top - 12:                                    # a quiet passage (a planned depth or void) is not judged against the records
+            at.append(None)
+            what.append("")
+            continue
+        d = cur - ref
+        at.append(round(float(np.abs(d).mean()), 1))
+        worst = max(groups, key=lambda g: float(d[g[1]].mean()) * g[2])
+        what.append(f"{worst[0]} ({abs(float(d[worst[1]].mean())):.0f} dB)" if float(d[worst[1]].mean()) * worst[2] >= 3 else "")
+    judged = [v for v in at if v is not None]
+    return {"apart": round(float(np.mean(judged)), 2) if judged else None, "apart_at": at, "apart_what": what}
 
 
 def _measure(path: str) -> dict:
@@ -908,7 +967,9 @@ def score(m: dict, others: list[dict]) -> dict:
     defn = float(m.get("definition", 0))
     opened = .7 * min(1, max(0, (float(m.get("air", 1.0)) - .5) / 1.7)) + .3 * min(1, max(0, (float(m.get("width", .35)) - .2) / .22))   # released, not choked: a top end and some width
     clear = min(1, max(0, 1 - (float(m.get("hum", 0)) - 7) / 9))           # no tone that never stops. Silence is not rewarded for its own sake.
-    return {"total": round(.36 * dance + .13 * clear + .14 * opened + .09 * ext + .03 * defn + .25 * variety, 3), "open": round(opened, 2), "dance": round(dance, 2), "extremes": round(ext, 2), "clarity": round(clear, 2), "drums": round(drums, 2),
+    apart = m.get("apart")                                                  # how far it is from the clarity of the records its creatures learned from: 2.5 dB is as close as a new piece gets, 6.5 is far
+    like = .5 if apart is None else min(1, max(0, 1 - (float(apart) - 2.5) / 4))
+    return {"total": round(.32 * dance + .10 * clear + .10 * opened + .15 * like + .08 * ext + .03 * defn + .22 * variety, 3), "like": round(like, 2), "open": round(opened, 2), "dance": round(dance, 2), "extremes": round(ext, 2), "clarity": round(clear, 2), "drums": round(drums, 2),
             "definition": round(defn, 2), "variety": round(variety, 2), "nearest": near, "shape": round(ext, 2)}
 
 
@@ -943,11 +1004,12 @@ CHISEL_SCHEMA = {"type": "object", "required": ["start", "end", "caption", "note
                  "properties": {"start": {"type": "number"}, "end": {"type": "number"}, "caption": {"type": "string"}, "note": {"type": "string"}}}
 
 
-LENSES = ("release: the stretch that sounds most choked (muffled, squeezed, boxed in, everything pressed into one lump), to be opened so that each sound is clear and rings out",
+LENSES = ("the records: the stretch that is furthest from the clarity of the records its creatures learned from (see the line about that below), to be remade so that what is wrong with it there is put right",
+          "release: the stretch that sounds most choked (muffled, squeezed, boxed in, everything pressed into one lump), to be opened so that each sound is clear and rings out",
           "the beat: where it falls apart, where the kick goes missing, where a body would stop moving",
-          "the extremes: a peak that is not overwhelming enough, a depth that is not heavy enough",
-          "the edges: a stretch that is a blur, a mass of sound with no separate, countable events",
-          "the passage: a change of state that is too orderly, or one that should melt and instead jolts")
+          "the extremes: a peak that is not overwhelming enough, a depth that is not heavy enough")
+# two more ways of looking were tried for a night and dropped: "the edges" (a blur with no countable events) and "the passage" (a change of state
+# too orderly or too abrupt). Of 271 carvings made under them, 17 were kept; the others kept about one in six.
 
 
 def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "", history=None, learned=None, rating: int = 0) -> dict:
@@ -972,6 +1034,12 @@ def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: st
                   f'- a constant tone under everything: {m.get("hum")} dB at {m.get("hum_hz")} Hz (over 12 is a hum the artist hears); its quietest second is {m.get("floor")} dB below its loudest (-12 means it never lets go)\n'
                   f'- how defined its structure measures: {m.get("definition")} of 1. Drums overall: {m["attack"]} (the artist wants 0.2 or more). In the 5-second timeline, a stretch with real drums reads about 0.2 to 0.4, and under 0.1 means none.\n'
                   f'- how released it is: {m.get("air")} percent of its energy is above 6 kHz (0.5 is choked and muffled, 2 or more is open) and its stereo width is {m.get("width")} (0.25 is nearly mono, 0.4 is open)\n'
+                  + (("- how far each 10-second stretch is from the clarity of the records its creatures learned from (dB; 3 is close, 6 and more is far; -- is a quiet passage, not judged): "
+                      + " ".join(f"{i * 10}s:{'--' if v is None else v}" for i, v in enumerate(m["apart_at"])) + "\n"
+                      + ("  what is most wrong where: " + "; ".join(f"{i * 10}-{i * 10 + 10}s {w}" for i, w in enumerate(m.get("apart_what") or []) if w)[:900] + "\n" if any(m.get("apart_what") or []) else "")
+                      + "  The artist calls those records their examples of clarity and wants every piece as clear and pronounced as they are, without sounding like them. A stretch that is far off is a prime candidate. "
+                        "When you remake one, write its cure into the caption in plain sound words: too little sub and bass means a deep heavy sub under the kick and a low end that carries; too much low-mid mud means fewer held sounds, "
+                        "nothing thick or droning in the middle, each hit short with a gap after it; too harsh on top means fewer hissing and fizzing layers; too dull on top means crisp hats and bright cracks.\n") if m.get("apart_at") else "")
                   + hist + understood()
                   + ({5: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 5 OF 5. That means it points the right way, not that it is finished: keep what makes it what it is and push it further the same way, clearer, every sound more pronounced.\n",
                       4: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 4 OF 5. It is good: sharpen it, do not turn it into something else.\n",
@@ -1047,7 +1115,7 @@ def rebuild(d: Path, sheet: dict) -> list:
                 "bpm": int(p.get("bpm") or 140), "duration": int(float(p.get("duration") or 150))}
         e.setdefault("carving", [])
         at = p.get("creature_at") if p.get("creature_at") and Path(str(p.get("creature_at"))).exists() else ""
-        done.append({"title": e["title"], "m": measure(str(raw)), "n": e["n"], "path": path, "raw": str(raw), "song": song, "sc": None, "strength": float(p.get("creature_strength") or 1.6), "at": at, "entry": e,
+        done.append({"title": e["title"], "m": measure(str(raw), _who(e)), "n": e["n"], "path": path, "raw": str(raw), "song": song, "sc": None, "strength": float(p.get("creature_strength") or 1.6), "at": at, "entry": e,
                      "tried": [(c["from"], c["to"]) for c in e["carving"]][-3:], "misses": 0, "carved": 0})
     for s_ in done:
         s_["sc"] = score(s_["m"], [o for o in done if o is not s_])
@@ -1192,7 +1260,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                                 raise RuntimeError("too many results came out broken")
                             t += 1
                             continue
-                        m = measure(path)
+                        m = measure(path, _who(song))
                         sc = score(m, done)
                         entry["tries"].append({"try": t + 1, "score": sc, "caption": song["caption"], "bpm": song["bpm"], "m": {k: m[k] for k in ("attack", "steady", "bpm", "tonal", "noise", "voice", "contrast")}})
                         if not best or sc["total"] > best["sc"]["total"]:
@@ -1297,7 +1365,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                             raise RuntimeError("nothing came back")
                         _state["carves"] += 1
                         why = broken(outs[0]["path"], float(s_["song"]["duration"]))
-                        m2 = None if why else measure(outs[0]["path"])
+                        m2 = None if why else measure(outs[0]["path"], _who(s_["entry"]))
                         sc2 = None if why else score(m2, [o for o in done if o is not s_])
                         better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .002 and m2["attack"] >= s_["m"]["attack"] - .015   # a carving that costs the piece its drums is never kept, whatever else it gains
                         s_["entry"]["carving"].append({"round": rnd, "lens": LENSES[cycle % len(LENSES)].split(":")[0], "from": cp["start"], "to": cp["end"], "why": cp["note"], "by": guest or "", "kept": better, "broken": why or None,
