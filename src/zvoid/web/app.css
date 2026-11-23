@@ -580,7 +580,7 @@ body.throwing, body.throwing * { cursor: grabbing !important; user-select: none 
 /* album rows are finished pieces: full brightness */
 #evo .night-row.alb-row { opacity: 1; } .alb-row .gym-note { color: #a9a6c2; } .alb-head .gym-note { color: #a9a6c2; }
 /* the player */
-#evo-player { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 60; width: min(980px, calc(100vw - 48px)); display: grid; grid-template-columns: 38px minmax(120px, 260px) 44px 1fr 44px 30px; gap: 12px; align-items: center;
+#evo-player { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 60; width: min(980px, calc(100vw - 48px)); display: grid; grid-template-columns: 38px minmax(120px, 260px) 44px 1fr 44px 30px 30px 30px; gap: 12px; align-items: center;
   padding: 10px 14px; border-radius: 14px; border: 1px solid var(--line-hi); background: #0d0d1af2; backdrop-filter: blur(10px); box-shadow: 0 10px 40px -10px #000, 0 0 30px -18px var(--cyan); }
 #evo-player[hidden] { display: none; }
 #evo-player .ep-pp { width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--cyan); color: #07070d; font-size: 12px; cursor: pointer; }
@@ -591,3 +591,4 @@ body.throwing, body.throwing * { cursor: grabbing !important; user-select: none 
 #evo-player .ep-track { position: relative; height: 22px; cursor: pointer; } #evo-player .ep-track::before { content: ''; position: absolute; left: 0; right: 0; top: 9px; height: 4px; border-radius: 2px; background: #2a2944; }
 #evo-player .ep-track i { position: absolute; left: 0; top: 9px; height: 4px; border-radius: 2px; background: var(--cyan); } #evo-player .ep-track i::after { content: ''; position: absolute; right: -6px; top: -4px; width: 12px; height: 12px; border-radius: 50%; background: #fff; }
 body.has-player #evo-main { padding-bottom: 90px; }
+#evo-player .ep-x:disabled { opacity: .3; cursor: default; } #evo-player .ep-x { font-size: 8px; letter-spacing: -2px; }

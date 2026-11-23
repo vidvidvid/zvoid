@@ -772,7 +772,7 @@ function libStream(fresh) {                            // one player for long pi
     const el = LIB.el = new Audio(); el.preload = 'auto';
     if (!LIB.direct) { try { const c = LIB.ctx = new (window.AudioContext || window.webkitAudioContext)(); const an = LIB.ana = c.createAnalyser(); an.fftSize = 1024; an.smoothingTimeConstant = .72;
       c.createMediaElementSource(el).connect(an); an.connect(c.destination); c.resume(); } catch (e) { LIB.ctx = null; LIB.ana = null; } }
-    el.addEventListener('ended', () => { if (LIB.p && LIB.p.el === el) { libStop(); libMark(); } }); }
+    el.addEventListener('ended', () => { if (LIB.p && LIB.p.el === el) { const was = LIB.playing; libStop(); libMark(); if (typeof evoNext === 'function') evoNext(was, 1); } }); }
   return LIB.el;
 }
 /* A piece that is running but silent: the player says it plays, nothing reaches the output. Say so in the log, wake the output,

@@ -595,6 +595,15 @@ function evoTitleOf(path) {
   const sh = EVO.sheet; if (sh) { const e = (sh.songs || []).find(x => x.path === path); if (e) { const x = (sh.ideas || [])[e.n - 1] || {}; return [x.name || e.title, [e.creature, ...(e.mix || [])].join(' × ').replace(/-/g, ' ')]; } }
   const it = (LIB.items || []).find(x => x.path === path); return [it ? it.title : path.split('/').pop().replace(/\.[a-z0-9]+$/i, ''), ''];
 }
+/* What comes after (or before) a piece: the next one of its album, or of its run. An album plays through by itself. */
+function evoNeighbour(path, step) {
+  if (!path) return null;
+  if (path.startsWith('album:')) { for (const a of EVO.albums || []) { const i = a.pieces.findIndex(p => path === 'album:' + a.folder + '/' + p.file), q = i < 0 ? null : a.pieces[i + step];
+      if (q) return { path: 'album:' + a.folder + '/' + q.file, url: albUrl(a.folder, q.file), kind: 'audio', size: 5e7 }; if (i >= 0) return null; } return null; }
+  const songs = ((EVO.sheet && EVO.sheet.songs) || []).filter(e => e.path).sort((x, y) => x.n - y.n), i = songs.findIndex(e => e.path === path), q = i < 0 ? null : songs[i + step];
+  return q ? { path: q.path, kind: 'audio', size: 5e7 } : null;
+}
+function evoNext(path, step) { const it = EVO.open ? evoNeighbour(path, step) : null; if (it) { libPlay(it); return true; } return false; }
 function evoPlayer() {
   let bar = document.getElementById('evo-player');
   if (!bar) {
@@ -603,7 +612,10 @@ function evoPlayer() {
     const seek = e => { const [, d] = libPos(); if (!d || !LIB.p) return; const r = track.getBoundingClientRect(); libStart(clamp((e.clientX - r.left) / r.width, 0, .999) * d); };
     let drag = false; track.addEventListener('mousedown', e => { drag = true; seek(e); }); addEventListener('mousemove', e => { if (drag) seek(e); }); addEventListener('mouseup', () => { drag = false; });
     pp.onclick = () => { const p = LIB.p; if (!p) return; if (p.el) { p.el.paused ? p.el.play().catch(() => {}) : p.el.pause(); } else { libStop(); libMark(); } };
-    bar = h('div', { id: 'evo-player', hidden: true }, pp, h('div', { class: 'ep-what' }, name, sub), now, track, len, h('button', { class: 'ep-x', title: 'Stop', onclick: () => { libStop(); libMark(); } }, '■'));
+    const skip = step => () => { const was = LIB.playing; if (was && evoNeighbour(was, step)) { libStop(); evoNext(was, step); } };
+    const prev = h('button', { class: 'ep-x', title: 'The piece before', onclick: skip(-1) }, '◀◀'), next = h('button', { class: 'ep-x', title: 'The next piece', onclick: skip(1) }, '▶▶');
+    bar = h('div', { id: 'evo-player', hidden: true }, pp, h('div', { class: 'ep-what' }, name, sub), now, track, len, prev, next, h('button', { class: 'ep-x', title: 'Stop', onclick: () => { libStop(); libMark(); } }, '■'));
+    bar._nav = [prev, next];
     document.body.append(bar);
     setInterval(() => {
       const on = !!(EVO.open && LIB.p && LIB.playing); bar.hidden = !on; document.body.classList.toggle('has-player', on); if (!on) return;
@@ -611,6 +623,7 @@ function evoPlayer() {
       if (name.textContent !== a) name.textContent = a; if (sub.textContent !== b) sub.textContent = b;
       now.textContent = evoClock(t); len.textContent = d ? evoClock(d) : '–:––'; fill.style.width = (d ? clamp(t / d, 0, 1) * 100 : 0) + '%';
       pp.textContent = LIB.p.el && LIB.p.el.paused ? '▶' : '❚❚';
+      bar._nav[0].disabled = !evoNeighbour(LIB.playing, -1); bar._nav[1].disabled = !evoNeighbour(LIB.playing, 1);
     }, 200);
   }
 }
