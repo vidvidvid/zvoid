@@ -586,3 +586,32 @@ function evoDraw() {
 $('#btn-evo').onclick = () => (EVO.open ? closeEvo() : openEvo());
 evoNightPoll();
 addEventListener('keydown', e => { if (e.key === 'Escape' && EVO.open && !/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')) closeEvo(); });
+
+/* ---------- the player: what is playing, where in it you are, how long it is, and a bar to move through it ---------- */
+const evoClock = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+function evoTitleOf(path) {
+  if (!path) return ['', ''];
+  if (path.startsWith('album:')) { for (const a of EVO.albums || []) for (const p of a.pieces) if (path === 'album:' + a.folder + '/' + p.file) return [p.name, `${a.title} · ${(p.creatures || []).join(' × ').replace(/-/g, ' ')}`]; }
+  const sh = EVO.sheet; if (sh) { const e = (sh.songs || []).find(x => x.path === path); if (e) { const x = (sh.ideas || [])[e.n - 1] || {}; return [x.name || e.title, [e.creature, ...(e.mix || [])].join(' × ').replace(/-/g, ' ')]; } }
+  const it = (LIB.items || []).find(x => x.path === path); return [it ? it.title : path.split('/').pop().replace(/\.[a-z0-9]+$/i, ''), ''];
+}
+function evoPlayer() {
+  let bar = document.getElementById('evo-player');
+  if (!bar) {
+    const fill = h('i'), track = h('div', { class: 'ep-track', title: 'Click anywhere to play from there' }, fill), now = h('span', { class: 'ep-time' }, '0:00'), len = h('span', { class: 'ep-time' }, '0:00');
+    const pp = h('button', { class: 'ep-pp', title: 'Pause / play (space)' }, '❚❚'), name = h('b'), sub = h('small');
+    const seek = e => { const [, d] = libPos(); if (!d || !LIB.p) return; const r = track.getBoundingClientRect(); libStart(clamp((e.clientX - r.left) / r.width, 0, .999) * d); };
+    let drag = false; track.addEventListener('mousedown', e => { drag = true; seek(e); }); addEventListener('mousemove', e => { if (drag) seek(e); }); addEventListener('mouseup', () => { drag = false; });
+    pp.onclick = () => { const p = LIB.p; if (!p) return; if (p.el) { p.el.paused ? p.el.play().catch(() => {}) : p.el.pause(); } else { libStop(); libMark(); } };
+    bar = h('div', { id: 'evo-player', hidden: true }, pp, h('div', { class: 'ep-what' }, name, sub), now, track, len, h('button', { class: 'ep-x', title: 'Stop', onclick: () => { libStop(); libMark(); } }, '■'));
+    document.body.append(bar);
+    setInterval(() => {
+      const on = !!(EVO.open && LIB.p && LIB.playing); bar.hidden = !on; document.body.classList.toggle('has-player', on); if (!on) return;
+      const [t, d] = libPos(), [a, b] = evoTitleOf(LIB.playing);
+      if (name.textContent !== a) name.textContent = a; if (sub.textContent !== b) sub.textContent = b;
+      now.textContent = evoClock(t); len.textContent = d ? evoClock(d) : '–:––'; fill.style.width = (d ? clamp(t / d, 0, 1) * 100 : 0) + '%';
+      pp.textContent = LIB.p.el && LIB.p.el.paused ? '▶' : '❚❚';
+    }, 200);
+  }
+}
+evoPlayer();
