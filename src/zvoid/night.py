@@ -373,6 +373,60 @@ def _sides(slug: str) -> str:
     return f'{slug} — its words: ' + "; ".join(f'"{l["trigger"]}" ({", ".join(l["tags"])}, about {round(l["mean"]["bpm"])} bpm, {l["count"]} tracks)' for l in c.get("limbs", []))
 
 
+_PLAIN = set("a an the and of in on at to with that like as is it its by for from every each no one two all very bpm danceable".split())
+
+
+def _alike(caps: list) -> list:
+    """Pairs of plans that would come out sounding like each other: (how alike, i, j, the words they share). Two plans are
+    alike when they share many of their less common words, and more readily when they are led by the same creature
+    word, which calls up the same patterns from the adapter. Tested on the night of 22 November, where the artist heard
+    the same scratching drums in two pieces: of its 190 pairs, that pair was the most alike by this measure."""
+    T = []
+    for cap in caps:
+        lead = {w.strip() for w in str(cap).split(",")[:4] if re.fullmatch(r"[a-z\-]+-[a-z]", w.strip())}
+        T.append(({w for w in re.findall(r"[a-z]+", str(cap).lower()) if w not in _PLAIN and len(w) > 2}, lead))
+    df = {}
+    for t, _ in T:
+        for w in t:
+            df[w] = df.get(w, 0) + 1
+    rare = [{w for w in t if df[w] <= max(2, len(T) * .3)} for t, _ in T]
+    out = []
+    for i in range(len(T)):
+        for j in range(i + 1, len(T)):
+            sim = len(rare[i] & rare[j]) / max(1, min(len(rare[i]), len(rare[j])))
+            if sim > .3 or (T[i][1] & T[j][1] and sim > .2):
+                out.append((round(sim, 2), i, j, sorted(rare[i] & rare[j])))
+    return sorted(out, reverse=True)
+
+
+def _apart_plans(out: list, creatures: list) -> list:
+    """No two pieces of a collection may share a drum pattern. Where two plans are alike, the later one is written again,
+    told exactly which piece it is too close to and in which words, until none are (or two tries are spent)."""
+    for _ in range(2):
+        pairs = _alike([x.get("caption", "") for x in out])
+        if not pairs:
+            break
+        done = set()
+        for sim, i, j, shared in pairs:
+            if j in done or i in done:
+                continue
+            done.add(j)
+            a, b = out[i], out[j]
+            try:
+                got = chat.think(HOUSE, (
+                    f'Two pieces planned for one collection would come out sounding alike. The artist heard exactly this in an earlier collection (the same scratching, rolling drum pattern in two pieces) and wants it never to happen again.\n\n'
+                    f'THE PIECE THAT STAYS: "{a.get("title")}" ({a.get("bpm")} bpm)\n{a.get("caption")}\n\nTHE PIECE TO WRITE AGAIN: "{b.get("title")}" ({b.get("bpm")} bpm). Its idea: {b.get("idea")}\n{b.get("caption")}\n\n'
+                    f'They share these words: {", ".join(shared)}.\n\nWrite the second piece again as one song. Keep its title, its creatures and its idea. Give it a drum pattern of a different kind altogether (not a variation of the other one), described in different words; '
+                    f'a tempo at least 15 bpm away from {a.get("bpm")}; a different low end and a different voice; and begin its caption with a DIFFERENT word of its creature than "{str(b.get("caption", "")).split(",")[0].strip()}" if the creature has another.\n'
+                    "The creatures and their words:\n" + "\n".join(_sides(c) for c in creatures) + "\n"
+                    "The other captions of the collection, which it must not resemble either:\n" + "\n".join("- " + str(x.get("caption", ""))[:260] for k, x in enumerate(out) if k not in (i, j))), IDEAS_SCHEMA, 300).get("songs") or []
+                if got:
+                    out[j] = {**b, **got[0], "title": b.get("title"), "creature": b.get("creature"), "creature2": b.get("creature2", ""), "creature3": b.get("creature3", ""), "creature4": b.get("creature4", ""), "starts": b.get("starts"), "ends": b.get("ends")}
+            except Exception as ex:
+                print("[night] could not rewrite a plan that is too like another: " + str(ex)[:200], flush=True)
+    return out
+
+
 def ideas(creatures: list[str], count: int, direction: str, rng, merges_only=()) -> list[dict]:
     """The collection's songs, as different from one another as they can be. Claude writes them; if it is not there, they are drawn from the built-in palettes."""
     out = []
@@ -388,6 +442,9 @@ def ideas(creatures: list[str], count: int, direction: str, rng, merges_only=())
                          'Leave the unused creature fields as "" (all three of them for a piece with a single creature).\n\n' if len(creatures) > 1 else 'Set creature2, creature3 and creature4 to "" for every piece.\n\n') +
                       "They are " + str(n) + " different FEELINGS and " + str(n) + " different ways of making a body move, not variations of one: vary the mechanism (see the list of essences), the tempo across the whole dance range, what rides on the beat (a voice, the low end, a noise, more drums), "
                       "how long it stays at the peak, in the depth and in the void, and how it gets from one to another (melting, or thrown). No two may share a tempo band, a carrier and a path.\n"
+                      "NO TWO PIECES MAY SHARE A DRUM PATTERN. The artist heard the same scratching, rolling drums in two pieces of an earlier collection and wants that never to happen again. Each piece gets a drum pattern of a different kind "
+                      "(not a variation of another piece's), described in words no other caption uses; the same goes for its low end and its voice. Each creature word (like \"machine-girl-c\") may begin at most one caption in the collection "
+                      "while the creature has unused words left, because the same word calls up the same patterns. Never reuse a phrase from one caption in another.\n"
                       "The whole collection is ONE passage that never ends: each piece begins in the state the one before it ended in. "
                       + (f'The first of these must start in "{out[-1].get("ends", "depth")}", where the last one stopped.\n' if out else "The first may start anywhere.\n")
                       + ("Already planned, so do not repeat their feelings:\n" + "\n".join(f'- {x["title"]}: {x["idea"]} ({x["bpm"]} bpm, {x["creature"]}, {x.get("starts")} → {x.get("ends")})' for x in out) + "\n" if out else "")
@@ -397,6 +454,7 @@ def ideas(creatures: list[str], count: int, direction: str, rng, merges_only=())
             if not got:
                 break
             out += got[:n]
+        out = _apart_plans(out, creatures)
     except Exception as ex:
         print("[night] Claude could not write the ideas, using the built-in ones: " + str(ex)[:200], flush=True)
     songs = []

@@ -459,7 +459,7 @@ function evoAlbumView(a) {
   const v = Date.now() - Date.now() % 60000, pic = (name, cls) => h('img', { class: cls, src: albUrl(a.folder, name) + '&v=' + v, alt: '', loading: 'lazy' });
   return h('div', { id: 'evo-main' },
     h('div', { class: 'alb-head' }, a.cover ? pic('cover.jpg', 'alb-cover') : h('div', { class: 'alb-cover' }),
-      h('div', {}, h('small', {}, `album ${a.n} · kept ${a.kept || ''}`), h('h2', {}, a.title), h('p', { class: 'gym-note' }, `${a.pieces.length} pieces · played by ${(a.creatures || []).join(', ').replace(/-/g, ' ')}`), a.note ? h('p', { class: 'gym-note' }, a.note) : '',
+      h('div', {}, h('small', {}, `album ${a.n} · kept ${a.kept || ''} · a frozen copy: these are the pieces as they sounded then, and they never change`), h('h2', {}, a.title), h('p', { class: 'gym-note' }, `${a.pieces.length} pieces · played by ${(a.creatures || []).join(', ').replace(/-/g, ' ')}`), a.note ? h('p', { class: 'gym-note' }, a.note) : '',
         h('div', { class: 'acts' }, h('button', { onclick: () => api('/api/night/albums', { json: { album: a.folder } }).catch(e => toast(e.message, true)) }, 'show in Finder'),
           h('button', { onclick: () => { EVO.album = null; evoDraw(); } }, '← back')))),
     h('div', { class: 'alb-list' }, a.pieces.map(p => { const path = 'album:' + a.folder + '/' + p.file;
@@ -477,6 +477,7 @@ function evoNightView() {                               // tonight, piece by pie
   return h('div', { id: 'evo-main' },
     h('div', { class: 'evo-head' }, h('h2', {}, N.tag || 'the night'), h('small', {}, N.running ? (N.phase === 'chiselling' ? `chiselling until ${until} · ${N.carved} carvings kept of ${N.carves} tried` : `making the pieces · ${N.made} of ${N.count} · then chiselling until ${until}`) : (N.msg || 'finished'))),
     N.running ? h('p', { class: 'gym-note', id: 'night-msg' }, N.msg || '') : null,
+    h('p', { class: 'gym-note' }, 'This is the living collection: the same pieces, as they sound right now. Carving and finishing keep changing them. The albums on the left are frozen copies of how they sounded when a loop ended.'),
     ideas.length ? evoNightMap(N, sh) : null,
     ideas.length && EVO.taste ? evoTalk(sh) : null,
     !ideas.length ? h('div', { class: 'evo-empty' }, N.running ? 'Writing the ideas…' : 'No night has been run yet. Start one on the left.') :
