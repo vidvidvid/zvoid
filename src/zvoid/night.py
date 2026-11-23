@@ -1152,6 +1152,8 @@ LENSES = ("the parts: not a remaking at all. ONE part of the piece (its drums, i
           "release: the stretch that sounds most choked (muffled, squeezed, boxed in, everything pressed into one lump), to be opened so that each sound is clear and rings out",
           "the beat: where it falls apart, where the kick goes missing, where a body would stop moving",
           "the extremes: a peak that is not overwhelming enough, a depth that is not heavy enough",
+          "the ancestor: ONE stretch takes something from an earlier piece the artist rated highly (they are listed below): its drum pattern, its low end, its kind of voice or its way of moving, carried over into this piece's own world, tempo and sounds, "
+          "so that the best of the earlier collections lives on in this one. Choose the earlier piece whose strength this piece lacks, say in the note which one and what was taken, and write that into the caption in sound words. Never the earlier piece's title or its whole idea, only one thing of it. This one is a lottery",
           "the stumble: ONE stretch where the piece should trip over its own sound, as a glitch that belongs to it: the beat catching and skipping, a hit stuttering, the sound chopped, frozen for an instant or running backwards, then snapping back onto the pulse as if nothing had happened. "
           "Pick a stretch where the piece is changing state anyway (the way into or out of a peak), never the middle of a held peak, keep it as short as allowed, and say the glitching in the caption in plain sound words while the kick stays readable under it. This one is a lottery: it is tried, and the artist's ears decide")
 # two more ways of looking were tried for a night and dropped: "the edges" (a blur with no countable events) and "the passage" (a change of state
@@ -1200,7 +1202,16 @@ def parts_plan(song: dict, m: dict, raw: str, history: list, rating: int = 0) ->
     return {**pick, "start": round(moves.bar_time(grid, pick["bar"]), 3), "end": round(moves.bar_time(grid, pick["bar"] + pick["bars"]), 3), "caption": ""}
 
 
-def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "", history=None, learned=None, rating: int = 0) -> dict:
+def ancestors(sid: str) -> str:
+    """The pieces of earlier collections that the artist rated 4 or 5, as something a new piece may take from."""
+    old = sorted((v for k, v in marks().items() if not k.startswith(sid + ":") and _rate(v) >= 4), key=lambda v: str(v.get("when") or ""))[:12]   # the oldest first: what is furthest back is most in danger of being lost
+    if not old:
+        return ""
+    return ("EARLIER PIECES THE ARTIST RATED HIGHLY (for the ancestor):\n" + "\n".join(
+        f'- "{v.get("title", "")}" ({" × ".join(v.get("creatures") or [])}' + (f', {v["bpm"]} bpm' if v.get("bpm") else "") + f', rated {_rate(v)}): {v.get("idea", "")}' + (f' [made from: {str(v.get("caption") or "")[:230]}]' if v.get("caption") else "") for v in old) + "\n")
+
+
+def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "", history=None, learned=None, rating: int = 0, sid: str = "") -> dict:
     """Which stretch of the song to carve next, and into what. Claude reads the song as a timeline; without it, the stretch
     with the fewest drum hits that has not been tried is given drums."""
     secs, hits, lev = float(m.get("secs") or song["duration"]), m.get("hits") or [], m.get("sections") or []
@@ -1229,6 +1240,7 @@ def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: st
                         "When you remake one, write its cure into the caption in plain sound words: too little sub and bass means a deep heavy sub under the kick and a low end that carries; too much low-mid mud means fewer held sounds, "
                         "nothing thick or droning in the middle, each hit short with a gap after it; too harsh on top means fewer hissing and fizzing layers; too dull on top means crisp hats and bright cracks.\n") if m.get("apart_at") else "")
                   + hist + understood()
+                  + (ancestors(sid) if lens.startswith("the ancestor") else "")
                   + ({5: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 5 OF 5. That means it points the right way, not that it is finished: keep what makes it what it is and push it further the same way, clearer, every sound more pronounced.\n",
                       4: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 4 OF 5. It is good: sharpen it, do not turn it into something else.\n",
                       3: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 3 OF 5: fine, but not it. It needs a real change, not polish: pick the stretch that is most ordinary and make it the most alive.\n",
@@ -1541,11 +1553,13 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         others_ = [c_ for c_ in creatures if c_ not in (s_["song"]["creature"], *(s_["song"].get("mix") or []), s_["song"].get("creature2")) and c_ not in merges_only and c_ not in ("avsenik", "folk")]   # a seasoning comes in through its own lottery only
                         guest = rng.choice(others_) if others_ and rng.random() < .4 else ""      # now and then another creature carves the stretch: the creatures meet inside a piece
                         lens_ = LENSES[cycle % len(LENSES)].split(":")[0]
-                        stumble = lens_ in ("the stumble", "the old country", "the parts")     # the lotteries: what they add cannot be measured
+                        stumble = lens_ in ("the stumble", "the old country", "the parts", "the ancestor")     # the lotteries: what they add cannot be measured
                         if stumble:
                             knows = [c_ for c_ in others_ if c_ in ("machine-girl", "dds", "sophie")]
                             if lens_ == "the stumble":            # a glitch is best played by a creature that knows them
                                 guest = rng.choice(knows) if knows and rng.random() < .7 else guest
+                            elif lens_ == "the ancestor":         # what is taken from an earlier piece is played by this piece's own creatures
+                                guest = ""
                             else:                                 # the old sounds are played by the creature raised on them, if there is one; without it the piece's own creatures play them
                                 guest = next((c_ for c_ in ("avsenik", "folk") if c_ in gym.trained_slugs() and c_ not in _who(s_["entry"])), "")
                             if sum(1 for c_ in s_["entry"].get("carving", []) if c_.get("lens") == lens_ and c_.get("kept")) >= 2:
@@ -1561,7 +1575,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                             outs = [{"path": str(where / "moved.wav")}]
                         else:
                             cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, LENSES[cycle % len(LENSES)], guest, s_["entry"].get("carving", []),
-                                             [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:], rate(s_))
+                                             [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:], rate(s_), sid)
                             try:                                  # the cut begins on a downbeat and lasts whole bars, so the new sound comes in on the pulse
                                 grid = moves.beat_grid(s_["raw"], float(s_["song"].get("bpm") or s_["m"].get("bpm") or 140))
                                 a_, b_ = moves.snap(grid, cp["start"], cp["end"], least=max(2, int(round(12 / grid["bar"]))))
