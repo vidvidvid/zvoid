@@ -1144,10 +1144,10 @@ CHISEL_SCHEMA = {"type": "object", "required": ["start", "end", "caption", "note
                  "properties": {"start": {"type": "number"}, "end": {"type": "number"}, "caption": {"type": "string"}, "note": {"type": "string"}}}
 
 
-LENSES = ("the old country: ONE stretch that takes in a sound from old Slovenian village music, as a texture and never as its dance: accordion bellows wheezing and stabbing, zither or hammered dulcimer plucks, a jaw harp twanging, tamburica strumming, "
+LENSES = ("the parts: not a remaking at all. ONE part of the piece (its drums, its bass, its voice, or everything else) is pulled out for a moment or pushed forward, on whole bars, so that the piece itself makes a void or a surge",
+          "the old country: ONE stretch that takes in a sound from old Slovenian village music, as a texture and never as its dance: accordion bellows wheezing and stabbing, zither or hammered dulcimer plucks, a jaw harp twanging, tamburica strumming, "
           "village voices singing wordlessly in close parts. Choose one or two of these, cut short and chopped so they ride the piece's own drums as another strange sound, and name them plainly in the caption. If a guest creature is given for this stretch, it was raised on that music: let its instruments in, while the piece's own drums stay in charge. The piece's own pulse and drum pattern stay; "
           "no polka, no waltz, no oom-pah, nothing merry or folkloric. Pick a stretch where a new colour would lift the piece. This one is a lottery too",
-          "the parts: not a remaking at all. ONE part of the piece (its drums, its bass, its voice, or everything else) is pulled out for a moment or pushed forward, on whole bars, so that the piece itself makes a void or a surge",
           "the records: the stretch that is furthest from the clarity of the records its creatures learned from (see the line about that below), to be remade so that what is wrong with it there is put right",
           "release: the stretch that sounds most choked (muffled, squeezed, boxed in, everything pressed into one lump), to be opened so that each sound is clear and rings out",
           "the beat: where it falls apart, where the kick goes missing, where a body would stop moving",
