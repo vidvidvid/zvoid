@@ -757,9 +757,30 @@ function libStart(off) {
   p.off = clamp(off, 0, Math.max(0, p.buf.duration - .02)); p.t0 = c.currentTime; p.paused = false; p.src = src; src.start(0, p.off);
 }
 function libStream() {                                 // one player for long pieces: it reads the file as it goes and holds almost nothing in memory
-  if (!LIB.el) { LIB.el = new Audio(); LIB.el.preload = 'auto'; try { ac().createMediaElementSource(LIB.el).connect(bus()); } catch (e) {}
+  if (!LIB.el) { LIB.el = new Audio(); LIB.el.preload = 'auto'; if (!LIB.direct) { try { ac().createMediaElementSource(LIB.el).connect(bus()); } catch (e) {} }
     LIB.el.addEventListener('ended', () => { if (LIB.p && LIB.p.el === LIB.el) { libStop(); libMark(); } }); }
   return LIB.el;
+}
+/* A piece that is running but silent: the player says it plays, nothing reaches the output. Say so in the log, wake the output,
+   and if it is still silent play the file straight to the output instead of through the analyser (the picture stops hearing it; you do). */
+const libPeak = () => { if (!ANA) return 0; const d = new Uint8Array(ANA.fftSize); let top = 0; ANA.getByteTimeDomainData(d); for (const v of d) top = Math.max(top, Math.abs(v - 128)); return top; };
+function libHeard(p) {
+  if (LIB.direct) return;
+  const el = p.el, look = () => { let top = 0; return new Promise(res => { let n = 0; const id = setInterval(() => { top = Math.max(top, libPeak()); if (++n >= 8) { clearInterval(id); res(top); } }, 120); }); };
+  const state = top => `output ${ac().state} at ${ac().sampleRate} Hz · player at ${el.currentTime.toFixed(1)} s, ready ${el.readyState}, ${el.paused ? 'paused' : 'running'}${el.error ? ', error ' + el.error.code : ''} · signal ${top}`;
+  setTimeout(async () => {
+    if (LIB.p !== p || el.paused) return;
+    let top = await look(); if (LIB.p !== p || el.paused) return;
+    if (top > 0 && ac().state === 'running') return;
+    _clog('[sound] playing but silent: ' + state(top));
+    try { await ac().resume(); } catch (e) {}
+    top = await look(); if (LIB.p !== p || el.paused) return;
+    if (top > 0 && ac().state === 'running') return _clog('[sound] waking the output was enough: ' + state(top));
+    if (!(el.currentTime > 0)) return _clog('[sound] the player itself is not moving: ' + state(top));
+    _clog('[sound] still silent, playing straight to the output: ' + state(top));
+    const at = el.currentTime; el.pause(); LIB.direct = true; LIB.el = null;
+    const el2 = libStream(); p.el = el2; el2.src = el.src; el2.addEventListener('loadedmetadata', () => { try { el2.currentTime = at; } catch (e) {} }, { once: true }); el2.play().catch(e => _clog('[sound] straight to the output failed too: ' + (e.message || e)));
+  }, 1500);
 }
 /* Short clips are read into memory and start the instant you click. Whole songs are streamed: read into memory, each one is
    tens of megabytes and seconds of work, and doing that for every song the pointer passed over is what made the app crawl. */
@@ -773,6 +794,7 @@ async function libPlay(it, at) {                     // at: where to start, 0..1
     const go = () => { if (LIB.p !== p) return; if (p.want != null && isFinite(el.duration)) { try { el.currentTime = clamp(p.want, 0, .999) * el.duration; } catch (e) {} p.want = null; } };
     el.addEventListener('loadedmetadata', go, { once: true });
     el.play().catch(e => { if (LIB.p === p) { libStop(); libMark(); toast('could not play that: ' + (e.message || e), true); } });
+    libHeard(p);
     return;
   }
   try { const buf = await loadBuf(it.path); let held = 0; for (const [k, v] of [...bufs.entries()].reverse()) { held++; if (held > 12 && k !== it.path) bufs.delete(k); }   // keep the last dozen short clips ready, not all of them
