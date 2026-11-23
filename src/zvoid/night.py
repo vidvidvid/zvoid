@@ -1149,7 +1149,10 @@ LENSES = ("the records: the stretch that is furthest from the clarity of the rec
           "the beat: where it falls apart, where the kick goes missing, where a body would stop moving",
           "the extremes: a peak that is not overwhelming enough, a depth that is not heavy enough",
           "the stumble: ONE stretch where the piece should trip over its own sound, as a glitch that belongs to it: the beat catching and skipping, a hit stuttering, the sound chopped, frozen for an instant or running backwards, then snapping back onto the pulse as if nothing had happened. "
-          "Pick a stretch where the piece is changing state anyway (the way into or out of a peak), never the middle of a held peak, keep it as short as allowed, and say the glitching in the caption in plain sound words while the kick stays readable under it. This one is a lottery: it is tried, and the artist's ears decide")
+          "Pick a stretch where the piece is changing state anyway (the way into or out of a peak), never the middle of a held peak, keep it as short as allowed, and say the glitching in the caption in plain sound words while the kick stays readable under it. This one is a lottery: it is tried, and the artist's ears decide",
+          "the old country: ONE stretch that takes in a sound from old Slovenian village music, as a texture and never as its dance: accordion bellows wheezing and stabbing, zither or hammered dulcimer plucks, a jaw harp twanging, tamburica strumming, "
+          "village voices singing wordlessly in close parts. Choose one or two of these, cut short and chopped so they ride the piece's own drums as another strange sound, and name them plainly in the caption. The piece's own pulse and drum pattern stay; "
+          "no polka, no waltz, no oom-pah, nothing merry or folkloric. Pick a stretch where a new colour would lift the piece. This one is a lottery too")
 # two more ways of looking were tried for a night and dropped: "the edges" (a blur with no countable events) and "the passage" (a change of state
 # too orderly or too abrupt). Of 271 carvings made under them, 17 were kept; the others kept about one in six.
 
@@ -1490,12 +1493,16 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     try:
                         others_ = [c_ for c_ in creatures if c_ not in (s_["song"]["creature"], *(s_["song"].get("mix") or []), s_["song"].get("creature2"))]
                         guest = rng.choice(others_) if others_ and rng.random() < .4 else ""      # now and then another creature carves the stretch: the creatures meet inside a piece
-                        stumble = LENSES[cycle % len(LENSES)].startswith("the stumble")
-                        if stumble:                               # a glitch is best played by a creature that knows them
+                        lens_ = LENSES[cycle % len(LENSES)].split(":")[0]
+                        stumble = lens_ in ("the stumble", "the old country")     # the lotteries: what they add cannot be measured
+                        if stumble:
                             knows = [c_ for c_ in others_ if c_ in ("machine-girl", "dds", "sophie")]
-                            guest = rng.choice(knows) if knows and rng.random() < .7 else guest
-                            if sum(1 for c_ in s_["entry"].get("carving", []) if c_.get("lens") == "the stumble" and c_.get("kept")) >= 2:
-                                s_["misses"] += 1                 # two stumbles in one piece are enough
+                            if lens_ == "the stumble":            # a glitch is best played by a creature that knows them
+                                guest = rng.choice(knows) if knows and rng.random() < .7 else guest
+                            else:
+                                guest = ""                        # the old sounds are played by the piece's own creatures, so they stay inside its world
+                            if sum(1 for c_ in s_["entry"].get("carving", []) if c_.get("lens") == lens_ and c_.get("kept")) >= 2:
+                                s_["misses"] += 1                 # two of a kind in one piece are enough
                                 continue
                         seen = [(o["title"], c) for o in done if o is not s_ for c in o["entry"].get("carving", [])]
                         cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, LENSES[cycle % len(LENSES)], guest, s_["entry"].get("carving", []),
