@@ -55,6 +55,10 @@ def _chant(rng, lines=(2, 4)):
     return out
 
 
+# every piece is sung in Slovenian phonetics (left to itself the model reads invented syllables as Spanish), and the model's planner is steered away from what the artist heard creep in
+VOICE = {"vocal_language": "sl", "lm_negative_prompt": "reggaeton, dembow, latin pop, latin trap, tropical, moombahton, spanish vocals, spanish rap, sung melody, crooning, autotune, pop chorus, rap verse, shaker, cowbell, congas, bongos"}
+
+
 def recipe(creature: str, direction: str = "", rng=None) -> dict:
     """One song's settings. Different every time, always in the shape that has worked."""
     rng = rng or random.Random()
@@ -152,11 +156,12 @@ HOW A PLAN IS WRITTEN:
 
 THE ARTIST'S OWN EXAMPLES OF CLARITY are the records the creatures were trained on: "the source songs that the entities were trained on are examples of clarity. We shouldn't make the same songs, but the clarity of them should be mimicked." Measured against those records, the pieces made so far are light in the sub and bass (3 dB on average, up to 12 in places), thick in the low mids (the mud), and far less dense. So in every plan: the low end is a deep, heavy sub that carries the piece under the kick; nothing thick, held or droning sits in the low mids (no pads, no sustained chords, no walls of mid-range noise under the drums); every sound is short enough to leave a gap; and the whole is dense and loud like a finished record, not thin. Say this in the caption in sound words. Never name or imitate the records themselves.
 
-FOUR THINGS THE ARTIST HEARD GO WRONG, AND HOW TO AVOID THEM:
+FIVE THINGS THE ARTIST HEARD GO WRONG, AND HOW TO AVOID THEM:
 - A constant hum under the whole piece. A tag is applied to the WHOLE piece, not to one section, so any tag that names something sustained lays a bed under everything, and then there is no void and no depth, only a wash: never write drone, hum, pad, sustained, swell, wash, ambience, echo, reverb, hollow pipe, held note. The low end must be struck, not held: "sub hits that stop dead", "short sub thuds". Always include tags for edges AND for openness: "punchy", "clear", "open", "bright crisp top end", "wide", "every hit rings out". The depth is heaviness, not a hum.
 - The sound choking. Tags that close a sound in are applied to the whole piece too: never write dry, close, tight, muffled, dark, dull, compressed, crushed, squashed, buried, claustrophobic, boxed, lo-fi, underwater, distant. Weight comes from what is struck, not from pressing everything together.
 - Smooth, soulful singing appearing from nowhere. The model sings anything voice-like in its default pop style unless told otherwise. Describe every voice as shouted, barked, chanted in unison, whispered, growled, rasped or throat-sung, and add "no melody in the voices, spoken rhythm". Never write wailing, singing, sung, humming, choir, soulful, high voice, female voice, crooning.
-- In the lyrics, the same: syllables start with hard consonants and are short (ka, tu, gra, zok, thum, tek, bra). No long open vowels and no vowel runs (not ee-yah, ah-ee-yo, oh-oh, yeah), and no trailing dots that stretch a sound.
+- In the lyrics, the same: syllables are short, start with hard consonants and END in a consonant or a cluster (grk, vrsk, zokt, tsk, hrak, krv, drm, thum, tek). No long open vowels and no vowel runs (not ee-yah, ah-ee-yo, oh-oh, yeah), and no trailing dots that stretch a sound.
+- A Latin dance record appearing from nowhere: a bouncing off-beat rhythm and voices that sound Spanish. The artist heard it and wants it gone for good. The model falls into it from three things, so never write them. (1) Open, sing-song syllable chains that end in vowels (ka tu ra, ka tu ka tu, la la, na na, a-e-o): they read as Spanish. (2) The three-three-two kick: a kick "grouped in threes", "long-short-short", "bouncing", "swung", "rolling off the beat", a sub or a clap answering on the off-beat as the main pattern. Kicks are straight on every beat, or broken, sprinting, tripping, galloping in fours, never bouncing. (3) Hand-held party percussion: shaker, cowbell, congas, bongos, claves, guiro, timbales, whistles, airhorn. Strikes are metal, wood, bone, stone, skin drums hit with sticks. Voices never rap in verses and never sing a tune.
 Drums come and go: present and hard at the peaks, a few heavy ones in the depths.
 WHAT THE ARTIST HAS SAID ABOUT PIECES ALREADY MADE (steer by this):
 - Liked most: a frantic, drum-led chase in stop-start bursts; and "panic as a chase: drums sprint in stop-start bursts and are thrown to the bottom without warning" ("a great direction"). Drums carrying a piece is good.
@@ -1417,7 +1422,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
     def make(song, where: Path, strength: float, seed: int):
         mix = song.get("mix") or ([song["creature2"]] if song.get("creature2") else [])
         at = hybrid([song["creature"], *mix], d) if mix else ""
-        params = gym.bred_boost(coerce(e.spec, {"task": "text2music", "caption": song["caption"], "lyrics": song["lyrics"], "duration": song["duration"], "bpm": song["bpm"],
+        params = gym.bred_boost(coerce(e.spec, {**VOICE, "task": "text2music", "caption": song["caption"], "lyrics": song["lyrics"], "duration": song["duration"], "bpm": song["bpm"],
                                                 "thinking": True, "batch": 1, "seed": seed, "creature": song["creature"], "creature_strength": round(strength * (1 + .1 * len(mix)), 2)}))   # measured: a merge played at double smears the drums; a little above a single creature's strength is clearest
         if at:
             params["creature_at"] = at
@@ -1603,7 +1608,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                             s_["tried"].append((cp["start"], cp["end"]))
                             _state["msg"] = base + f" · remaking {cp['start']:.0f}–{cp['end']:.0f}s"
                             where.mkdir()
-                            params = gym.bred_boost(coerce(e.spec, {"task": "repaint", "src_audio": s_["raw"], "repaint_start": cp["start"], "repaint_end": cp["end"], "caption": cp["caption"],
+                            params = gym.bred_boost(coerce(e.spec, {**VOICE, "task": "repaint", "src_audio": s_["raw"], "repaint_start": cp["start"], "repaint_end": cp["end"], "caption": cp["caption"],
                                                                     "lyrics": s_["song"]["lyrics"], "duration": round(float(s_["m"].get("secs") or s_["song"]["duration"]), 1), "thinking": False, "batch": 1,
                                                                     "seed": rng.randint(1, 2 ** 31 - 1), "creature": guest or s_["song"]["creature"],
                                                                     "creature_strength": 1.6 if guest else s_["strength"]}))
