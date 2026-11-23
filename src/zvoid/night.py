@@ -946,6 +946,66 @@ def like_sources(path: str, creatures) -> dict:
     return json.loads(r.stdout.strip().splitlines()[-1])
 
 
+ALBUM_SCHEMA = {"type": "object", "required": ["title"], "properties": {"title": {"type": "string"}}}
+
+
+def album(sid: str, files: dict | None = None, note: str = "") -> str:
+    """The outcome of one loop, kept as an album: a folder of its own under "albums", numbered in the order the loops
+    ended and given a title, holding every finished piece as it sounded when the loop ended (lossless, under the name
+    the artist knows it by) and a sheet that says what the loop was. Later loops change the pieces in the library; an
+    album never changes. `files` gives other audio for some pieces (number -> path), for an outcome that has since
+    been worked on."""
+    import soundfile as sf
+    from .paths import ROOT
+    d = DIR / sid
+    sheet, names = json.loads((d / "collection.json").read_text()), {}
+    try:
+        names = json.loads((d / "names.json").read_text())
+    except Exception:
+        pass
+    songs = [e for e in sheet.get("songs", []) if Path(str((files or {}).get(e.get("n")) or e.get("path") or "")).exists()]
+    if not songs:
+        return ""
+    root = ROOT / "albums"
+    root.mkdir(exist_ok=True)
+    num = 1 + max([int(m.group(1)) for f in root.iterdir() if f.is_dir() for m in [re.match(r"(\d+) ", f.name)] if m] or [0])
+    safe = lambda t: "".join({"/": "∕", "\\": "⧵", ":": "꞉"}.get(ch, ch) for ch in " ".join(str(t).split()) if ch >= " ")[:80].strip(" .") or "untitled"
+    name = lambda e: names.get(str(e.get("n"))) or e.get("title") or "untitled"
+    rates, cuts = marks_of(sid), [c for e in songs for c in (e.get("carving") or [])]
+    title = ""
+    try:
+        title = " ".join(str(chat.think(
+            "You name albums of rave music of the future. Titles are strange and exact: invented words, numbers, symbols, a kanji or a few Arabic letters, a file name, a time of day. Never a genre, never an existing artist or album, never a plain English phrase.",
+            "Name this album in at most 40 characters. Its pieces:\n" + "\n".join(f'- "{name(e)}": {e.get("idea", "")}' for e in songs)
+            + ("\n\nAlbums that already exist (be unlike them): " + "; ".join(f.name for f in sorted(root.iterdir()) if f.is_dir()) if any(root.iterdir()) else ""), ALBUM_SCHEMA, 120).get("title") or "").split())[:40]
+    except Exception:
+        pass
+    title = title or (sheet.get("name") or "a night") + time.strftime(" · %H.%M")
+    out = root / f"{num:02d} {safe(title)}"
+    out.mkdir()
+    lines = [f"# {title}", "", f"Album {num}. Kept {time.strftime('%-d %B %Y, %H:%M')}.", "",
+             f"The outcome of a loop on the collection “{sheet.get('name') or sid}” ({sid}), played by {', '.join(sheet.get('creatures') or [])}.",
+             f"{sum(1 for c in cuts if c.get('kept'))} carvings kept of {len(cuts)} tried on these pieces so far." if cuts else "No carving yet.", *([note] if note else []), "", "## Pieces", ""]
+    for e in songs:
+        src, n = Path(str((files or {}).get(e.get("n")) or e["path"])), int(e.get("n") or 0)
+        x, sr = sf.read(str(src), always_2d=True, dtype="float32")
+        sf.write(str(out / f"{n:02d} {safe(name(e))}.flac"), x.clip(-1, 1), sr, subtype="PCM_24")
+        plan = (sheet.get("ideas") or [])[n - 1] if 0 < n <= len(sheet.get("ideas") or []) else {}
+        kept = sum(1 for c in (e.get("carving") or []) if c.get("kept"))
+        lines += [f"{n:02d}. **{name(e)}**" + (f" (made as “{e.get('title')}”)" if e.get("title") and e.get("title") != name(e) else ""),
+                  f"    {' × '.join(dict.fromkeys(_who(e)))}" + (f" · {plan['bpm']} bpm" if plan.get("bpm") else "") + f" · {len(x) / sr / 60:.0f}:{int(len(x) / sr) % 60:02d}"
+                  + (f" · rated {rates[str(n)]} of 5" if rates.get(str(n)) else "") + (f" · {kept} carvings kept" if kept else ""),
+                  f"    {e.get('idea', '')}", ""]
+    u = _talk()["understanding"]
+    if u:
+        lines += ["## What the program understood about the artist's taste at this point", "", *("- " + x for x in u), ""]
+    (out / "album.md").write_text("\n".join(lines))
+    (out / "album.json").write_text(json.dumps({"n": num, "title": title, "kept": time.strftime("%Y-%m-%d %H:%M"), "collection": sid, "creatures": sheet.get("creatures"), "note": note,
+                                                "pieces": [{"n": e.get("n"), "name": name(e), "made_as": e.get("title"), "creatures": list(dict.fromkeys(_who(e))), "rating": rates.get(str(e.get("n")), 0), "idea": e.get("idea", "")} for e in songs]},
+                                               indent=1, ensure_ascii=False))
+    return str(out)
+
+
 def _who(song: dict) -> list:
     return [c for c in [song.get("creature"), song.get("creature2"), *(song.get("mix") or [])] if c]
 
@@ -1403,6 +1463,15 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     print("[night] could not join them: " + str(ex)[:300], flush=True)
             _state["msg"] = (f"stopped: {_state['made']} songs are in the library" if _state["stop"] else "stopped: " + _state["error"] if _state["error"]
                              else f"done: {_state['made']} songs are in the library as “{tag}”" + (f", {_state['carved']} carvings kept of {_state['carves']} tried" if _state.get("carves") else ""))
+            if _state["made"] and not _state["error"]:              # what this loop came to is kept as an album, whether it ran its course or was stopped
+                try:
+                    save()
+                    kept_at = album(sid)
+                    if kept_at:
+                        _state["album"] = kept_at
+                        _state["msg"] += " · kept as the album “" + Path(kept_at).name + "”"
+                except Exception as ex:
+                    print("[night] could not keep the album: " + str(ex)[:300], flush=True)
         except Exception as ex:
             _state["error"] = str(ex).strip().splitlines()[0][:300] if str(ex).strip() else "it failed"
             _state["msg"] = "stopped: " + _state["error"]
