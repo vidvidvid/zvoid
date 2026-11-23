@@ -384,10 +384,10 @@ function evoTalk(sh) {
     onblur: () => setTimeout(() => { if (EVO.stale && !EVO.talkBusy && !(document.activeElement && document.activeElement.tagName === 'TEXTAREA' && document.activeElement.closest('.night-talk'))) { EVO.stale = false; evoDraw(); } }, 600) }); ta.value = EVO.talkText || '';
   const know = h('div', { class: 'talk-know' }, h('h4', {}, 'what I understand so far'),
     T.understanding.length ? h('ul', {}, T.understanding.map(u => h('li', {}, u))) : h('p', { class: 'gym-note' }, 'Nothing yet. Mark a piece “more” or “less”, or let me ask you something.'),
-    T.understanding.length && !EVO.fixing && !EVO.talkBusy ? h('button', { class: 'talk-link', onclick: () => { EVO.fixing = true; EVO.talkText = ''; evoDraw(); } }, 'that’s not right…') : '');
+    T.understanding.length && !EVO.fixing && !EVO.talkBusy ? h('button', { class: 'talk-link', onclick: () => { EVO.fixing = true; EVO.talkText = ''; evoDraw(); } }, 'tell me something, or correct me…') : '');
   let ask;
   if (EVO.talkBusy) ask = h('p', { class: 'gym-note talk-think' }, 'thinking…');
-  else if (EVO.fixing) ask = h('div', {}, h('h4', {}, 'tell me what I got wrong'), ta,
+  else if (EVO.fixing) ask = h('div', {}, h('h4', {}, 'tell me anything: what you hear in a piece, or what I got wrong'), ta,
     h('div', { class: 'acts' }, h('button', { class: 'hot', onclick: () => { const text = EVO.talkText || ''; if (!text.trim()) return toast('write what is wrong first', true); EVO.fixing = false; evoTalkDo(() => api('/api/night/answer', { json: { id, text, correction: true } })); } }, 'correct it'),
       h('button', { onclick: () => { EVO.fixing = false; EVO.talkText = ''; evoDraw(); } }, 'never mind')));
   else if (q) ask = h('div', {}, h('h4', {}, q.text),
@@ -402,10 +402,13 @@ function evoTalk(sh) {
     h('button', { class: 'hot', onclick: () => evoAsk(0) }, 'ask me something'));
   return h('div', { class: 'night-talk' }, know, h('div', { class: 'talk-ask' }, ask));
 }
-/* Your verdict on a piece: more like this, or not this. Nothing can measure taste, so this is what the next night steers by. */
+/* How much you like a piece, 1 to 5. Nothing can measure taste, so this is what the carving and the next night steer by.
+   Rate as many as you like in a row: the question about why comes once you pause, about the last one you rated. */
 async function evoMarkPiece(n, v) {
   try { const N = EVO.night || {}, cur = (EVO.marks || {})[n] || 0; EVO.marks = await api('/api/night/mark', { json: { id: N.id, n, mark: cur === v ? 0 : v } }); evoDraw();
-    if (cur !== v && EVO.taste && !EVO.talkBusy) { EVO.fixing = false; await evoAsk(n); const el = document.querySelector('.night-talk'); if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } } catch (e) { toast(e.message, true); }
+    clearTimeout(EVO.askT);
+    if (cur !== v && EVO.taste) EVO.askT = setTimeout(() => { if (EVO.talkBusy || (document.activeElement && document.activeElement.closest && document.activeElement.closest('.night-talk'))) return; EVO.fixing = false; evoAsk(n); }, 6000);
+  } catch (e) { toast(e.message, true); }
 }
 function evoNightView() {                               // tonight, piece by piece: who plays it, what it is, and where it has got to
   const N = EVO.night || {}, sh = EVO.sheet && EVO.sheet.id === N.id ? EVO.sheet : null, ideas = (sh && sh.ideas) || [], done = {}, cur = /song (\d+) of/.exec(N.msg || '');
@@ -425,9 +428,8 @@ function evoNightView() {                               // tonight, piece by pie
         h('div', { class: 'night-what' }, h('b', {}, x.name || x.title, h('em', {}, `${x.bpm} bpm`)), h('small', { class: 'night-who' }, who(x)), h('small', { title: x.idea }, x.idea)),
         path ? libWave({ path, kind: 'audio', size: 5e7 }) : h('span', { class: 'night-wait' }, making ? 'being made now…' : 'waiting'),
         h('small', { class: 'night-carve', title: tried ? (e.carving || []).map(c => `${c.kept ? 'kept' : 'not kept'}: ${c.from}–${c.to}s${c.by ? ' by ' + c.by : ''} · ${c.why || ''}`).join('\n') : '' }, tried ? `${kept} of ${tried} carvings kept` : ''),
-        path && EVO.marks ? h('span', { class: 'night-marks' },
-          h('button', { class: 'night-mark' + (EVO.marks[n] === 1 ? ' on' : ''), title: 'More like this: the next night moves toward it', onclick: () => evoMarkPiece(n, 1) }, 'more'),
-          h('button', { class: 'night-mark away' + (EVO.marks[n] === -1 ? ' on' : ''), title: 'Not this: the next night stays away from it', onclick: () => evoMarkPiece(n, -1) }, 'less')) : h('span', {})); })));
+        path && EVO.marks ? h('span', { class: 'night-marks', title: 'How much do you like it? 1: not this at all · 3: fine, but not it · 5: this is it. Tap the same number again to clear it.' },
+          [1, 2, 3, 4, 5].map(v => h('button', { class: 'night-mark r' + v + ((EVO.marks[n] || 0) >= v ? ' on' : '') + (EVO.marks[n] === v ? ' at' : ''), onclick: () => evoMarkPiece(n, v) }, String(v)))) : h('span', {})); })));
 }
 function evoMark() { document.querySelectorAll('#evo .evo-pp').forEach(b => { const on = b.dataset.path === LIB.playing; b.textContent = on ? '■' : '▶'; const box = b.closest('.evo-card, .evo-step, .night-row, .talk-piece'); if (box) box.classList.toggle('playing', on); }); }
 

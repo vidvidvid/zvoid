@@ -175,11 +175,20 @@ def marks() -> dict:
 
 
 def marks_of(sid: str) -> dict:
-    return {k.split(":")[1]: v.get("mark", 0) for k, v in marks().items() if k.startswith(sid + ":")}
+    return {k.split(":")[1]: _rate(v) for k, v in marks().items() if k.startswith(sid + ":")}
+
+
+RATES = {0: "not rated yet", 1: "1 of 5: not this at all", 2: "2 of 5: not working", 3: "3 of 5: fine, but not it", 4: "4 of 5: good", 5: "5 of 5: this is it"}
+
+
+def _rate(v: dict) -> int:
+    """How much the artist likes a piece, 1 to 5 (0: no verdict). Older marks were only more / less."""
+    r = int(v.get("rate") or 0)
+    return r if 1 <= r <= 5 else 4 if v.get("mark", 0) > 0 else 2 if v.get("mark", 0) < 0 else 0
 
 
 def mark(sid: str, n: int, v: int) -> dict:
-    """The artist's verdict on a finished piece: more like this (1), not this (-1), or no verdict (0). It is kept with
+    """The artist's verdict on a finished piece: how much they like it, 1 to 5, or no verdict (0). It is kept with
     enough of the piece (who played it, its idea, what it was made from) for a later night to steer by."""
     if not re.fullmatch(r"[a-z0-9]{6,16}", sid) or not (DIR / sid / "collection.json").exists():
         raise FileNotFoundError("no such collection")
@@ -200,7 +209,8 @@ def mark(sid: str, n: int, v: int) -> dict:
             names = json.loads((DIR / sid / "names.json").read_text())
         except Exception:
             pass
-        every[key] = {"mark": 1 if v > 0 else -1, "title": names.get(str(n)) or e.get("title", ""), "creatures": [c for c in [e.get("creature"), *(e.get("mix") or [])] if c], "idea": e.get("idea", ""),
+        v = max(1, min(5, int(v)))
+        every[key] = {"rate": v, "mark": 1 if v >= 4 else -1 if v <= 2 else 0, "title": names.get(str(n)) or e.get("title", ""), "creatures": [c for c in [e.get("creature"), *(e.get("mix") or [])] if c], "idea": e.get("idea", ""),
                       "bpm": plan.get("bpm"), "caption": cap[:400], "path": e.get("path"), "when": time.strftime("%Y-%m-%d %H:%M")}
     MARKS.parent.mkdir(parents=True, exist_ok=True)
     MARKS.write_text(json.dumps(every, indent=1, ensure_ascii=False))
@@ -259,7 +269,7 @@ def _pieces(sid: str) -> list:
 
 def _told(t: dict, sid: str, ps: list) -> str:
     """Everything the listener knows, as text: the pieces, the marks, the conversation so far, and what it believed last time."""
-    word = {1: "MORE like this", -1: "NOT this", 0: "no mark yet"}
+    word = {k: "the artist rated it " + v if k else v for k, v in RATES.items()}
     return ("THE PIECES OF THIS COLLECTION\n" + "\n".join(f'{p["n"]}. "{p["title"]}" ({" × ".join(p["creatures"])}, {p["bpm"]} bpm) [{word[p["mark"]]}]: {p["idea"]} Made from: {p["caption"]}' for p in ps)
             + "\n\nTHE CONVERSATION SO FAR (oldest first)\n" + ("\n".join(f'- You asked: {x.get("q", "")}' + (f' (about: {", ".join(x.get("titles") or [])})' if x.get("titles") else "")
                                                                     + f'\n  They answered: {"; ".join(x.get("picks") or []) or "(tapped nothing)"}' + (f' and said: "{x["text"]}"' if x.get("text") else "") for x in t["talk"][-24:]) or "(nothing yet)")
@@ -306,7 +316,7 @@ def answer(sid: str, picks: list, text: str = "", correction: bool = False) -> d
         raise RuntimeError("tap an answer or write one")
     ps = _pieces(sid or (q or {}).get("sid") or "") if (sid or (q or {}).get("sid")) else []
     title = {p["n"]: p["title"] for p in ps}
-    t["talk"].append({"when": time.strftime("%Y-%m-%d %H:%M"), "sid": sid, "q": "You told them what you understood, and they corrected it." if correction else q["text"],
+    t["talk"].append({"when": time.strftime("%Y-%m-%d %H:%M"), "sid": sid, "q": "They said this without being asked: a remark while listening, or a correction of what you wrote down." if correction else q["text"],
                       "pieces": [] if correction else q["pieces"], "titles": [] if correction else [title.get(n, str(n)) for n in q["pieces"]], "picks": picks, "text": text})
     _talk_save(t)                                            # the answer is safe even if the summary below fails
     try:
@@ -340,18 +350,18 @@ def taste() -> str:
             for e in sh.get("songs", []):
                 key = f"{sh.get('id') or f.parent.name}:{e.get('n')}"
                 if e.get("path") in starred and key not in every:
-                    every[key] = {"mark": 1, "title": e.get("title", ""), "creatures": [c for c in [e.get("creature"), *(e.get("mix") or [])] if c], "idea": e.get("idea", ""), "bpm": None, "caption": ""}
+                    every[key] = {"rate": 5, "mark": 1, "title": e.get("title", ""), "creatures": [c for c in [e.get("creature"), *(e.get("mix") or [])] if c], "idea": e.get("idea", ""), "bpm": None, "caption": ""}
     except Exception:
         pass
-    liked, away = [v for v in every.values() if v.get("mark", 0) > 0], [v for v in every.values() if v.get("mark", 0) < 0]
-    if not liked and not away:
+    rated = sorted([v for v in every.values() if _rate(v)], key=lambda v: -_rate(v))
+    if not rated:
         return understood()
-    line = lambda v: (f'- "{v.get("title", "")}" ({" × ".join(v.get("creatures") or [])}' + (f', {v["bpm"]} bpm' if v.get("bpm") else "") + f'): {v.get("idea", "")}'
+    line = lambda v: (f'- [{_rate(v)} of 5] "{v.get("title", "")}" ({" × ".join(v.get("creatures") or [])}' + (f', {v["bpm"]} bpm' if v.get("bpm") else "") + f'): {v.get("idea", "")}'
                       + (f' [made from: {v["caption"][:220]}]' if v.get("caption") else ""))
-    return (understood() + "WHAT THE ARTIST MARKED AFTER LISTENING (their ears are the only judge of taste; this outweighs anything that can be measured):\n"
-            + ("More like these. Work out what they have in common (which creatures and merges, what carries them, how they move, what their sounds are made of) and go further in that direction, without repeating any of them:\n"
-               + "\n".join(line(v) for v in liked[-12:]) + "\n" if liked else "")
-            + ("Not these. Work out what they share and stay away from it:\n" + "\n".join(line(v) for v in away[-12:]) + "\n" if away else "") + "\n")
+    return (understood() + "HOW MUCH THE ARTIST LIKED EACH PIECE AFTER LISTENING, 1 TO 5 (their ears are the only judge of taste; this outweighs anything that can be measured):\n"
+            + "\n".join(line(v) for v in rated[:24]) + "\n"
+            + "Work out what separates the 5s and 4s from the rest (which creatures and merges, what carries them, how they move, what their sounds are made of) and go further in that direction without repeating any of them. "
+              "A 3 is a warning as much as a 1: fine is not what they are after. Stay away from what the 1s and 2s share.\n\n")
 
 
 def _sides(slug: str) -> str:
@@ -873,7 +883,7 @@ LENSES = ("release: the stretch that sounds most choked (muffled, squeezed, boxe
           "the passage: a change of state that is too orderly, or one that should melt and instead jolts")
 
 
-def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "", history=None, learned=None) -> dict:
+def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "", history=None, learned=None, rating: int = 0) -> dict:
     """Which stretch of the song to carve next, and into what. Claude reads the song as a timeline; without it, the stretch
     with the fewest drum hits that has not been tried is given drums."""
     secs, hits, lev = float(m.get("secs") or song["duration"]), m.get("hits") or [], m.get("sections") or []
@@ -896,6 +906,11 @@ def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: st
                   f'- how defined its structure measures: {m.get("definition")} of 1. Drums overall: {m["attack"]} (the artist wants 0.2 or more). In the 5-second timeline, a stretch with real drums reads about 0.2 to 0.4, and under 0.1 means none.\n'
                   f'- how released it is: {m.get("air")} percent of its energy is above 6 kHz (0.5 is choked and muffled, 2 or more is open) and its stereo width is {m.get("width")} (0.25 is nearly mono, 0.4 is open)\n'
                   + hist + understood()
+                  + ({5: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 5 OF 5. It is what they want: touch it only where it is plainly choked or its drums are buried, and keep everything that makes it what it is.\n",
+                      4: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 4 OF 5. It is good: sharpen it, do not turn it into something else.\n",
+                      3: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 3 OF 5: fine, but not it. It needs a real change, not polish: pick the stretch that is most ordinary and make it the most alive.\n",
+                      2: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 2 OF 5. It is not working. Be bold: remake its weakest stretch into what their taste above asks for, even if that departs from the plan.\n",
+                      1: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 1 OF 5. It is not working at all. Be bold: remake its weakest stretch into what their taste above asks for, even if that departs from the plan.\n"}.get(rating, ""))
                   + ("- stretches already reworked, do not pick these again: " + ", ".join(f"{a:.0f}-{b:.0f}s" for a, b in tried) + "\n" if tried else "")
                   + (f"\nThis time look especially at {lens}." if lens else "")
                   + (f"\nFor this stretch ANOTHER CREATURE takes over: {_sides(guest)}. Write the stretch for what that creature would do with it, so the piece becomes a meeting of the two." if guest else "")
@@ -1166,7 +1181,10 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
             # ---- the rest of the night: chisel. One stretch of one song is made again; it is kept only if the song measures as more defined
             rnd, cycle, idle_cycles = 0, 0, 0
             while hours and done and not _state["stop"] and not _state["error"] and time.time() < _state["until"]:
-                live = [s_ for s_ in done if s_["misses"] < 3 and s_["carved"] < 6]
+                rates = marks_of(sid)                              # read again every round: the artist may be rating while it works
+                rate = lambda q: int(rates.get(str(q["n"]), 0))
+                room = {5: (1, 2), 4: (2, 4), 2: (5, 9), 1: (5, 9)}     # how many misses and how many kept cuts a piece gets per turn: the loved ones are left nearly alone, the unloved get the work
+                live = [s_ for s_ in done if s_["misses"] < room.get(rate(s_), (3, 6))[0] and s_["carved"] < room.get(rate(s_), (3, 6))[1]]
                 if not live:                                       # every piece has settled under this way of looking: look again another way, for as long as the night lasts
                     if _state["carved"] == _state.get("carved_at_cycle", -1):
                         idle_cycles += 1
@@ -1182,7 +1200,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                 _state["lens"] = LENSES[cycle % len(LENSES)]
                 rnd += 1
                 _state["phase"] = "chiselling"
-                for s_ in sorted(live, key=lambda q: q["sc"]["total"]):             # the least defined first
+                for s_ in sorted(live, key=lambda q: (rate(q) or 3, q["sc"]["total"])):     # the ones the artist likes least first, then the least defined
                     if _state["stop"] or time.time() >= _state["until"]:
                         break
                     base = f"chiselling, round {rnd} · “{s_['title']}”"
@@ -1194,7 +1212,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         guest = rng.choice(others_) if others_ and rng.random() < .4 else ""      # now and then another creature carves the stretch: the creatures meet inside a piece
                         seen = [(o["title"], c) for o in done if o is not s_ for c in o["entry"].get("carving", [])]
                         cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, LENSES[cycle % len(LENSES)], guest, s_["entry"].get("carving", []),
-                                         [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:])
+                                         [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:], rate(s_))
                         s_["tried"].append((cp["start"], cp["end"]))
                         _state["msg"] = base + f" · remaking {cp['start']:.0f}–{cp['end']:.0f}s"
                         where.mkdir()

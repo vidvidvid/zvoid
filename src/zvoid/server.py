@@ -285,7 +285,7 @@ def create_app():
 
     @app.get("/api/night/marks")
     def night_marks(id: str = ""):
-        """What the artist marked in a collection: piece number -> 1 (more like this) or -1 (not this)."""
+        """How much the artist likes each piece of a collection: piece number -> 1 to 5."""
         return night.marks_of(id)
 
     @app.post("/api/night/mark")
