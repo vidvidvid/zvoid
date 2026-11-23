@@ -974,7 +974,38 @@ def rebuild(d: Path, sheet: dict) -> list:
 
 def status() -> dict:
     s = {k: v for k, v in _state.items() if k not in ("job", "stop")}
-    return s or {"running": False}
+    return s or _last() or {"running": False}
+
+
+def _last() -> dict:
+    """After a restart nothing is running, but the last night is still there to look at, mark and talk about."""
+    try:
+        sheets = sorted(DIR.glob("*/collection.json"), key=lambda f: f.stat().st_mtime)
+        sheets = [f for f in sheets if not f.parent.name.startswith("_")]
+        if not sheets:
+            return {}
+        f = sheets[-1]
+        sh = json.loads(f.read_text())
+        songs = [o for o in sh.get("songs") or [] if o.get("path") and Path(o["path"]).exists()]
+        if not songs:
+            return {}
+        began = sh.get("started")
+        if isinstance(began, str):
+            try:
+                began = time.mktime(time.strptime(began, "%Y-%m-%d %H:%M:%S"))
+            except Exception:
+                began = None
+        began = began or f.stat().st_ctime
+        cuts = [c for o in songs for c in (o.get("carving") or [])]
+        kept = sum(1 for c in cuts if c.get("kept"))
+        tag = sh.get("name") or "the night of " + time.strftime("%-d %B", time.localtime(began))
+        return {"running": False, "id": sh.get("id") or f.parent.name, "creatures": sh.get("creatures") or [], "creature": (sh.get("creatures") or [""])[0], "count": len(sh.get("ideas") or songs),
+                "tries": sh.get("tries", 1), "made": len(songs), "thrown": 0, "started": began, "finished": f.stat().st_mtime, "tag": tag, "error": None, "phase": "chiselling" if cuts else "",
+                "carved": kept, "carves": len(cuts),
+                "msg": f"done: {len(songs)} songs are in the library as “{tag}”" + (f", {kept} carvings kept of {len(cuts)} tried" if cuts else ""),
+                "songs": [{"n": o.get("n"), "name": o.get("title"), "path": o["path"], "creature": o.get("creature"), "idea": o.get("idea", "")} for o in songs]}
+    except Exception:
+        return {}
 
 
 def stop():
