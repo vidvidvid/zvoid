@@ -1133,12 +1133,13 @@ addEventListener('resize', drawCables);
 /* The window keeps itself up to date: when the app's own files change on disk, it loads them again by itself, as soon as nothing
    is playing and nobody is typing. A fix to the screen no longer needs the app restarted, which would end a run that is going. */
 (() => {
-  const mine = [...document.scripts].map(x => x.src).filter(u => u && u.startsWith(location.origin)).concat([...document.querySelectorAll('link[rel=stylesheet]')].map(x => x.href).filter(u => u && u.startsWith(location.origin)));
+  /* the list is read each time: when this file runs, the scripts after it are not on the page yet */
+  const mine = () => [...document.scripts].map(x => x.src).filter(u => u && u.startsWith(location.origin)).concat([...document.querySelectorAll('link[rel=stylesheet]')].map(x => x.href).filter(u => u && u.startsWith(location.origin)));
   let first = null, due = false;
-  const stamp = async () => (await Promise.all(mine.map(u => fetch(u, { cache: 'no-store' }).then(r => r.ok ? r.text() : '?').then(t => t === '?' ? t : t.length + ':' + hash(t)).catch(() => '?')))).join('|');
+  const stamp = async () => (await Promise.all(mine().map(u => fetch(u, { cache: 'no-store' }).then(r => r.ok ? r.text() : '?').then(t => t === '?' ? t : t.length + ':' + hash(t)).catch(() => '?')))).join('|');
   setInterval(async () => {
     try { const now = await stamp(); if (now.includes('?')) return; if (first == null) { first = now; return; } if (now !== first) due = true;
-      const typing = document.activeElement && /TEXTAREA|INPUT/.test(document.activeElement.tagName);
+      const typing = document.activeElement && (document.activeElement.tagName === 'TEXTAREA' || (document.activeElement.tagName === 'INPUT' && /text|search/.test(document.activeElement.type || 'text'))) && document.activeElement.value;      // a field with something in it: do not take it away
       if (due && !LIB.playing && !typing) location.reload(); } catch (e) {}
   }, 20000);
 })();
