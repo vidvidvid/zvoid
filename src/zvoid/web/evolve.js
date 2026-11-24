@@ -69,8 +69,12 @@ function evoNightBox(trained, s) {
         h('input', { type: 'checkbox', checked: !!EVO.nightFree, onchange: e => { EVO.nightFree = e.target.checked; } }), h('span', {}, 'unleashed'), h('small', {}, 'free hands, the first night’s brief')),
       dir, h('div', { class: 'acts' }, cnt, h('span', { class: 'gym-note' }, 'songs'), tr),
       h('div', { class: 'acts' }, h('span', { class: 'gym-note' }, 'then chisel for'), hrs, h('span', { class: 'gym-note' }, 'hours')), estEl,
-      h('div', { class: 'acts' }, h('button', { class: 'hot', disabled: !trained.length, title: 'Both machines are kept awake while it runs. Leave Zvoid open.', onclick: async () => {
+      h('div', { class: 'acts' }, h('button', { class: 'hot', disabled: !trained.length, title: 'Both machines are kept awake while it runs. Leave Zvoid open.', onclick: async e => {
         if (!EVO.nightWho.size) return toast('tick at least one creature', true);
+        /* a run takes hours of both machines, so one press only arms the button: it says what would start, and a second press within six seconds starts it */
+        const b = e.currentTarget; if (!b.dataset.armed) { const was = b.textContent; b.dataset.armed = '1'; b.textContent = `press again: ${+cnt.value || 20} pieces, ${EVO.nightWho.size} creatures, ${+hrs.value || 0} h of carving`;
+          setTimeout(() => { delete b.dataset.armed; b.textContent = was; }, 6000); return; }
+        delete b.dataset.armed;
         try { EVO.night = await api('/api/night', { json: { creatures: [...EVO.nightWho], merges_only: [...EVO.nightSeason].filter(x => EVO.nightWho.has(x)), unleashed: !!EVO.nightFree, count: +cnt.value || 20, tries: +tr.value || 2, hours: +hrs.value || 0, direction: dir.value } }); EVO.viewId = null; EVO.album = null; EVO.showNight = true; EVO.sheet = null; evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'make the collection ▸')),
       N.msg && N.finished ? h('small', { title: N.msg }, N.msg) : '',
       N.id ? h('div', { class: 'acts' }, h('button', { onclick: async () => { EVO.viewId = null; EVO.showNight = true; EVO.album = null; EVO.sheet = null; await evoNightPoll(); evoDraw(); } }, N.running ? 'show the run that is going' : 'show the latest run')) : '');
