@@ -1,0 +1,21 @@
+{
+  "name": "VQGAN+CLIP",
+  "tab": "VQGAN+CLIP",
+  "tagline": "The image machine of 2021, from before diffusion: it **pushes pixels around until an old vision model agrees they match your words**. Grainy, smeared, over-detailed, strange. It can **start from a picture and mutate it**, which is how album and piece covers are grown from Zvoid's own.",
+  "python": "3.11",
+  "vram_mb": 6000,
+  "requirements": ["torch", "torchvision", "taming-transformers-rom1504", "omegaconf", "pytorch-lightning", "transformers>=4.45", "pillow", "numpy<3", "soundfile"],
+  "disk": "≈ 1.6 GB",
+  "license": "VQGAN: MIT (CompVis, taming-transformers) · CLIP: MIT (OpenAI)",
+  "label_param": "prompt",
+  "params": [
+    {"name": "prompt", "type": "textarea", "default": "a luminous creature of gas and light in a black void", "help": "Several ideas can be separated with | and each is pulled toward."},
+    {"name": "init_image", "type": "file", "label": "Picture to start from (optional)", "help": "The picture is mutated toward the words instead of being grown from noise."},
+    {"name": "keep", "type": "slider", "min": 0, "max": 4, "step": 0.1, "default": 1.2, "help": "How strongly the starting picture is held on to. 0 lets it dissolve completely."},
+    {"name": "iterations", "type": "slider", "min": 20, "max": 600, "step": 10, "default": 180},
+    {"name": "size", "type": "choice", "default": "640", "choices": ["384", "512", "640", "768"], "help": "Pixels on each side that the machine works at."},
+    {"name": "seed", "type": "seed"},
+    {"name": "cutouts", "type": "slider", "min": 8, "max": 64, "step": 4, "default": 32, "advanced": true},
+    {"name": "save_side", "type": "slider", "min": 384, "max": 2048, "step": 64, "default": 1280, "advanced": true, "help": "The picture is enlarged to this for the file."}
+  ]
+}
