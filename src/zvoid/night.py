@@ -476,7 +476,8 @@ def _free_prompt(n: int, count: int, direction: str, creatures: list, merges_onl
             + (f'The first of these must start in "{out[-1].get("ends", "depth")}", where the last one stopped.\n' if out else "The first may start anywhere.\n")
             + ("Already planned, so do not repeat their feelings:\n" + "\n".join(f'- {x["title"]}: {x["idea"]} ({x["bpm"]} bpm, {x["creature"]}, {x.get("starts")} → {x.get("ends")})' for x in out) + "\n" if out else "")
             + sparks()
-            + "You have free hands. Nobody is checking these against a list. Have fun with them.\n"
+            + "You have free hands. Nobody is checking these against a list. Have fun with them. If an idea turns up that contradicts itself, or makes no sense at all and is still somehow exact, you may keep it: the artist enjoys those. "
+              "That is a permission, not a request. Do not go looking for one, do not give every piece one, and never build them to a pattern.\n"
             + 'For each: a short title (' + (_title_style(direction) or "invented words") + '), creature, creature2, creature3, creature4, "idea" (one plain sentence: the feeling, and what makes this one different), "starts" and "ends" (peak, depth or void), caption, lyrics, bpm, duration.')
 
 
