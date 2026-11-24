@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import hashlib
 import re
 import socket
 import shutil
@@ -334,8 +335,10 @@ def create_app():
             for x in a.get("pieces") or []:
                 name = audio.get(f"{int(x.get('n') or 0):02d}")
                 if name:
-                    pieces.append({**x, "file": name, "cover": Path(name).stem in pics})
-            out.append({"folder": d.name, "n": a.get("n"), "title": a.get("title"), "kept": a.get("kept"), "collection": a.get("collection"), "note": a.get("note", ""), "creatures": a.get("creatures") or [], "cover": "cover" in pics, "pieces": pieces})
+                    pieces.append({**x, "file": name, "cover": Path(name).stem in pics, "dream": (d / ".pictures" / (Path(name).stem + ".dreamed")).exists()})
+            out.append({"folder": d.name, "n": a.get("n"), "title": a.get("title"), "kept": a.get("kept"), "collection": a.get("collection"), "note": a.get("note", ""), "creatures": a.get("creatures") or [], "cover": "cover" in pics, "pieces": pieces,
+                        # an album's pictures are Zvoid's own, grown further by the old image machine when that engine is there and the album asks for it
+                        "dream": bool(a.get("dream")) and "vqgan_clip" in engines and engines["vqgan_clip"].installed, "cover_dream": (d / ".pictures" / "cover.dreamed").exists()})
         return out
 
     @app.get("/api/night/albumfile")
@@ -348,8 +351,64 @@ def create_app():
             raise HTTPException(404, "no such file")
         return FileResponse(f)
 
+    _dreaming = threading.Lock()
+
+    @app.post("/api/night/dream")
+    async def night_dream(request: Request, album: str, n: int = 0):
+        """One of Zvoid's own pictures (sent here without its lettering) is handed to the VQGAN+CLIP engine, which mutates it toward
+        what the piece is about, and the result is sent back. One at a time, and never while a run or another job is using the PC."""
+        d = _album_dir(album)
+        data = await request.body()
+        if not (1000 < len(data) < 8_000_000) or data[:2] != b"\xff\xd8":
+            raise HTTPException(400, "not a picture")
+        e = engines.get("vqgan_clip")
+        if not e or not e.installed:
+            raise HTTPException(404, "the picture engine is not installed")
+        if night.status().get("running") or gym._train.get("state") in ("running", "stopping") or any(j.get("state") in ("queued", "running") for j in jobs.values()):
+            raise HTTPException(409, "the machines are busy")
+        if not _dreaming.acquire(blocking=False):
+            raise HTTPException(409, "a picture is being made")
+
+        def make():
+            try:
+                a = json.loads((d / "album.json").read_text())
+                mood = ""
+                try:
+                    mood = str(json.loads((night.DIR / str(a.get("collection")) / "collection.json").read_text()).get("direction") or "")
+                except Exception:
+                    pass
+                nether = bool(re.search(r"nether|demon|evil|ghoul|underworld|hell", mood, re.I))
+                piece = next((x for x in a.get("pieces") or [] if int(x.get("n") or 0) == int(n)), None)
+                what = str(piece.get("idea") or piece.get("name") or "")[:260] if piece else "; ".join(str(x.get("idea") or "").split(":")[0] for x in (a.get("pieces") or [])[:6])[:300]
+                prompt = " | ".join([what, "demons and ghouls in a pit of the underworld, bone, ember, chains and teeth" if nether else "luminous creatures of gas and light in a black void", "intricate, grainy, strange"])
+                work = OUTPUTS_DIR / "_night" / "_dream" / uuid.uuid4().hex[:8]
+                work.mkdir(parents=True)
+                (work / "start.jpg").write_bytes(data)
+                params = _coerce(e.spec, {"prompt": prompt, "init_image": str(work / "start.jpg"), "iterations": 180, "size": "768" if not n else "640", "keep": 1.0, "cutouts": 32,
+                                          "seed": int(hashlib.md5(f"{album}:{n}".encode()).hexdigest()[:7], 16), "save_side": 1280})
+                outs = []
+                for ev in e.run(params, work):
+                    if ev[0] != "progress":
+                        outs = ev[1]
+                if not outs:
+                    raise RuntimeError("nothing came back")
+                got = Path(outs[0]["path"]).read_bytes()
+                shutil.rmtree(work, ignore_errors=True)
+                return got
+            finally:
+                _dreaming.release()
+
+        from starlette.concurrency import run_in_threadpool
+        from fastapi.responses import Response
+        try:
+            return Response(await run_in_threadpool(make), media_type="image/jpeg")
+        except HTTPException:
+            raise
+        except Exception as ex:
+            raise HTTPException(500, str(ex).strip().splitlines()[0][:300] if str(ex).strip() else "the picture could not be made")
+
     @app.post("/api/night/cover")
-    async def night_cover(request: Request, album: str, n: int = 0):
+    async def night_cover(request: Request, album: str, n: int = 0, dream: int = 0):
         """A picture for an album (n = 0) or for one of its pieces, drawn by the app's own renderer and sent here to be kept beside the sound."""
         d = _album_dir(album)
         data = await request.body()
@@ -362,10 +421,13 @@ def create_app():
             (d / ".pictures").mkdir(exist_ok=True)
             pic = d / ".pictures" / (hit.stem + ".jpg")
             pic.write_bytes(data)
+            (pic.with_suffix(".dreamed").write_text("1") if dream else pic.with_suffix(".dreamed").unlink(missing_ok=True))
             if hit.suffix.lower() == ".flac":
                 night.embed(str(hit), str(pic), night.album_tags(str(d), n))
         else:
             (d / "cover.jpg").write_bytes(data)
+            (d / ".pictures").mkdir(exist_ok=True)
+            ((d / ".pictures" / "cover.dreamed").write_text("1") if dream else (d / ".pictures" / "cover.dreamed").unlink(missing_ok=True))
         return {"ok": True}
 
     @app.post("/api/night/albums")

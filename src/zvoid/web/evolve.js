@@ -455,7 +455,17 @@ async function evoMarkPiece(n, v) {
 const albUrl = (a, name) => `/api/night/albumfile?album=${encodeURIComponent(a)}&name=${encodeURIComponent(name)}`;
 /* A picture grown from the pieces themselves: every piece is the merged body of the creatures that play it, in their own
    colours and forms, drawn by the same shader as the night. One piece fills its cover; an album shows all of its pieces. */
-function evoCoverBlob(pieces, title, sub, cid) {
+/* The name of a piece or an album, printed on its picture. */
+function evoStamp(src, title, sub, big) {
+  const S = 1200, c2 = document.createElement('canvas'); c2.width = c2.height = S; const g = c2.getContext('2d'); g.drawImage(src, 0, 0, S, S);
+  const shade = g.createLinearGradient(0, S - 260, 0, S); shade.addColorStop(0, 'rgba(4,4,10,0)'); shade.addColorStop(1, 'rgba(4,4,10,.82)'); g.fillStyle = shade; g.fillRect(0, S - 260, S, 260);
+  const mono = 'ui-monospace, "SF Mono", Menlo, "Hiragino Sans", "Geeza Pro", monospace';
+  g.textBaseline = 'alphabetic'; g.fillStyle = 'rgba(255,255,255,.94)'; g.font = `600 ${big ? 46 : 40}px ${mono}`; g.fillText(title, 60, S - 96, S - 120);
+  g.fillStyle = 'rgba(255,255,255,.56)'; g.font = `22px ${mono}`; g.fillText(sub, 60, S - 56, S - 120);
+  return new Promise(res => c2.toBlob(res, 'image/jpeg', .92));
+}
+const evoBitmap = blob => new Promise((res, rej) => { const im = new Image(), u = URL.createObjectURL(blob); im.onload = () => { URL.revokeObjectURL(u); res(im); }; im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('picture')); }; im.src = u; });
+function evoCoverBlob(pieces, title, sub, cid, plain) {
   const G = nightGL(); if (!G || !pieces.length) return Promise.resolve(null);
   const S = 1200, one = pieces.length === 1, B = [], F = [], at = [], rgb = (hu, l = .6) => hsl2rgb(hu, .95, l);
   const sky = nightLook(cid);
@@ -473,23 +483,30 @@ function evoCoverBlob(pieces, title, sub, cid) {
   if (!one) at.forEach(([x, y, cs], i) => { const nx = at.slice(i + 1).find(o => o[2].some(c => cs.includes(c))) || at[(i + 1) % at.length];      // threads run between pieces that share a creature
     if (F.length < 48 && nx) F.push([x, y, nx[0], nx[1], ...rgb(look(cs[0]).hue, .62), .42, (hash('b' + i) - .5) * .5, hash('f' + i + title), i % 4 ? 0 : .5, i % 4 ? 0 : 1]); });
   nightPaint(G, S, S, 40 + hash(title + (one ? pieces[0].n : 'album')) * 900, B, F, sky);
-  const c2 = document.createElement('canvas'); c2.width = c2.height = S; const g = c2.getContext('2d'); g.drawImage(G.canvas, 0, 0);
-  const shade = g.createLinearGradient(0, S - 260, 0, S); shade.addColorStop(0, 'rgba(4,4,10,0)'); shade.addColorStop(1, 'rgba(4,4,10,.82)'); g.fillStyle = shade; g.fillRect(0, S - 260, S, 260);
-  const mono = 'ui-monospace, "SF Mono", Menlo, "Hiragino Sans", "Geeza Pro", monospace';
-  g.textBaseline = 'alphabetic'; g.fillStyle = 'rgba(255,255,255,.94)'; g.font = `600 ${one ? 40 : 46}px ${mono}`; g.fillText(title, 60, S - 96, S - 120);
-  g.fillStyle = 'rgba(255,255,255,.56)'; g.font = `22px ${mono}`; g.fillText(sub, 60, S - 56, S - 120);
-  return new Promise(res => c2.toBlob(res, 'image/jpeg', .92));
+  if (plain) { const c2 = document.createElement('canvas'); c2.width = c2.height = S; c2.getContext('2d').drawImage(G.canvas, 0, 0); return new Promise(res => c2.toBlob(res, 'image/jpeg', .94)); }   // without lettering: what the old image machine starts from
+  return evoStamp(G.canvas, title, sub, !one);
 }
 /* Albums that have no pictures yet get them, a piece at a time, whenever this screen has the chance. */
 async function evoCovers() {
   if (EVO.coversBusy) return; EVO.coversBusy = true;
   try { let A = await fetch('/api/night/albums', { cache: 'no-store' }).then(r => r.ok ? r.json() : null); if (!A) return;
     const had = JSON.stringify(EVO.albums || null); EVO.albums = A; if (EVO.open && had !== JSON.stringify(A)) EVO.stale = true;
-    for (const a of A) { const todo = [...(a.cover ? [] : [0]), ...a.pieces.filter(p => !p.cover).map(p => p.n)]; if (!todo.length) continue; if (!nightGL()) break;
+    for (const a of A) {
+      const todo = [...(!a.cover || (a.dream && !a.cover_dream) ? [0] : []), ...a.pieces.filter(p => !p.cover || (a.dream && !p.dream)).map(p => p.n)]; if (!todo.length) continue; if (!nightGL()) break;
       if (a.collection && !(EVO.dirs || {})[a.collection]) { try { const sh = await fetch(fileUrl(`${EVO.outRoot}/_night/${a.collection}/collection.json`), { cache: 'no-store' }).then(r => r.ok ? r.json() : null); if (sh) nightLook(a.collection, sh.direction || ' '); } catch (e) {} }   // the album's pictures are drawn under its run's own sky
-      for (const n of todo) { const p = a.pieces.find(x => x.n === n);
-        const blob = await evoCoverBlob(n ? [p] : a.pieces, n ? p.name : a.title, n ? `${String(n).padStart(2, '0')} · ${(p.creatures || []).join(' × ').replace(/-/g, ' ')} · ${a.title}` : `album ${a.n} · ${a.pieces.length} pieces · ${(a.kept || '').slice(0, 10)}`, a.collection); if (!blob) break;
-        await fetch(`/api/night/cover?album=${encodeURIComponent(a.folder)}&n=${n}`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob }); await new Promise(r => setTimeout(r, 40)); }
+      let busy = false;
+      for (const n of todo) { const p = a.pieces.find(x => x.n === n), had = n ? p.cover : a.cover;
+        const title = n ? p.name : a.title, sub = n ? `${String(n).padStart(2, '0')} · ${a.title}` : `album ${a.n} · ${a.pieces.length} pieces · ${(a.kept || '').slice(0, 10)}`;
+        let blob = null, dreamed = 0;
+        if (a.dream && !busy) {                              // Zvoid's own picture, grown further by the image machine of 2021 on the PC, then lettered here
+          const plain = await evoCoverBlob(n ? [p] : a.pieces, title, sub, a.collection, true); if (!plain) break;
+          const r = await fetch(`/api/night/dream?album=${encodeURIComponent(a.folder)}&n=${n}`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: plain }).catch(() => null);
+          if (r && r.ok) { blob = await evoStamp(await evoBitmap(await r.blob()), title, sub, !n); dreamed = 1; }
+          else busy = true;                                  // the machines are busy (a run is going), or the engine failed: Zvoid's own picture stands in, and this is tried again later
+        }
+        if (!blob) { if (had) continue; blob = await evoCoverBlob(n ? [p] : a.pieces, title, sub, a.collection); if (!blob) break; }
+        await fetch(`/api/night/cover?album=${encodeURIComponent(a.folder)}&n=${n}&dream=${dreamed}`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob }); await new Promise(r => setTimeout(r, 40));
+        if (dreamed) { EVO.albums = await api('/api/night/albums'); EVO.picV = Date.now(); if (EVO.open && EVO.album === a.folder && !LIB.playing) evoDraw(); } }
       EVO.albums = await api('/api/night/albums'); EVO.stale = true; }
     if (EVO.open && EVO.stale && !(document.activeElement && document.activeElement.tagName === 'TEXTAREA')) evoDraw();
   } catch (e) { console.warn('covers: ' + e.message); } finally { EVO.coversBusy = false; }
@@ -503,7 +520,7 @@ function evoCarveOn(id) {
     h('span', { class: 'gym-note' }, 'for'), hrs, h('span', { class: 'gym-note' }, busy ? 'hours · another run is going now' : 'hours'));
 }
 function evoAlbumView(a) {
-  const v = Date.now() - Date.now() % 60000, pic = (name, cls) => h('img', { class: cls, src: albUrl(a.folder, name) + '&v=' + v, alt: '', loading: 'lazy' });
+  const v = EVO.picV || (Date.now() - Date.now() % 60000), pic = (name, cls) => h('img', { class: cls, src: albUrl(a.folder, name) + '&v=' + v, alt: '', loading: 'lazy' });
   return h('div', { id: 'evo-main' },
     h('div', { class: 'alb-head' }, a.cover ? pic('cover.jpg', 'alb-cover') : h('div', { class: 'alb-cover' }),
       h('div', {}, h('small', {}, `album ${a.n} · as the run stood on ${a.kept || ''}`), h('h2', {}, a.title), h('p', { class: 'gym-note' }, `${a.pieces.length} pieces · played by ${(a.creatures || []).join(', ').replace(/-/g, ' ')}`), a.note ? h('p', { class: 'gym-note' }, a.note) : '',

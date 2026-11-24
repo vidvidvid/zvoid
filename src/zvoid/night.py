@@ -1138,7 +1138,7 @@ def album(sid: str, files: dict | None = None, note: str = "") -> str:
     if u:
         lines += ["## What the program understood about the artist's taste at this point", "", *("- " + x for x in u), ""]
     (out / "album.md").write_text("\n".join(lines))
-    (out / "album.json").write_text(json.dumps({"n": num, "title": title, "kept": time.strftime("%Y-%m-%d %H:%M"), "collection": sid, "creatures": sheet.get("creatures"), "note": note,
+    (out / "album.json").write_text(json.dumps({"dream": True, "n": num, "title": title, "kept": time.strftime("%Y-%m-%d %H:%M"), "collection": sid, "creatures": sheet.get("creatures"), "note": note,
                                                 "pieces": [{"n": e.get("n"), "name": name(e), "made_as": e.get("title"), "creatures": list(dict.fromkeys(_who(e))), "rating": rates.get(str(e.get("n")), 0), "idea": e.get("idea", "")} for e in songs]},
                                                indent=1, ensure_ascii=False))
     return str(out)
