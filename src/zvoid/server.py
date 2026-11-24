@@ -329,7 +329,7 @@ def create_app():
             except Exception:
                 continue
             audio = {f.name[:2]: f.name for f in d.iterdir() if f.suffix.lower() in (".flac", ".wav")}
-            pics = {f.stem for f in d.iterdir() if f.suffix.lower() == ".jpg"}
+            pics = {f.stem for f in [*d.iterdir(), *((d / ".pictures").iterdir() if (d / ".pictures").is_dir() else [])] if f.suffix.lower() == ".jpg"}   # a piece's picture lives inside its audio file; the copy the screen shows is kept out of sight
             pieces = []
             for x in a.get("pieces") or []:
                 name = audio.get(f"{int(x.get('n') or 0):02d}")
@@ -342,7 +342,9 @@ def create_app():
     def night_album_file(album: str, name: str):
         d = _album_dir(album)
         f = (d / name).resolve()
-        if f.parent != d or not f.is_file():
+        if (f.parent != d or not f.is_file()) and name.lower().endswith(".jpg"):
+            f = (d / ".pictures" / name).resolve()
+        if f.parent not in (d, d / ".pictures") or not f.is_file():
             raise HTTPException(404, "no such file")
         return FileResponse(f)
 
@@ -357,7 +359,11 @@ def create_app():
             hit = next((f for f in d.iterdir() if f.suffix.lower() in (".flac", ".wav") and f.name.startswith(f"{int(n):02d} ")), None)
             if not hit:
                 raise HTTPException(404, "no such piece")
-            (d / (hit.stem + ".jpg")).write_bytes(data)
+            (d / ".pictures").mkdir(exist_ok=True)
+            pic = d / ".pictures" / (hit.stem + ".jpg")
+            pic.write_bytes(data)
+            if hit.suffix.lower() == ".flac":
+                night.embed(str(hit), str(pic), night.album_tags(str(d), n))
         else:
             (d / "cover.jpg").write_bytes(data)
         return {"ok": True}

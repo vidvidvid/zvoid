@@ -1030,6 +1030,43 @@ def like_sources(path: str, creatures) -> dict:
     return json.loads(r.stdout.strip().splitlines()[-1])
 
 
+def embed(audio: str, picture: str = "", tags: dict | None = None) -> bool:
+    """Put a piece's picture and its name, album, artist and number inside the audio file itself, the way a record's
+    files carry them, so any player shows them and the picture need not lie beside the file. Needs ffmpeg; without it
+    nothing is changed."""
+    ff = shutil.which("ffmpeg") or next((x for x in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg") if Path(x).exists()), None)
+    src = Path(audio)
+    if not ff or not src.exists():
+        return False
+    tmp = src.with_name(src.stem + ".tagging" + src.suffix)
+    cmd = [ff, "-y", "-loglevel", "error", "-i", str(src)]
+    if picture and Path(picture).exists():
+        cmd += ["-i", str(picture), "-map", "0:a", "-map", "1:v", "-c:v", "copy", "-disposition:v", "attached_pic"]
+    else:
+        cmd += ["-map", "0:a"]
+    cmd += ["-c:a", "copy", "-map_metadata", "-1"]
+    for k, v in (tags or {}).items():
+        if v not in (None, ""):
+            cmd += ["-metadata", f"{k}={v}"]
+    r = subprocess.run(cmd + [str(tmp)], capture_output=True, text=True, timeout=120)
+    if r.returncode or not tmp.exists() or tmp.stat().st_size < src.stat().st_size * .5:
+        tmp.unlink(missing_ok=True)
+        return False
+    tmp.replace(src)
+    return True
+
+
+def album_tags(folder: str, n: int) -> dict:
+    """What a piece of an album is called, for writing into its file."""
+    try:
+        a = json.loads((Path(folder) / "album.json").read_text())
+        p = next(x for x in a.get("pieces") or [] if int(x.get("n") or 0) == int(n))
+        return {"title": p.get("name") or "", "album": a.get("title") or "", "artist": "mala roza muca", "album_artist": "mala roza muca", "track": f"{int(n)}/{len(a.get('pieces') or [])}",
+                "date": str(a.get("kept") or "")[:4], "comment": p.get("idea") or ""}
+    except Exception:
+        return {}
+
+
 ALBUM_SCHEMA = {"type": "object", "required": ["title"], "properties": {"title": {"type": "string"}}}
 
 
@@ -1088,6 +1125,9 @@ def album(sid: str, files: dict | None = None, note: str = "") -> str:
         src, n = Path(str((files or {}).get(e.get("n")) or e["path"])), int(e.get("n") or 0)
         x, sr = sf.read(str(src), always_2d=True, dtype="float32")
         sf.write(str(out / f"{n:02d} {safe(name(e))}.flac"), x.clip(-1, 1), sr, subtype="PCM_24")
+        pic = out / ".pictures" / f"{n:02d} {safe(name(e))}.jpg"      # its picture (if it has one yet) and its name go inside the file
+        embed(str(out / f"{n:02d} {safe(name(e))}.flac"), str(pic) if pic.exists() else "", {"title": name(e), "album": title, "artist": "mala roza muca", "album_artist": "mala roza muca",
+                                                                                         "track": f"{n}/{len(songs)}", "date": time.strftime("%Y"), "comment": e.get("idea", "")})
         plan = (sheet.get("ideas") or [])[n - 1] if 0 < n <= len(sheet.get("ideas") or []) else {}
         kept = sum(1 for c in (e.get("carving") or []) if c.get("kept"))
         lines += [f"{n:02d}. **{name(e)}**" + (f" (made as “{e.get('title')}”)" if e.get("title") and e.get("title") != name(e) else ""),
