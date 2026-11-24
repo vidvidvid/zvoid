@@ -516,7 +516,7 @@ function evoAlbumView(a) {
       return h('div', { class: 'night-row alb-row' + (LIB.playing === path ? ' playing' : '') }, h('span', { class: 'night-n' }, String(p.n).padStart(2, '0')),
         h('button', { class: 'evo-pp', data: { path }, title: 'Play / stop', onclick: () => libPlay({ path, url: albUrl(a.folder, p.file), kind: 'audio', size: 5e7 }) }, LIB.playing === path ? '■' : '▶'),
         p.cover ? pic(p.file.replace(/\.[a-z0-9]+$/i, '.jpg'), 'alb-thumb') : h('span', { class: 'alb-thumb' }),
-        h('div', {}, h('b', {}, p.name), h('small', {}, (p.creatures || []).join(' × ').replace(/-/g, ' ') + (p.rating ? ` · rated ${p.rating} of 5` : '')), h('p', { class: 'gym-note' }, p.idea || ''))); })));
+        h('div', {}, h('b', {}, p.name), h('p', { class: 'gym-note' }, p.idea || ''))); })));
 }
 
 function evoNightView() {                               // tonight, piece by piece: who plays it, what it is, and where it has got to
