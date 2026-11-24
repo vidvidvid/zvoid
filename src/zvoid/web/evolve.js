@@ -60,12 +60,18 @@ function evoNightBox(trained, s) {
     const estEl = h('small', {}), est = () => { const m = Math.round((+cnt.value || 20) * (+tr.value || 2) * 1.75 + (+cnt.value || 20) * .4), end = new Date(Date.now() + (m + (+hrs.value || 0) * 60) * 60000).toTimeString().slice(0, 5);
       estEl.textContent = `making them: about ${m >= 90 ? (m / 60).toFixed(1) + ' hours' : m + ' minutes'}` + ((+hrs.value || 0) ? ` · then chiselling for up to ${+hrs.value} h · done by about ${end}` : '') + ' · only the finished songs reach the library'; estEl.title = estEl.textContent; };
     est();
-    box.append(h('div', { class: 'evo-who' }, trained.map(c => h('label', {}, h('input', { type: 'checkbox', checked: EVO.nightWho.has(c.slug), onchange: e => { e.target.checked ? EVO.nightWho.add(c.slug) : EVO.nightWho.delete(c.slug); } }), h('span', {}, c.name)))),
+    EVO.nightSeason = EVO.nightSeason || new Set(['avsenik'].filter(x => trained.some(c => c.slug === x)));
+    if (EVO.nightFree == null) EVO.nightFree = true;
+    /* a creature is in (ticked), and can be marked as a seasoning with the small ~ beside it: then it never plays alone or leads, it only appears inside merges */
+    box.append(h('div', { class: 'evo-who' }, trained.map(c => h('label', {}, h('input', { type: 'checkbox', checked: EVO.nightWho.has(c.slug), onchange: e => { e.target.checked ? EVO.nightWho.add(c.slug) : EVO.nightWho.delete(c.slug); } }), h('span', {}, c.name),
+        h('button', { class: 'evo-season' + (EVO.nightSeason.has(c.slug) ? ' on' : ''), title: 'Seasoning: this creature never plays alone and never leads a piece; it only appears merged into others', onclick: e => { e.preventDefault(); EVO.nightSeason.has(c.slug) ? EVO.nightSeason.delete(c.slug) : EVO.nightSeason.add(c.slug); evoDraw(); } }, '~')))),
+      h('label', { class: 'evo-free', title: 'The brief of the very first night, before two days of remarks were turned into rules: free tempo, creatures cutting into each other freely, no ceiling on reworking, nothing checked against a list. The finishing (clarity, space, pictures, albums) stays. Untick for the careful process with every rule.' },
+        h('input', { type: 'checkbox', checked: !!EVO.nightFree, onchange: e => { EVO.nightFree = e.target.checked; } }), h('span', {}, 'unleashed'), h('small', {}, 'free hands, the first night’s brief')),
       dir, h('div', { class: 'acts' }, cnt, h('span', { class: 'gym-note' }, 'songs'), tr),
       h('div', { class: 'acts' }, h('span', { class: 'gym-note' }, 'then chisel for'), hrs, h('span', { class: 'gym-note' }, 'hours')), estEl,
       h('div', { class: 'acts' }, h('button', { class: 'hot', disabled: !trained.length, title: 'Both machines are kept awake while it runs. Leave Zvoid open.', onclick: async () => {
         if (!EVO.nightWho.size) return toast('tick at least one creature', true);
-        try { EVO.night = await api('/api/night', { json: { creatures: [...EVO.nightWho], count: +cnt.value || 20, tries: +tr.value || 2, hours: +hrs.value || 0, direction: dir.value } }); EVO.viewId = null; EVO.album = null; EVO.showNight = true; EVO.sheet = null; evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'make the collection ▸')),
+        try { EVO.night = await api('/api/night', { json: { creatures: [...EVO.nightWho], merges_only: [...EVO.nightSeason].filter(x => EVO.nightWho.has(x)), unleashed: !!EVO.nightFree, count: +cnt.value || 20, tries: +tr.value || 2, hours: +hrs.value || 0, direction: dir.value } }); EVO.viewId = null; EVO.album = null; EVO.showNight = true; EVO.sheet = null; evoDraw(); evoNightPoll(); toast('night shift started: leave Zvoid open'); } catch (e) { toast(String(e.message || e), true); } } }, 'make the collection ▸')),
       N.msg && N.finished ? h('small', { title: N.msg }, N.msg) : '',
       N.id ? h('div', { class: 'acts' }, h('button', { onclick: async () => { EVO.viewId = null; EVO.showNight = true; EVO.album = null; EVO.sheet = null; await evoNightPoll(); evoDraw(); } }, N.running ? 'show the run that is going' : 'show the latest run')) : '');
   }

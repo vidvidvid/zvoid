@@ -22,7 +22,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import chat, gym, library, moves
+from . import chat, gym, library, moves, unleashed
 from .paths import ENGINES_DIR, ENVS_DIR, OUTPUTS_DIR
 
 _state: dict = {}      # the one night shift that can run at a time
@@ -452,7 +452,39 @@ def _apart_plans(out: list, creatures: list) -> list:
     return out
 
 
-def ideas(creatures: list[str], count: int, direction: str, rng, merges_only=()) -> list[dict]:
+def sparks() -> str:
+    """What has delighted the artist before, for an unleashed run: shown as sparks, never as rules."""
+    liked = sorted((v for v in marks().values() if _rate(v) >= 4), key=lambda v: -_rate(v))[:16]
+    if not liked:
+        return ""
+    return ("SPARKS. These are pieces this artist has loved. None of it is a rule or a target, and nothing here is to be repeated: it only shows what kind of surprise has landed before. Surprise is the point.\n"
+            + "\n".join(f'- "{v.get("title", "")}": {v.get("idea", "")}' for v in liked) + "\n")
+
+
+def _free_prompt(n: int, count: int, direction: str, creatures: list, merges_only, out: list) -> str:
+    """The plan request of the first night, word for word, for an unleashed run: feelings and ways of moving, no rules added since."""
+    return (f"Plan {n} songs for one collection of {count}. Direction from the artist: {_plain_direction(direction) or 'music nobody has heard before'}\n\n"
+            "Creatures to use, spread evenly over the songs:\n" + "\n".join(_sides(c) for c in creatures) + "\n\n"
+            + ("The creatures are meant to MIX. More than half of the pieces are HYBRIDS, played through several creatures merged into one. Most hybrids are pairs (set creature2). "
+               + ("In every ten pieces, two are merges of THREE creatures (set creature2 and creature3)" + (" and one is a merge of FOUR (creature2, creature3 and creature4)" if len(creatures) > 3 else "") + ". " if len(creatures) > 2 else "")
+               + (f"These creatures never play alone, they only appear inside merges, as a seasoning: {', '.join(merges_only)}. " if merges_only else "")
+               + "Begin a hybrid's caption with one word of EACH creature in it, in order. Choose combinations whose sounds would do something to each other, use every creature in at least one hybrid, and do not repeat a combination. "
+               'Leave the unused creature fields as "" (all three of them for a piece with a single creature).\n\n' if len(creatures) > 1 else 'Set creature2, creature3 and creature4 to "" for every piece.\n\n')
+            + "They are " + str(n) + " different FEELINGS and " + str(n) + " different ways of making a body move, not variations of one: vary the mechanism (see the list of essences), the tempo across the whole dance range, what rides on the beat (a voice, the low end, a noise, more drums), "
+            "how long it stays at the peak, in the depth and in the void, and how it gets from one to another (melting, or thrown). No two may share a tempo band, a carrier and a path.\n"
+            "The whole collection is ONE passage that never ends: each piece begins in the state the one before it ended in. "
+            + (f'The first of these must start in "{out[-1].get("ends", "depth")}", where the last one stopped.\n' if out else "The first may start anywhere.\n")
+            + ("Already planned, so do not repeat their feelings:\n" + "\n".join(f'- {x["title"]}: {x["idea"]} ({x["bpm"]} bpm, {x["creature"]}, {x.get("starts")} → {x.get("ends")})' for x in out) + "\n" if out else "")
+            + sparks()
+            + "You have free hands. Nobody is checking these against a list. Have fun with them.\n"
+            + 'For each: a short title (' + (_title_style(direction) or "invented words") + '), creature, creature2, creature3, creature4, "idea" (one plain sentence: the feeling, and what makes this one different), "starts" and "ends" (peak, depth or void), caption, lyrics, bpm, duration.')
+
+
+def _plain_direction(direction: str) -> str:
+    return re.sub(r"TITLES:.*", "", direction or "", flags=re.S).strip()
+
+
+def ideas(creatures: list[str], count: int, direction: str, rng, merges_only=(), free: bool = False) -> list[dict]:
     """The collection's songs, as different from one another as they can be. Claude writes them; if it is not there, they are drawn from the built-in palettes."""
     out = []
     try:
@@ -477,11 +509,14 @@ def ideas(creatures: list[str], count: int, direction: str, rng, merges_only=())
                       + ("Already planned, so do not repeat their feelings:\n" + "\n".join(f'- {x["title"]}: {x["idea"]} ({x["bpm"]} bpm, {x["creature"]}, {x.get("starts")} → {x.get("ends")})' for x in out) + "\n" if out else "")
                       + taste()
                       + 'For each: a short title (' + (("for this collection the artist asked for titles like this, and it overrides anything said about titles elsewhere: " + _title_style(direction)) if _title_style(direction) else "titles of the rave music of the future: invented words at the core, and around them, freely, numbers, symbols, a kanji or a few Arabic letters whose meaning fits, a file name, a time of day, a rare English or Slovenian word; give every title a different shape and sound, never twenty two-word names with the same hard consonants") + '), creature, creature2, creature3, creature4, "idea" (one plain sentence: the feeling, and what makes this one different), "starts" and "ends" (peak, depth or void), caption, lyrics, bpm, duration.')
-            got = chat.think(HOUSE, prompt, IDEAS_SCHEMA, 420).get("songs") or []
+            if free:                                           # an unleashed run: the first night's brief and request, and nothing checked afterwards
+                prompt = _free_prompt(n, count, direction, creatures, merges_only, out)
+            got = chat.think(unleashed.HOUSE if free else HOUSE, prompt, IDEAS_SCHEMA, 420).get("songs") or []
             if not got:
                 break
             out += got[:n]
-        out = _apart_plans(out, creatures)
+        if not free:
+            out = _apart_plans(out, creatures)
     except Exception as ex:
         print("[night] Claude could not write the ideas, using the built-in ones: " + str(ex)[:200], flush=True)
     songs = []
@@ -1172,7 +1207,7 @@ def score(m: dict, others: list[dict]) -> dict:
             "definition": round(defn, 2), "variety": round(variety, 2), "nearest": near, "shape": round(ext, 2)}
 
 
-def revise(song: dict, m: dict, sc: dict, tries_left: int, rng) -> dict:
+def revise(song: dict, m: dict, sc: dict, tries_left: int, rng, free: bool = False) -> dict:
     """What to change for the next try. Claude reads the measurements and rewrites the plan; without it, drums are added by rule."""
     try:
         said = lambda v, lo, hi: "low" if v < lo else "high" if v > hi else "middling"
@@ -1188,7 +1223,7 @@ def revise(song: dict, m: dict, sc: dict, tries_left: int, rng) -> dict:
                   + (f'- the finished song it is most like: "{sc["nearest"]}" (variety {sc["variety"]}, 1 = very different)\n' if sc.get("nearest") else "")
                   + f"\nTries left for this song: {tries_left}. The artist heard a song that measured 0.12 for drum hits and said it needed more drums, so merely detectable is not enough: aim for drum hits of 0.2 or more in the parts where drums play. It must be danceable above all. Answer keep=true only if the steady pulse is at least 0.4, drum hits are at least 0.2, the constant tone is under 10 dB, and it is unlike the others (still return the caption, lyrics and bpm unchanged).\n"
                   "Otherwise rewrite the caption and lyrics to fix what the numbers show, keeping the idea and the creature's words at the front. Say in one sentence what you changed and why.")
-        r = chat.think(HOUSE, prompt, REVISE_SCHEMA, 240)
+        r = chat.think(unleashed.HOUSE if free else HOUSE, prompt, REVISE_SCHEMA, 240)
         if r.get("keep"):
             return {"keep": True, "note": r.get("note") or "kept"}
         return {"keep": False, "note": (r.get("note") or "")[:300], "song": _fit(dict(song, caption=r.get("caption") or song["caption"], lyrics=r.get("lyrics") or song["lyrics"], bpm=r.get("bpm") or song["bpm"]), rng)}
@@ -1223,7 +1258,7 @@ PARTS_SCHEMA = {"type": "object", "required": ["part", "start_bar", "bars", "gai
                 "properties": {"part": {"type": "string", "enum": ["drums", "bass", "vocals", "other"]}, "start_bar": {"type": "integer"}, "bars": {"type": "integer"}, "gain_db": {"type": "number"}, "note": {"type": "string"}}}
 
 
-def parts_plan(song: dict, m: dict, raw: str, history: list, rating: int = 0) -> dict:
+def parts_plan(song: dict, m: dict, raw: str, history: list, rating: int = 0, free: bool = False) -> dict:
     """A move that remakes nothing: which part of the piece to pull out for a moment, or to push forward, and where.
     Claude reads the piece as a timeline laid over its own bars; without it, the drums fall away for the two bars
     before the piece's biggest surge."""
@@ -1234,12 +1269,12 @@ def parts_plan(song: dict, m: dict, raw: str, history: list, rating: int = 0) ->
     try:
         line = lambda arr: " ".join(f"bar {bar_at(i * 5)}:{v}" for i, v in enumerate(arr))
         done = [c for c in history if c.get("move")]
-        r = chat.think(HOUSE, (
+        r = chat.think(unleashed.HOUSE if free else HOUSE, (
             f'Song: "{song["title"]}" for the creature {song["creature"]}. Its idea: {song["idea"]}\n\nCAPTION\n{song["caption"]}\n\n'
             f'It exists as audio. It has {n} bars of {grid["bar"]:.2f} seconds ({grid["bpm"]:.0f} bpm). Measured, at the bars where each 5 seconds begins:\n'
             f'- level (dB below its loudest): {line(lev)}\n- drum hits (0 none .. 1 hard): {line(hits)}\n'
             + ("- moves of this kind already made on it: " + "; ".join(f"{c.get('part')} {'out' if (c.get('db') or 0) < 0 else 'forward'} at {c['from']:.0f}-{c['to']:.0f}s ({'kept' if c.get('kept') else 'thrown away'})" for c in done[-6:]) + "\n" if done else "")
-            + understood()
+            + ("" if free else understood())
             + (f"- The artist rated this piece {rating} of 5.\n" if rating else "")
             + "\nThe piece can be split into four parts: drums, bass, vocals, and other (everything else). Choose ONE move that would make this piece hit harder or breathe, the way a DJ or a producer would with a mute button and a fader, and that fits its idea:\n"
               "- pull a part OUT entirely (gain_db -60) for 1 to 4 bars: the drums falling away right before a surge so that the surge lands, the bass dropping out so its return is felt, the voice left alone or taken away. The part comes back on the bar line.\n"
@@ -1270,7 +1305,7 @@ def ancestors(sid: str) -> str:
         f'- "{v.get("title", "")}" ({" × ".join(v.get("creatures") or [])}' + (f', {v["bpm"]} bpm' if v.get("bpm") else "") + f', rated {_rate(v)}): {v.get("idea", "")}' + (f' [made from: {str(v.get("caption") or "")[:230]}]' if v.get("caption") else "") for v in old) + "\n")
 
 
-def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "", history=None, learned=None, rating: int = 0, sid: str = "") -> dict:
+def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "", history=None, learned=None, rating: int = 0, sid: str = "", free: bool = False) -> dict:
     """Which stretch of the song to carve next, and into what. Claude reads the song as a timeline; without it, the stretch
     with the fewest drum hits that has not been tried is given drums."""
     secs, hits, lev = float(m.get("secs") or song["duration"]), m.get("hits") or [], m.get("sections") or []
@@ -1297,8 +1332,8 @@ def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: st
                       + ("  what is most wrong where: " + "; ".join(f"{i * 10}-{i * 10 + 10}s {w}" for i, w in enumerate(m.get("apart_what") or []) if w)[:900] + "\n" if any(m.get("apart_what") or []) else "")
                       + "  The artist calls those records their examples of clarity and wants every piece as clear and pronounced as they are, without sounding like them. A stretch that is far off is a prime candidate. "
                         "When you remake one, write its cure into the caption in plain sound words: too little sub and bass means a deep heavy sub under the kick and a low end that carries; too much low-mid mud means fewer held sounds, "
-                        "nothing thick or droning in the middle, each hit short with a gap after it; too harsh on top means fewer hissing and fizzing layers; too dull on top means crisp hats and bright cracks.\n") if m.get("apart_at") else "")
-                  + hist + understood()
+                        "nothing thick or droning in the middle, each hit short with a gap after it; too harsh on top means fewer hissing and fizzing layers; too dull on top means crisp hats and bright cracks.\n") if m.get("apart_at") and not free else "")
+                  + hist + ("" if free else understood())
                   + (ancestors(sid) if lens.startswith("the ancestor") else "")
                   + ({5: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 5 OF 5. That means it points the right way, not that it is finished: keep what makes it what it is and push it further the same way, clearer, every sound more pronounced.\n",
                       4: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 4 OF 5. It is good: sharpen it, do not turn it into something else.\n",
@@ -1314,7 +1349,7 @@ def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: st
                   "a stretch that is merely in-between, or a peak whose drums are missing. Do not add silences: only if the plan itself has a void section and the timeline shows that it is not empty may that one be made emptier. "
                   f'Give start and end in seconds, and a caption for JUST that stretch: it must begin with "{words}", then say concretely what plays there (which drums and how, the low end, the voices, the noise), fewer things rather than more, and end with "loud drums in front of everything, clear open sound, bright crisp top end, wide, every hit rings out". '
                   "No genre or artist names. In the note, one sentence: which section this is and what it should become.")
-        r = chat.think(HOUSE, prompt, CHISEL_SCHEMA, 240)
+        r = chat.think(unleashed.HOUSE if free else HOUSE, prompt, CHISEL_SCHEMA, 240)
         a, b = float(r["start"]), float(r["end"])
         a = max(0.0, min(secs - 12, a))
         b = max(a + 12, min(secs, min(a + 30, b)))
@@ -1427,7 +1462,7 @@ def stop():
             _state["job"]["cancel"] = True
 
 
-def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, direction: str = "", tries: int = 1, name: str = "", hours: float = 0, resume: str = "", merges_only=()) -> dict:
+def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, direction: str = "", tries: int = 1, name: str = "", hours: float = 0, resume: str = "", merges_only=(), unleashed_run: bool = False) -> dict:
     """Make a collection. Every song starts as its own idea and gets up to `tries` goes: made, measured, revised, made again.
     The best go of each is the song; only those reach the library.
     With `hours`, it then keeps chiselling until that time is up: one stretch of one song is made again, and the change is
@@ -1457,7 +1492,12 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
     hours = max(0.0, min(16.0, float(hours or 0)))
     _state.update(running=True, id=sid, creatures=creatures, creature=creatures[0], count=count, tries=tries, made=0, thrown=0, msg="starting…", started=time.time(), songs=[], tag=tag,
                   job=job, stop=False, error=None, per=None, hours=hours, until=time.time() + hours * 3600 if hours else None, phase="making", carved=0, carves=0)
-    sheet = old or {"id": sid, "name": tag, "creatures": creatures, "direction": direction, "tries": tries, "started": time.strftime("%Y-%m-%d %H:%M:%S"), "songs": []}
+    sheet = old or {"id": sid, "name": tag, "creatures": creatures, "direction": direction, "tries": tries, "started": time.strftime("%Y-%m-%d %H:%M:%S"), "songs": [],
+                    "unleashed": bool(unleashed_run), "merges_only": list(merges_only or [])}
+    free = bool(sheet.get("unleashed"))                    # an unleashed run: the first night's brief, free tempo, free guests, no ceiling. What is done to the sound afterwards stays
+    merges_only = list(merges_only or sheet.get("merges_only") or [])
+    lenses = tuple(l for l in LENSES if l.split(":")[0] in ("release", "the beat", "the extremes", "the parts", "the stumble")) if free else LENSES
+    _state["unleashed"] = free
     save = lambda: (d / "collection.json").write_text(json.dumps(sheet, indent=1, ensure_ascii=False))
 
     def make(song, where: Path, strength: float, seed: int):
@@ -1495,7 +1535,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
             else:
                 _state["msg"] = f"writing {count} different ideas…"
                 job.update(msg=_state["msg"])
-                plan = ideas(creatures, count, direction, rng, [c for c in (merges_only or []) if c in creatures])
+                plan = ideas(creatures, count, direction, rng, [c for c in (merges_only or []) if c in creatures], free)
                 sheet["ideas"] = [{k: x.get(k) for k in ("title", "creature", "mix", "idea", "bpm", "duration", "starts", "ends")} for x in plan]
                 save()
             for n, song in enumerate(plan, 1):
@@ -1535,7 +1575,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         t += 1
                         if t < tries:
                             _state["msg"] = f"song {n} of {count} · “{song['title']}” · reading its measurements"
-                            rv = revise(best["song"], best["m"], best["sc"], tries - t, rng)
+                            rv = revise(best["song"], best["m"], best["sc"], tries - t, rng, free)
                             entry["tries"][-1]["then"] = rv["note"]
                             if rv["keep"] and best["sc"]["drums"] >= .55:
                                 break
@@ -1585,15 +1625,15 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                 since = lambda q: sum(1 for c in q["entry"].get("carving", []) if c.get("kept") and float(c.get("at") or 0) > when.get(str(q["n"]), 0))
                 rate = lambda q: int(rates.get(str(q["n"]), 0)) if since(q) < 2 else 0
                 room = {2: (5, 9), 1: (5, 9)}     # how many misses and how many kept cuts a piece gets per turn: the unloved get more of the work. A 5 is a direction, not a finished piece, so it is carved like any other
-                parts_turn = LENSES[cycle % len(LENSES)].startswith("the parts")
+                parts_turn = lenses[cycle % len(lenses)].startswith("the parts")
                 # a piece that has been remade end to end stops being one piece (the artist called one such "a blob of mess"): once half its length has been
                 # remade it is left alone, unless the artist rated it 3 or lower. Moving its parts remakes nothing, so that stays open to every piece
                 worn = lambda q: sum(c["to"] - c["from"] for c in q["entry"].get("carving", []) if c.get("kept") and not c.get("move")) >= .5 * float(q["m"].get("secs") or q["song"]["duration"])
-                live = [s_ for s_ in done if s_["misses"] < room.get(rate(s_), (3, 6))[0] and s_["carved"] < room.get(rate(s_), (3, 6))[1] and (parts_turn or rate(s_) in (1, 2, 3) or not worn(s_))]
+                live = [s_ for s_ in done if s_["misses"] < room.get(rate(s_), (3, 6))[0] and s_["carved"] < room.get(rate(s_), (3, 6))[1] and (free or parts_turn or rate(s_) in (1, 2, 3) or not worn(s_))]
                 if not live:                                       # every piece has settled under this way of looking: look again another way, for as long as the night lasts
                     if _state["carved"] == _state.get("carved_at_cycle", -1):
                         idle_cycles += 1
-                        if idle_cycles >= len(LENSES):             # a whole turn of every way of looking without one improvement: it is as carved as this can make it
+                        if idle_cycles >= len(lenses):             # a whole turn of every way of looking without one improvement: it is as carved as this can make it
                             break
                     else:
                         idle_cycles = 0
@@ -1602,7 +1642,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     for s_ in done:
                         s_.update(misses=0, carved=0, tried=s_["tried"][-2:])
                     continue
-                _state["lens"] = LENSES[cycle % len(LENSES)]
+                _state["lens"] = lenses[cycle % len(lenses)]
                 rnd += 1
                 _state["phase"] = "chiselling"
                 for s_ in sorted(live, key=lambda q: (rate(q) or 3, q["sc"]["total"])):     # the ones the artist likes least first, then the least defined
@@ -1613,9 +1653,9 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                     job.update(msg=base, frac=min(.99, (time.time() - _state["started"]) / max(1, _state["until"] - _state["started"])))
                     where = d / f"s{s_['n']:02d}_t{uuid.uuid4().hex[:6]}"
                     try:
-                        others_ = [c_ for c_ in creatures if c_ not in (s_["song"]["creature"], *(s_["song"].get("mix") or []), s_["song"].get("creature2")) and c_ not in merges_only and c_ not in ("avsenik", "folk")]   # a seasoning comes in through its own lottery only
+                        others_ = [c_ for c_ in creatures if c_ not in (s_["song"]["creature"], *(s_["song"].get("mix") or []), s_["song"].get("creature2")) and (free or (c_ not in merges_only and c_ not in ("avsenik", "folk")))]   # a seasoning comes in through its own lottery only; in an unleashed run any creature may cut into any piece
                         guest = rng.choice(others_) if others_ and rng.random() < .4 else ""      # now and then another creature carves the stretch: the creatures meet inside a piece
-                        lens_ = LENSES[cycle % len(LENSES)].split(":")[0]
+                        lens_ = lenses[cycle % len(lenses)].split(":")[0]
                         stumble = lens_ in ("the stumble", "the old country", "the parts", "the ancestor")     # the lotteries: what they add cannot be measured
                         if stumble:
                             knows = [c_ for c_ in others_ if c_ in ("machine-girl", "dds", "sophie")]
@@ -1631,14 +1671,14 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         seen = [(o["title"], c) for o in done if o is not s_ for c in o["entry"].get("carving", [])]
                         if lens_ == "the parts":                    # nothing is remade: a part of the piece is pulled out or pushed forward, on its own bars
                             guest = ""
-                            cp = parts_plan(s_["song"], s_["m"], s_["raw"], s_["entry"].get("carving", []), rate(s_))
+                            cp = parts_plan(s_["song"], s_["m"], s_["raw"], s_["entry"].get("carving", []), rate(s_), free)
                             _state["msg"] = base + f" · {cp['part']} {'out' if cp['db'] < 0 else 'forward'} at {cp['start']:.0f}–{cp['end']:.0f}s"
                             where.mkdir()
                             moves.strip_lift(s_["raw"], str(where / "moved.wav"), cp["part"], cp["start"], cp["end"], cp["db"])
                             outs = [{"path": str(where / "moved.wav")}]
                         else:
-                            cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, LENSES[cycle % len(LENSES)], guest, s_["entry"].get("carving", []),
-                                             [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:], rate(s_), sid)
+                            cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, lenses[cycle % len(lenses)], guest, s_["entry"].get("carving", []),
+                                             [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:], rate(s_), sid, free)
                             try:                                  # the cut begins on a downbeat and lasts whole bars, so the new sound comes in on the pulse
                                 grid = moves.beat_grid(s_["raw"], float(s_["song"].get("bpm") or s_["m"].get("bpm") or 140))
                                 a_, b_ = moves.snap(grid, cp["start"], cp["end"], least=max(2, int(round(12 / grid["bar"]))))
@@ -1684,7 +1724,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                         better = bool(sc2) and sc2["total"] > s_["sc"]["total"] + .002 and m2["attack"] >= s_["m"]["attack"] - .015   # a carving that costs the piece its drums is never kept, whatever else it gains
                         if stumble and sc2 and not better:        # a glitch cannot be measured: it is kept unless it broke something (the drums, or the piece as a whole), and the artist's rating sorts it out
                             better = sc2["total"] >= s_["sc"]["total"] - .03 and (lens_ == "the parts" or m2["attack"] >= s_["m"]["attack"] - .03)   # pulling the drums out for two bars is meant to cost drums
-                        s_["entry"]["carving"].append({"round": rnd, "at": time.time(), "lens": LENSES[cycle % len(LENSES)].split(":")[0], "from": cp["start"], "to": cp["end"], "why": cp["note"], "by": guest or "", **({"move": "parts", "part": cp["part"], "db": cp["db"]} if lens_ == "the parts" else {}), "kept": better, "broken": why or None,
+                        s_["entry"]["carving"].append({"round": rnd, "at": time.time(), "lens": lenses[cycle % len(lenses)].split(":")[0], "from": cp["start"], "to": cp["end"], "why": cp["note"], "by": guest or "", **({"move": "parts", "part": cp["part"], "db": cp["db"]} if lens_ == "the parts" else {}), "kept": better, "broken": why or None,
                                                        "before": s_["sc"]["total"], "after": sc2["total"] if sc2 else None, "definition": [s_["sc"]["definition"], sc2["definition"] if sc2 else None]})
                         if better:
                             shutil.copy(outs[0]["path"], s_["raw"])             # the working copy is now the carved one,

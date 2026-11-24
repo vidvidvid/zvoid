@@ -595,3 +595,7 @@ body.has-player #evo-main { padding-bottom: 90px; }
 /* a rating the piece has moved on from */
 #evo .night-marks.old { position: relative; } #evo .night-marks.old .night-mark.on { background: none; color: #ffb454; border-color: #ffb454; border-style: dashed; opacity: 1; }
 #evo .night-marks.old::after { content: 'changed since · listen again'; position: absolute; right: 0; top: 24px; font: 9px var(--mono); color: #ffb454; white-space: nowrap; }
+/* the run's switches */
+#evo .evo-season { width: 16px; height: 16px; padding: 0; margin-left: 4px; border-radius: 50%; border: 1px solid var(--line); background: none; color: var(--dim); font: 10px var(--mono); line-height: 1; cursor: pointer; }
+#evo .evo-season.on { color: #07070d; background: #ffb454; border-color: #ffb454; }
+.evo-free { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; font-size: 12px; } .evo-free small { color: var(--muted); font-size: 10px; }
