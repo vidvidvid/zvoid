@@ -599,3 +599,10 @@ body.has-player #evo-main { padding-bottom: 90px; }
 #evo .evo-season { width: 16px; height: 16px; padding: 0; margin-left: 4px; border-radius: 50%; border: 1px solid var(--line); background: none; color: var(--dim); font: 10px var(--mono); line-height: 1; cursor: pointer; }
 #evo .evo-season.on { color: #07070d; background: #ffb454; border-color: #ffb454; }
 .evo-free { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; font-size: 12px; } .evo-free small { color: var(--muted); font-size: 10px; }
+/* the night shift box never grows wider than its column: its rows shrink, and what does not fit is cut with … */
+#evo-night { grid-template-columns: minmax(0, 1fr); } #evo-night > * { min-width: 0; }
+.evo-who { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .evo-who label { gap: 5px; } .evo-who label span { flex: 0 1 auto; min-width: 0; }
+#evo .evo-season { flex: none; margin-left: 2px; }
+.evo-free { flex-wrap: wrap; row-gap: 2px; } .evo-free small { flex: 1 1 100%; white-space: normal; }
+#evo-night .acts { flex-wrap: wrap; } #evo-night .acts select, #evo-night .acts input { min-width: 0; max-width: 100%; }
+#evo .alb-item { grid-template-columns: 44px minmax(0, 1fr); } .alb-item span { overflow: hidden; }
