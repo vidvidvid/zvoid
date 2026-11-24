@@ -534,12 +534,22 @@ function evoCarveOn(id) {
 function evoNotes(sid, n, paths) {
   if (!sid) return '';
   const list = ((EVO.notes || {})[sid] || {})[n] || [], key = `${sid}:${n}`;
-  const again = () => setTimeout(() => { const el = document.querySelector(`.note-in[data-k="${key}"]`); if (el) el.focus(); }, 40);
+  if (!EVO.drafts) { try { EVO.drafts = JSON.parse(localStorage.getItem('zvoid-note-drafts') || '{}') || {}; } catch (e) { EVO.drafts = {}; } }
+  const draft = v => { if (v) EVO.drafts[key] = v; else delete EVO.drafts[key]; try { localStorage.setItem('zvoid-note-drafts', JSON.stringify(EVO.drafts)); } catch (e) {} };
+  const keep = async () => {                                   // what is written is kept: on return, and also when you click away from it
+    const text = (EVO.drafts[key] || '').trim(); if (!text) return;
+    const pos = paths.includes(LIB.playing) ? Math.round(libPos()[0]) : null; draft('');
+    const el = document.querySelector(`.note-in[data-k="${key}"]`); if (el) el.value = '';
+    try { (EVO.notes = EVO.notes || {})[sid] = await api('/api/night/note', { json: { id: sid, n, text, pos } }); evoDraw(); }
+    catch (err) { draft(text); const e2 = document.querySelector(`.note-in[data-k="${key}"]`); if (e2 && !e2.value) e2.value = text; toast('the note was not kept: ' + err.message, true); } };
   const inp = h('input', { class: 'note-in', type: 'text', spellcheck: 'false', placeholder: list.length ? 'another note…' : 'a note on this piece…', data: { k: key },
-    title: 'Press return to keep it. While the piece is playing, the note remembers where in it you were.',
-    onkeydown: async e => { e.stopPropagation(); if (e.key !== 'Enter' || !inp.value.trim()) return; e.preventDefault();
-      const pos = paths.includes(LIB.playing) ? Math.round(libPos()[0]) : null, text = inp.value.trim(); inp.value = '';
-      try { (EVO.notes = EVO.notes || {})[sid] = await api('/api/night/note', { json: { id: sid, n, text, pos } }); evoDraw(); again(); } catch (err) { inp.value = text; toast(err.message, true); } } });
+    title: 'Press return to keep it (clicking away keeps it too). While the piece is playing, the note remembers where in it you were.',
+    oninput: () => draft(inp.value),
+    onfocus: () => { EVO.noteFocus = key; },
+    onblur: () => setTimeout(() => { if (!inp.isConnected) return; if (EVO.noteFocus === key) EVO.noteFocus = ''; keep(); }, 0),   // a field taken away by a redraw is not a field you left
+    onkeydown: e => { e.stopPropagation(); if (e.key !== 'Enter') return; e.preventDefault(); draft(inp.value); keep(); } });
+  inp.value = EVO.drafts[key] || '';                           // the screen is rebuilt often (the next piece starts, a rating lands): what you were writing comes back with it
+  if (EVO.noteFocus === key) setTimeout(() => { const at = document.activeElement; if (inp.isConnected && (!at || at === document.body || !at.isConnected)) { inp.focus(); try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (e) {} } }, 30);
   return h('div', { class: 'night-notes' }, list.map((x, i) => h('span', { class: 'note' }, x.pos != null ? h('i', { title: 'Play from here', onclick: () => { if (paths.includes(LIB.playing)) libStart(x.pos); } }, evoClock(x.pos)) : '', h('span', {}, x.text),
     h('button', { title: 'Remove this note', onclick: async () => { try { EVO.notes[sid] = await api('/api/night/note', { json: { id: sid, n, drop: i } }); evoDraw(); } catch (err) { toast(err.message, true); } } }, '×'))), inp);
 }
