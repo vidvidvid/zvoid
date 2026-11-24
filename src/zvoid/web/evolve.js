@@ -91,7 +91,7 @@ async function evoNightPoll() {
     if (EVO.night.id && (EVO.open || !EVO.sheet)) await evoSheet();
     if (!EVO.coversAt || Date.now() - EVO.coversAt > 90000) { EVO.coversAt = Date.now(); evoCovers(); }
     const b = $('#btn-evo'); if (b) b.textContent = EVO.night.running ? (EVO.night.phase === 'chiselling' ? `⟲ evolve · chiselling` : `⟲ evolve · night ${EVO.night.made}/${EVO.night.count}`) : '⟲ evolve';
-    const typing = !!(document.activeElement && document.activeElement.tagName === 'TEXTAREA' && document.activeElement.closest('.night-talk'));   // while you are writing an answer the screen is not rebuilt under you
+    const typing = !!(document.activeElement && ((document.activeElement.tagName === 'TEXTAREA' && document.activeElement.closest('.night-talk')) || (document.activeElement.classList && document.activeElement.classList.contains('note-in') && document.activeElement.value)));   // while you are writing an answer the screen is not rebuilt under you
     if (EVO.open) { if ((sig(EVO.night) !== was || EVO.stale) && !typing) evoDraw(); else { if (sig(EVO.night) !== was) EVO.stale = true; const m = document.querySelector('#evo-night small'); if (m && EVO.night.running) m.textContent = EVO.night.msg || ''; const m2 = $('#night-msg'); if (m2) m2.textContent = EVO.night.msg || ''; } } } catch (e) {}
   EVO.nightT = setTimeout(evoNightPoll, EVO.night && EVO.night.running ? 3000 : 20000);
 }
@@ -105,7 +105,7 @@ async function evoSheet() {                              // the night's own note
     EVO.sheet = sh;
     if (!EVO.talkBusy) EVO.taste = await fetch('/api/night/taste?id=' + EVO.night.id, { cache: 'no-store' }).then(q => q.ok ? q.json() : null).catch(() => null);
     EVO.marks = await fetch('/api/night/marks?id=' + EVO.night.id, { cache: 'no-store' }).then(q => q.ok ? q.json() : null).catch(() => null);
-    evoStale(sh);   // null until the app has been restarted with the marks in it
+    evoStale(sh); evoNotesLoad(EVO.night.id);   // null until the app has been restarted with the marks in it
   } catch (e) {}
 }
 /* The night as a small vivarium. The creatures float in a ring in the dark, each a glowing body of its own species and
@@ -529,7 +529,23 @@ function evoCarveOn(id) {
     onclick: async () => { try { EVO.viewId = null; EVO.album = null; EVO.showNight = true; EVO.night = await api('/api/night/resume', { json: { id, hours: +hrs.value || 3 } }); EVO.sheet = null; evoDraw(); evoNightPoll(); toast('carving on: leave Zvoid open'); } catch (e) { toast(e.message, true); } } }, 'carve this run further'),
     h('span', { class: 'gym-note' }, 'for'), hrs, h('span', { class: 'gym-note' }, busy ? 'hours · another run is going now' : 'hours'));
 }
+/* A quick note on a piece: type, press return, and it is kept at once, with no thinking in between. Written while the piece plays,
+   it remembers where in the piece you were. The carving and the next plans read these in your own words. */
+function evoNotes(sid, n, paths) {
+  if (!sid) return '';
+  const list = ((EVO.notes || {})[sid] || {})[n] || [], key = `${sid}:${n}`;
+  const again = () => setTimeout(() => { const el = document.querySelector(`.note-in[data-k="${key}"]`); if (el) el.focus(); }, 40);
+  const inp = h('input', { class: 'note-in', type: 'text', spellcheck: 'false', placeholder: list.length ? 'another note…' : 'a note on this piece…', data: { k: key },
+    title: 'Press return to keep it. While the piece is playing, the note remembers where in it you were.',
+    onkeydown: async e => { e.stopPropagation(); if (e.key !== 'Enter' || !inp.value.trim()) return; e.preventDefault();
+      const pos = paths.includes(LIB.playing) ? Math.round(libPos()[0]) : null, text = inp.value.trim(); inp.value = '';
+      try { (EVO.notes = EVO.notes || {})[sid] = await api('/api/night/note', { json: { id: sid, n, text, pos } }); evoDraw(); again(); } catch (err) { inp.value = text; toast(err.message, true); } } });
+  return h('div', { class: 'night-notes' }, list.map((x, i) => h('span', { class: 'note' }, x.pos != null ? h('i', { title: 'Play from here', onclick: () => { if (paths.includes(LIB.playing)) libStart(x.pos); } }, evoClock(x.pos)) : '', h('span', {}, x.text),
+    h('button', { title: 'Remove this note', onclick: async () => { try { EVO.notes[sid] = await api('/api/night/note', { json: { id: sid, n, drop: i } }); evoDraw(); } catch (err) { toast(err.message, true); } } }, '×'))), inp);
+}
+async function evoNotesLoad(sid) { if (!sid) return; EVO.notes = EVO.notes || {}; const got = await fetch('/api/night/notes?id=' + sid, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null); if (got) { const was = JSON.stringify(EVO.notes[sid] || null); EVO.notes[sid] = got; return was !== JSON.stringify(got); } return false; }
 function evoAlbumView(a) {
+  if (a.collection && !(EVO.notes || {})[a.collection] && !(EVO.notesAsked = EVO.notesAsked || {})[a.collection]) { EVO.notesAsked[a.collection] = 1; evoNotesLoad(a.collection).then(ch => { if (ch && EVO.album === a.folder) evoDraw(); }); }
   const v = EVO.picV || (Date.now() - Date.now() % 60000), pic = (name, cls) => h('img', { class: cls, src: albUrl(a.folder, name) + '&v=' + v, alt: '', loading: 'lazy' });
   return h('div', { id: 'evo-main' },
     h('div', { class: 'alb-head' }, a.cover ? pic('cover.jpg', 'alb-cover') : h('div', { class: 'alb-cover' }),
@@ -543,7 +559,7 @@ function evoAlbumView(a) {
       return h('div', { class: 'night-row alb-row' + (LIB.playing === path ? ' playing' : '') }, h('span', { class: 'night-n' }, String(p.n).padStart(2, '0')),
         h('button', { class: 'evo-pp', data: { path }, title: 'Play / stop', onclick: () => libPlay({ path, url: albUrl(a.folder, p.file), kind: 'audio', size: 5e7 }) }, LIB.playing === path ? '■' : '▶'),
         p.cover ? pic(p.file.replace(/\.[a-z0-9]+$/i, '.jpg'), 'alb-thumb') : h('span', { class: 'alb-thumb' }),
-        h('div', {}, h('b', {}, p.name), h('p', { class: 'gym-note' }, p.idea || ''))); })));
+        h('div', {}, h('b', {}, p.name), h('p', { class: 'gym-note' }, p.idea || ''), evoNotes(a.collection, p.n, [path, ...(((EVO.sheet && EVO.sheet.id === a.collection && EVO.sheet.songs) || []).filter(e => e.n === p.n).map(e => e.path))]))); })));
 }
 
 function evoNightView() {                               // tonight, piece by piece: who plays it, what it is, and where it has got to
@@ -564,7 +580,7 @@ function evoNightView() {                               // tonight, piece by pie
       return h('div', { class: 'night-row' + (path ? ' done' : making ? ' making' : '') + (path && LIB.playing === path ? ' playing' : '') },
         h('span', { class: 'night-n' }, String(n).padStart(2, '0')),
         path ? h('button', { class: 'evo-pp', data: { path }, title: 'Play / stop', onclick: () => libPlay({ path, kind: 'audio', size: 5e7 }) }, LIB.playing === path ? '■' : '▶') : h('span', { class: 'night-dot' }, making ? '◌' : '·'),
-        h('div', { class: 'night-what' }, h('b', {}, x.name || x.title, h('em', {}, `${x.bpm} bpm`)), h('small', { class: 'night-who' }, who(x)), h('small', { title: x.idea }, x.idea)),
+        h('div', { class: 'night-what' }, h('b', {}, x.name || x.title, h('em', {}, `${x.bpm} bpm`)), h('small', { class: 'night-who' }, who(x)), h('small', { title: x.idea }, x.idea), path ? evoNotes(N.id, n, [path]) : ''),
         path ? libWave({ path, kind: 'audio', size: 5e7 }) : h('span', { class: 'night-wait' }, making ? 'being made now…' : 'waiting'),
         h('small', { class: 'night-carve', title: tried ? (e.carving || []).map(c => `${c.kept ? 'kept' : 'not kept'}: ${c.from}–${c.to}s${c.by ? ' by ' + c.by : ''} · ${c.why || ''}`).join('\n') : '' }, tried ? `${kept} of ${tried} carvings kept` : ''),
         path && EVO.marks ? h('span', { class: 'night-marks' + ((EVO.staleMarks || {})[n] ? ' old' : ''), title: ((EVO.staleMarks || {})[n] ? 'This piece has changed since you rated it. Listen again, then tap a number (the same one, if it still holds). · ' : '') + 'How much do you like it? 1: not this at all · 3: fine, but not it · 5: this is the direction (not the end goal). Tap the same number again to clear it.' },

@@ -238,6 +238,69 @@ def mark(sid: str, n: int, v: int) -> dict:
     return marks_of(sid)
 
 
+NOTES = DIR / "notes.json"     # what the artist jotted on a piece while listening: "<collection>:<number>" -> [{text, pos (seconds into the piece, if it was playing), when}]
+
+
+def notes_of(sid: str) -> dict:
+    try:
+        every = dict(json.loads(NOTES.read_text()))
+    except Exception:
+        every = {}
+    return {k.split(":")[1]: v for k, v in every.items() if k.startswith(sid + ":") and v}
+
+
+def note(sid: str, n: int, text: str = "", pos=None, drop=None) -> dict:
+    """A quick note on a piece, kept at once with no thinking in between. Written while the piece plays, it remembers
+    where in the piece the artist was. `drop` removes the note at that place in the list."""
+    if not re.fullmatch(r"[a-z0-9]{6,16}", sid) or not (DIR / sid / "collection.json").exists():
+        raise FileNotFoundError("no such collection")
+    try:
+        every = dict(json.loads(NOTES.read_text()))
+    except Exception:
+        every = {}
+    key = f"{sid}:{int(n)}"
+    mine = list(every.get(key) or [])
+    if drop is not None:
+        if 0 <= int(drop) < len(mine):
+            mine.pop(int(drop))
+    else:
+        text = " ".join(str(text or "").split())[:600]
+        if not text:
+            raise RuntimeError("write something first")
+        mine.append({"text": text, "pos": (round(float(pos)) if pos is not None else None), "when": time.strftime("%Y-%m-%d %H:%M")})
+    every[key] = mine
+    NOTES.parent.mkdir(parents=True, exist_ok=True)
+    NOTES.write_text(json.dumps(every, indent=1, ensure_ascii=False))
+    return notes_of(sid)
+
+
+def _clock(sec) -> str:
+    return f"{int(sec) // 60}:{int(sec) % 60:02d}"
+
+
+def noted(sid: str, n: int = 0) -> str:
+    """The artist's own notes, as lines for a brief: on one piece, or (n = 0) on every piece of a collection."""
+    got = notes_of(sid)
+    if n:
+        mine = got.get(str(int(n))) or []
+        return ("- THE ARTIST'S OWN NOTES ON THIS PIECE, written while listening (the time is where in the piece they were): "
+                + "; ".join((f"at {_clock(x['pos'])}: " if x.get("pos") is not None else "") + f'"{x["text"]}"' for x in mine[-8:]) + "\n") if mine else ""
+    if not got:
+        return ""
+    title = {}
+    try:
+        sheet = json.loads((DIR / sid / "collection.json").read_text())
+        names = {}
+        try:
+            names = json.loads((DIR / sid / "names.json").read_text())
+        except Exception:
+            pass
+        title = {str(e.get("n")): names.get(str(e.get("n"))) or e.get("title", "") for e in sheet.get("songs", [])}
+    except Exception:
+        pass
+    return "\n".join(f'- on "{title.get(k, k)}": ' + "; ".join((f"at {_clock(x['pos'])}: " if x.get("pos") is not None else "") + f'"{x["text"]}"' for x in v[-5:]) for k, v in sorted(got.items(), key=lambda kv: int(kv[0]))) + "\n"
+
+
 TASTE = DIR / "taste.json"     # the conversation about taste: what was asked and answered, and what has been understood from it
 QUESTION_SCHEMA = {"type": "object", "required": ["text", "pieces", "options"],
                    "properties": {"text": {"type": "string"}, "pieces": {"type": "array", "items": {"type": "integer"}}, "options": {"type": "array", "items": {"type": "string"}}}}
@@ -295,6 +358,7 @@ def _told(t: dict, sid: str, ps: list) -> str:
     return ("THE PIECES OF THIS COLLECTION\n" + "\n".join(f'{p["n"]}. "{p["title"]}" ({" × ".join(p["creatures"])}, {p["bpm"]} bpm) [{word[p["mark"]]}]: {p["idea"]} Made from: {p["caption"]}' for p in ps)
             + "\n\nTHE CONVERSATION SO FAR (oldest first)\n" + ("\n".join(f'- You asked: {x.get("q", "")}' + (f' (about: {", ".join(x.get("titles") or [])})' if x.get("titles") else "")
                                                                     + f'\n  They answered: {"; ".join(x.get("picks") or []) or "(tapped nothing)"}' + (f' and said: "{x["text"]}"' if x.get("text") else "") for x in t["talk"][-24:]) or "(nothing yet)")
+            + ("\n\nNOTES THEY JOTTED ON PIECES WHILE LISTENING (their own words; the time is where in the piece they were)\n" + noted(sid) if noted(sid) else "")
             + "\n\nWHAT YOU BELIEVED AFTER THE LAST ANSWER\n" + ("\n".join("- " + u for u in t["understanding"]) or "(nothing yet)")
             + ("\nStill open: " + "; ".join(t["open"]) if t["open"] else "") + "\n\n")
 
@@ -1306,7 +1370,7 @@ def ancestors(sid: str) -> str:
         f'- "{v.get("title", "")}" ({" × ".join(v.get("creatures") or [])}' + (f', {v["bpm"]} bpm' if v.get("bpm") else "") + f', rated {_rate(v)}): {v.get("idea", "")}' + (f' [made from: {str(v.get("caption") or "")[:230]}]' if v.get("caption") else "") for v in old) + "\n")
 
 
-def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "", history=None, learned=None, rating: int = 0, sid: str = "", free: bool = False) -> dict:
+def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: str = "", history=None, learned=None, rating: int = 0, sid: str = "", free: bool = False, n: int = 0) -> dict:
     """Which stretch of the song to carve next, and into what. Claude reads the song as a timeline; without it, the stretch
     with the fewest drum hits that has not been tried is given drums."""
     secs, hits, lev = float(m.get("secs") or song["duration"]), m.get("hits") or [], m.get("sections") or []
@@ -1335,6 +1399,7 @@ def chisel_plan(song: dict, m: dict, tried: list, rng, lens: str = "", guest: st
                         "When you remake one, write its cure into the caption in plain sound words: too little sub and bass means a deep heavy sub under the kick and a low end that carries; too much low-mid mud means fewer held sounds, "
                         "nothing thick or droning in the middle, each hit short with a gap after it; too harsh on top means fewer hissing and fizzing layers; too dull on top means crisp hats and bright cracks.\n") if m.get("apart_at") and not free else "")
                   + hist + ("" if free else understood())
+                  + (noted(sid, n) if sid and n else "")
                   + (ancestors(sid) if lens.startswith("the ancestor") else "")
                   + ({5: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 5 OF 5. That means it points the right way, not that it is finished: keep what makes it what it is and push it further the same way, clearer, every sound more pronounced.\n",
                       4: "- THE ARTIST HAS HEARD THIS PIECE AND RATED IT 4 OF 5. It is good: sharpen it, do not turn it into something else.\n",
@@ -1679,7 +1744,7 @@ def start(engines: dict, jobs: dict, coerce, creatures, count: int = 10, directi
                             outs = [{"path": str(where / "moved.wav")}]
                         else:
                             cp = chisel_plan(s_["song"], s_["m"], s_["tried"], rng, lenses[cycle % len(lenses)], guest, s_["entry"].get("carving", []),
-                                             [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:], rate(s_), sid, free)
+                                             [x for x in seen if x[1].get("kept")][-3:] + [x for x in seen if not x[1].get("kept")][-3:], rate(s_), sid, free, s_["n"])
                             try:                                  # the cut begins on a downbeat and lasts whole bars, so the new sound comes in on the pulse
                                 grid = moves.beat_grid(s_["raw"], float(s_["song"].get("bpm") or s_["m"].get("bpm") or 140))
                                 a_, b_ = moves.snap(grid, cp["start"], cp["end"], least=max(2, int(round(12 / grid["bar"]))))

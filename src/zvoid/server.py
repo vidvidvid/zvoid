@@ -294,6 +294,15 @@ def create_app():
     def night_mark(body: dict):
         return evo(night.mark, str(body.get("id") or ""), int(body.get("n") or 0), int(body.get("mark") or 0))
 
+    @app.get("/api/night/notes")
+    def night_notes(id: str = ""):
+        """The quick notes the artist jotted on the pieces of a collection: piece number -> list of notes."""
+        return night.notes_of(id)
+
+    @app.post("/api/night/note")
+    def night_note(body: dict):
+        return evo(night.note, str(body.get("id") or ""), int(body.get("n") or 0), str(body.get("text") or ""), body.get("pos"), body.get("drop"))
+
     @app.get("/api/night/taste")
     def night_taste(id: str = ""):
         """The conversation about taste: what the program understands so far, and the question it is waiting on."""

@@ -606,3 +606,10 @@ body.has-player #evo-main { padding-bottom: 90px; }
 .evo-free { flex-wrap: wrap; row-gap: 2px; } .evo-free small { flex: 1 1 100%; white-space: normal; }
 #evo-night .acts { flex-wrap: wrap; } #evo-night .acts select, #evo-night .acts input { min-width: 0; max-width: 100%; }
 #evo .alb-item { grid-template-columns: 44px minmax(0, 1fr); } .alb-item span { overflow: hidden; }
+/* quick notes on a piece */
+.night-notes { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 4px; min-width: 0; }
+.night-notes .note { display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%; padding: 2px 4px 2px 8px; border-radius: 8px; background: #17162a; border: 1px solid var(--line); font: 11px var(--sans); color: #d6d3ee; }
+.night-notes .note i { font: 10px var(--mono); font-style: normal; color: var(--cyan); cursor: pointer; flex: none; } .night-notes .note span { overflow-wrap: anywhere; white-space: normal; }
+#evo .night-notes .note button { border: 0; background: none; color: var(--dim); padding: 0 3px; font-size: 12px; cursor: pointer; flex: none; } #evo .night-notes .note button:hover { color: #ff5c8a; }
+#evo .night-notes .note-in { flex: 1 1 140px; min-width: 100px; max-width: 420px; background: none; border: 0; border-bottom: 1px dashed var(--line); border-radius: 0; padding: 2px 2px; font: 11px var(--sans); color: var(--text); outline: none; }
+#evo .night-notes .note-in:focus { border-bottom-color: var(--cyan); } .night-notes .note-in::placeholder { color: var(--dim); }
