@@ -588,9 +588,18 @@ body.throwing, body.throwing * { cursor: grabbing !important; user-select: none 
 #evo-player .ep-what { min-width: 0; } #evo-player .ep-what b { display: block; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #evo-player .ep-what small { display: block; font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #evo-player .ep-time { font: 12px var(--mono); color: var(--text); text-align: center; font-variant-numeric: tabular-nums; }
-#evo-player .ep-track { position: relative; height: 22px; cursor: pointer; } #evo-player .ep-track::before { content: ''; position: absolute; left: 0; right: 0; top: 9px; height: 4px; border-radius: 2px; background: #2a2944; }
-#evo-player .ep-track i { position: absolute; left: 0; top: 9px; height: 4px; border-radius: 2px; background: var(--cyan); } #evo-player .ep-track i::after { content: ''; position: absolute; right: -6px; top: -4px; width: 12px; height: 12px; border-radius: 50%; background: #fff; }
-body.has-player #evo-main { padding-bottom: 90px; }
+#evo-player .ep-track { position: relative; height: 44px; cursor: pointer; min-width: 0; }
+#evo-player .ep-wave { display: block; width: 100%; height: 100%; }
+#evo-player .ep-marks { position: absolute; inset: 0; pointer-events: none; }
+#evo-player .ep-mark { position: absolute; bottom: -3px; width: 9px; height: 9px; margin-left: -4.5px; border-radius: 50%; background: #ffb454; border: 2px solid #0d0d1a; pointer-events: auto; cursor: pointer; box-sizing: border-box; }
+#evo-player .ep-mark:hover { background: #fff; transform: scale(1.35); }
+#evo-player .ep-say { position: absolute; bottom: calc(100% + 6px); max-width: min(420px, 100%); padding: 4px 9px; border-radius: 8px; background: #1d1b33; border: 1px solid #ffb45488; color: #f1eeff; font: 11px var(--sans); white-space: pre-wrap; overflow-wrap: anywhere; pointer-events: none; box-shadow: 0 6px 20px -8px #000; }
+#evo-player .ep-say[hidden], #evo-player .ep-noterow[hidden] { display: none; }
+#evo-player .ep-noterow { grid-column: 4; display: flex; align-items: baseline; gap: 8px; min-width: 0; margin-top: -4px; }
+#evo-player .ep-at { font: 10px var(--mono); color: var(--dim); font-variant-numeric: tabular-nums; flex: none; } #evo-player .ep-at.held { color: #ffb454; }
+#evo-player .ep-note { flex: 1; min-width: 0; background: none; border: 0; border-bottom: 1px dashed var(--line); border-radius: 0; padding: 2px; font: 11px var(--sans); color: var(--text); outline: none; }
+#evo-player .ep-note:focus { border-bottom-color: #ffb454; } #evo-player .ep-note::placeholder { color: var(--dim); }
+body.has-player #evo-main { padding-bottom: 130px; }
 #evo-player .ep-x:disabled { opacity: .3; cursor: default; } #evo-player .ep-x { font-size: 8px; letter-spacing: -2px; }
 /* a rating the piece has moved on from */
 #evo .night-marks.old { position: relative; } #evo .night-marks.old .night-mark.on { background: none; color: #ffb454; border-color: #ffb454; border-style: dashed; opacity: 1; }

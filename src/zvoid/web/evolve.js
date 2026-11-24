@@ -533,25 +533,25 @@ function evoCarveOn(id) {
    it remembers where in the piece you were. The carving and the next plans read these in your own words. */
 function evoNotes(sid, n, paths) {
   if (!sid) return '';
-  const list = ((EVO.notes || {})[sid] || {})[n] || [], key = `${sid}:${n}`;
+  const list = () => ((EVO.notes || {})[sid] || {})[n] || [], key = `${sid}:${n}`;
   if (!EVO.drafts) { try { EVO.drafts = JSON.parse(localStorage.getItem('zvoid-note-drafts') || '{}') || {}; } catch (e) { EVO.drafts = {}; } }
   const draft = v => { if (v) EVO.drafts[key] = v; else delete EVO.drafts[key]; try { localStorage.setItem('zvoid-note-drafts', JSON.stringify(EVO.drafts)); } catch (e) {} };
+  const chips = () => list().map((x, i) => h('span', { class: 'note' }, x.pos != null ? h('i', { title: 'Play from here', onclick: () => { if (paths.includes(LIB.playing)) libStart(x.pos); } }, evoClock(x.pos)) : '', h('span', {}, x.text),
+    h('button', { title: 'Remove this note', onclick: async () => { try { EVO.notes[sid] = await api('/api/night/note', { json: { id: sid, n, drop: i } }); paint(); } catch (err) { toast(err.message, true); } } }, '×')));
+  const paint = () => { box.querySelectorAll('.note').forEach(x => x.remove()); chips().forEach(c => box.insertBefore(c, inp)); inp.placeholder = list().length ? 'another note…' : 'a note on this piece…'; };   // only the notes are redrawn: the field you are in is left alone
   const keep = async () => {                                   // what is written is kept: on return, and also when you click away from it
     const text = (EVO.drafts[key] || '').trim(); if (!text) return;
-    const pos = paths.includes(LIB.playing) ? Math.round(libPos()[0]) : null; draft('');
-    const el = document.querySelector(`.note-in[data-k="${key}"]`); if (el) el.value = '';
-    try { (EVO.notes = EVO.notes || {})[sid] = await api('/api/night/note', { json: { id: sid, n, text, pos } }); evoDraw(); }
-    catch (err) { draft(text); const e2 = document.querySelector(`.note-in[data-k="${key}"]`); if (e2 && !e2.value) e2.value = text; toast('the note was not kept: ' + err.message, true); } };
-  const inp = h('input', { class: 'note-in', type: 'text', spellcheck: 'false', placeholder: list.length ? 'another note…' : 'a note on this piece…', data: { k: key },
-    title: 'Press return to keep it (clicking away keeps it too). While the piece is playing, the note remembers where in it you were.',
-    oninput: () => draft(inp.value),
-    onfocus: () => { EVO.noteFocus = key; },
-    onblur: () => setTimeout(() => { if (!inp.isConnected) return; if (EVO.noteFocus === key) EVO.noteFocus = ''; keep(); }, 0),   // a field taken away by a redraw is not a field you left
+    const pos = inp._at != null ? inp._at : null; inp._at = null; draft(''); inp.value = '';
+    try { (EVO.notes = EVO.notes || {})[sid] = await api('/api/night/note', { json: { id: sid, n, text, pos } }); paint(); }
+    catch (err) { draft(text); if (!inp.value) inp.value = text; toast('the note was not kept: ' + err.message, true); } };
+  const inp = h('input', { class: 'note-in', type: 'text', spellcheck: 'false', data: { k: key },
+    title: 'Press return to keep it (clicking away keeps it too). While the piece is playing, the note remembers where in it you were when you began to write.',
+    oninput: () => { if (!inp.value) inp._at = null; else if (inp._at == null && paths.includes(LIB.playing)) inp._at = Math.round(libPos()[0]); draft(inp.value); },
+    onblur: () => setTimeout(async () => { if (!inp.isConnected) return; await keep(); if (EVO.stale) evoDraw(); }, 0),
     onkeydown: e => { e.stopPropagation(); if (e.key !== 'Enter') return; e.preventDefault(); draft(inp.value); keep(); } });
-  inp.value = EVO.drafts[key] || '';                           // the screen is rebuilt often (the next piece starts, a rating lands): what you were writing comes back with it
-  if (EVO.noteFocus === key) setTimeout(() => { const at = document.activeElement; if (inp.isConnected && (!at || at === document.body || !at.isConnected)) { inp.focus(); try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (e) {} } }, 30);
-  return h('div', { class: 'night-notes' }, list.map((x, i) => h('span', { class: 'note' }, x.pos != null ? h('i', { title: 'Play from here', onclick: () => { if (paths.includes(LIB.playing)) libStart(x.pos); } }, evoClock(x.pos)) : '', h('span', {}, x.text),
-    h('button', { title: 'Remove this note', onclick: async () => { try { EVO.notes[sid] = await api('/api/night/note', { json: { id: sid, n, drop: i } }); evoDraw(); } catch (err) { toast(err.message, true); } } }, '×'))), inp);
+  inp.value = EVO.drafts[key] || '';
+  const box = h('div', { class: 'night-notes' }, inp); paint();
+  return box;
 }
 async function evoNotesLoad(sid) { if (!sid) return; EVO.notes = EVO.notes || {}; const got = await fetch('/api/night/notes?id=' + sid, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null); if (got) { const was = JSON.stringify(EVO.notes[sid] || null); EVO.notes[sid] = got; return was !== JSON.stringify(got); } return false; }
 function evoAlbumView(a) {
@@ -609,8 +609,11 @@ function evoCard(n, opts) {
       opts.back && h('button', { disabled: !!live, title: 'Go back to this sound and grow a different branch from it', onclick: () => evoPick(n.id, false) }, 'grow from here'),
       h('button', { title: n.kept ? 'Already in the library' : 'Put this sound in the library', disabled: !!n.kept, onclick: () => evoKeep(n.id) }, n.kept ? 'kept ✓' : 'keep')));
 }
-function evoDraw() {
+addEventListener('mousedown', e => { if (!(e.target && e.target.closest && e.target.closest('.note-in'))) EVO.clickAt = Date.now(); }, true);
+function evoDraw(force) {
   const el = evoEl(); if (!EVO.open) return;
+  const at = document.activeElement;       // a note being written is never rebuilt from under the cursor: the screen waits until you leave the field (a click elsewhere is leaving it)
+  if (force !== true && at && at.classList && at.classList.contains('note-in') && at.isConnected && at.closest('#evo') && Date.now() - (EVO.clickAt || 0) > 1500) { EVO.stale = true; return; }
   EVO.stale = false;
   const s = EVO.s, trained = EVO.creatures.filter(c => c.trained), fed = EVO.creatures.filter(c => c.food && c.food.length);
   const from = h('select', {}, fed.map(c => h('option', { value: c.slug }, c.name)));
@@ -680,26 +683,70 @@ function evoNeighbour(path, step) {
   return q ? { path: q.path, kind: 'audio', size: 5e7 } : null;
 }
 function evoNext(path, step) { const it = EVO.open ? evoNeighbour(path, step) : null; if (it) { libPlay(it); return true; } return false; }
+/* Which piece of which collection a playing file is: the notes of a piece belong to its collection and number, whether it plays from the run or from its album. */
+function evoPieceOf(path) {
+  if (!path) return null;
+  if (path.startsWith('album:')) { for (const a of EVO.albums || []) for (const p of a.pieces) if (path === 'album:' + a.folder + '/' + p.file) return a.collection ? { sid: a.collection, n: p.n, peaks: `/api/night/albumpeaks?album=${encodeURIComponent(a.folder)}&name=${encodeURIComponent(p.file)}` } : null; return null; }
+  const sh = EVO.sheet, e = sh && (sh.songs || []).find(x => x.path === path);
+  return e ? { sid: sh.id, n: e.n, peaks: '/api/peaks?path=' + encodeURIComponent(path) } : null;
+}
 function evoPlayer() {
   let bar = document.getElementById('evo-player');
   if (!bar) {
-    const fill = h('i'), track = h('div', { class: 'ep-track', title: 'Click anywhere to play from there' }, fill), now = h('span', { class: 'ep-time' }, '0:00'), len = h('span', { class: 'ep-time' }, '0:00');
+    const wave = h('canvas', { class: 'ep-wave' }), marks = h('div', { class: 'ep-marks' }), say = h('div', { class: 'ep-say', hidden: true });
+    const track = h('div', { class: 'ep-track', title: 'Click anywhere to play from there' }, wave, marks, say), now = h('span', { class: 'ep-time' }, '0:00'), len = h('span', { class: 'ep-time' }, '0:00');
     const pp = h('button', { class: 'ep-pp', title: 'Pause / play (space)' }, '❚❚'), name = h('b'), sub = h('small');
     const seek = e => { const [, d] = libPos(); if (!d || !LIB.p) return; const r = track.getBoundingClientRect(); libStart(clamp((e.clientX - r.left) / r.width, 0, .999) * d); };
-    let drag = false; track.addEventListener('mousedown', e => { drag = true; seek(e); }); addEventListener('mousemove', e => { if (drag) seek(e); }); addEventListener('mouseup', () => { drag = false; });
+    let drag = false, hoverX = -1, hoverMark = null, sig = '';
+    track.addEventListener('mousedown', e => { if (e.target.classList.contains('ep-mark')) return; drag = true; seek(e); }); addEventListener('mousemove', e => { if (drag) seek(e); }); addEventListener('mouseup', () => { drag = false; });
+    track.addEventListener('mousemove', e => { hoverX = e.clientX - track.getBoundingClientRect().left; }); track.addEventListener('mouseleave', () => { hoverX = -1; });
     pp.onclick = () => { const p = LIB.p; if (!p) return; if (p.el) { p.el.paused ? p.el.play().catch(() => {}) : p.el.pause(); } else { libStop(); libMark(); } };
     const skip = step => () => { const was = LIB.playing; if (was && evoNeighbour(was, step)) { libStop(); evoNext(was, step); } };
     const prev = h('button', { class: 'ep-x', title: 'The piece before', onclick: skip(-1) }, '◀◀'), next = h('button', { class: 'ep-x', title: 'The next piece', onclick: skip(1) }, '▶▶');
-    bar = h('div', { id: 'evo-player', hidden: true }, pp, h('div', { class: 'ep-what' }, name, sub), now, track, len, prev, next, h('button', { class: 'ep-x', title: 'Stop', onclick: () => { libStop(); libMark(); } }, '■'));
+    /* A comment on the sound, as on SoundCloud: write it while listening and it lands on the waveform at the moment you began to write. */
+    const at = h('span', { class: 'ep-at' }, '0:00');
+    const inp = h('input', { class: 'ep-note', type: 'text', spellcheck: 'false', placeholder: 'comment on this moment…', title: 'Press return to keep it. It is pinned to the moment in the piece at which you began to write.',
+      oninput: () => { if (!inp.value) inp._at = null; else if (inp._at == null) inp._at = Math.round(libPos()[0]); },
+      onkeydown: async e => { e.stopPropagation(); if (e.key === 'Escape') { inp.blur(); return; } if (e.key !== 'Enter' || !inp.value.trim()) return; e.preventDefault();
+        const pc = evoPieceOf(inp._for || LIB.playing); if (!pc) return toast('this piece does not belong to a collection, so it cannot carry notes', true);
+        const text = inp.value.trim(), pos = inp._at != null ? inp._at : Math.round(libPos()[0]); inp.value = ''; inp._at = null;
+        try { (EVO.notes = EVO.notes || {})[pc.sid] = await api('/api/night/note', { json: { id: pc.sid, n: pc.n, text, pos } }); sig = ''; if (EVO.open) evoDraw(); }
+        catch (err) { inp.value = text; inp._at = pos; toast('the comment was not kept: ' + err.message, true); } } });
+    const noteRow = h('div', { class: 'ep-noterow' }, at, inp);
+    bar = h('div', { id: 'evo-player', hidden: true }, pp, h('div', { class: 'ep-what' }, name, sub), now, track, len, prev, next, h('button', { class: 'ep-x', title: 'Stop', onclick: () => { libStop(); libMark(); } }, '■'), noteRow);
     bar._nav = [prev, next];
     document.body.append(bar);
+    EVO.peaks = new Map();
+    const draw = (pk, prog) => {
+      const dpr = devicePixelRatio || 1, w = wave.clientWidth, hgt = wave.clientHeight; if (!w) return;
+      if (wave.width !== Math.round(w * dpr)) { wave.width = Math.round(w * dpr); wave.height = Math.round(hgt * dpr); }
+      const g = wave.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, hgt); const mid = hgt / 2;
+      if (!pk || !pk.hi) { g.fillStyle = '#2a2944'; g.fillRect(0, mid - 2, w, 4); g.fillStyle = '#3ee6d6'; g.fillRect(0, mid - 2, prog * w, 4); }
+      else { const n = pk.hi.length, bw = 2, gap = 1, cols = Math.floor(w / (bw + gap)); let top = .05; for (let i = 0; i < n; i++) top = Math.max(top, pk.hi[i], -pk.lo[i]);
+        for (let c = 0; c < cols; c++) { const i0 = Math.floor(c / cols * n), i1 = Math.max(i0 + 1, Math.floor((c + 1) / cols * n)); let lo = 0, hi = 0; for (let i = i0; i < i1; i++) { lo = Math.min(lo, pk.lo[i]); hi = Math.max(hi, pk.hi[i]); }
+          const y0 = mid - hi / top * (mid - 1), y1 = mid - lo / top * (mid - 1); g.fillStyle = (c + .5) / cols <= prog ? '#3ee6d6' : '#5a5688'; g.fillRect(c * (bw + gap), y0, bw, Math.max(1, y1 - y0)); } }
+      g.fillStyle = '#fff'; g.fillRect(prog * w - .5, 0, 1, hgt);
+      if (hoverX >= 0) { g.fillStyle = '#ffffff66'; g.fillRect(hoverX - .5, 0, 1, hgt); }
+    };
     setInterval(() => {
       const on = !!(EVO.open && LIB.p && LIB.playing); bar.hidden = !on; document.body.classList.toggle('has-player', on); if (!on) return;
-      const [t, d] = libPos(), [a, b] = evoTitleOf(LIB.playing);
+      const [t, d] = libPos(), [a, b] = evoTitleOf(LIB.playing), path = LIB.playing, pc = evoPieceOf(path);
       if (name.textContent !== a) name.textContent = a; if (sub.textContent !== b) sub.textContent = b;
-      now.textContent = evoClock(t); len.textContent = d ? evoClock(d) : '–:––'; fill.style.width = (d ? clamp(t / d, 0, 1) * 100 : 0) + '%';
+      now.textContent = evoClock(t); len.textContent = d ? evoClock(d) : '–:––';
       pp.textContent = LIB.p.el && LIB.p.el.paused ? '▶' : '❚❚';
       bar._nav[0].disabled = !evoNeighbour(LIB.playing, -1); bar._nav[1].disabled = !evoNeighbour(LIB.playing, 1);
+      if (pc && !EVO.peaks.has(path)) { EVO.peaks.set(path, null); fetch(pc.peaks).then(r => r.ok ? r.json() : null).then(pk => { if (pk && pk.hi) EVO.peaks.set(path, pk); }).catch(() => {}); }
+      draw(EVO.peaks.get(path), d ? clamp(t / d, 0, 1) : 0);
+      if (inp._path !== path) { if (inp._path && inp.value && inp._at != null) inp._for = inp._path; else inp._for = null; inp._path = path; }   // a comment begun on one piece stays with it if the next piece starts before return
+      if (!inp.value) inp._for = null;
+      noteRow.hidden = !pc; at.textContent = evoClock(inp._at != null && inp.value ? inp._at : t); at.classList.toggle('held', inp._at != null && !!inp.value);
+      if (pc && !(EVO.notes || {})[pc.sid] && !(EVO.notesAsked = EVO.notesAsked || {})[pc.sid]) { EVO.notesAsked[pc.sid] = 1; evoNotesLoad(pc.sid); }
+      const list = pc ? ((((EVO.notes || {})[pc.sid] || {})[pc.n]) || []).filter(x => x.pos != null) : [], s2 = path + '|' + Math.round(d) + '|' + JSON.stringify(list);
+      if (s2 !== sig) { sig = s2; hoverMark = null; marks.replaceChildren(...(d ? list.map(x => { const m = h('i', { class: 'ep-mark', style: `left:${clamp(x.pos / d, 0, 1) * 100}%` });
+        m.addEventListener('mouseenter', () => { hoverMark = x; }); m.addEventListener('mouseleave', () => { if (hoverMark === x) hoverMark = null; });
+        m.addEventListener('mousedown', e => { e.stopPropagation(); libStart(clamp(x.pos, 0, d * .999)); }); return m; }) : [])); }
+      const cur = hoverMark || (d ? [...list].reverse().find(x => t >= x.pos && t < x.pos + 5) : null);   // a comment speaks up while its moment plays, and when you point at it
+      say.hidden = !cur; if (cur) { const txt = evoClock(cur.pos) + '  ' + cur.text; if (say.textContent !== txt) say.textContent = txt; const f = clamp(cur.pos / d, 0, 1); say.style.left = f * 100 + '%'; say.style.transform = `translateX(${-f * 100}%)`; }
     }, 200);
   }
 }

@@ -360,6 +360,18 @@ def create_app():
             raise HTTPException(404, "no such file")
         return FileResponse(f)
 
+    @app.get("/api/night/albumpeaks")
+    def night_album_peaks(album: str, name: str):
+        """The outline of an album piece, for drawing its waveform in the player."""
+        d = _album_dir(album)
+        f = (d / name).resolve()
+        if f.parent != d or not f.is_file():
+            raise HTTPException(404, "no such file")
+        try:
+            return library.peaks(f)
+        except FileNotFoundError as ex:
+            raise HTTPException(404, str(ex))
+
     _dreaming = threading.Lock()
 
     @app.post("/api/night/dream")
